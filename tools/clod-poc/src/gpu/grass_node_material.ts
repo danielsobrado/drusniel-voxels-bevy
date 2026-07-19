@@ -67,12 +67,31 @@ function grassRingBandMask(
   return nearPass.or(midPass).or(farPass).or(superPass);
 }
 
+const DEFAULT_APPEARANCE = {
+  baseColor: [0.18, 0.34, 0.12] as const,
+  tipColor: [0.30, 0.42, 0.14] as const,
+  dryColor: [0.30, 0.24, 0.09] as const,
+  normalPull: 1.0,
+};
+
+function normalizedWindDirection(direction: readonly number[] | undefined): THREE.Vector2 {
+  const v = new THREE.Vector2(direction?.[0] ?? 0.8, direction?.[1] ?? 0.6);
+  return v.lengthSq() > 1e-6 ? v.normalize() : v.set(1, 0);
+}
+
 export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMaterialHandle {
+  const appearance = params.appearance ?? DEFAULT_APPEARANCE;
   const uTime = uniform(0);
   const uBladeWidth = uniform(params.bladeWidth);
   const uWindStrength = uniform(params.windStrength);
   const uWindSpeed = uniform(params.windSpeed);
   const uGustStrength = uniform(params.gustStrength ?? 0.15);
+  const uWindDir = uniform(normalizedWindDirection(params.windDirection));
+  const uWindTurbulence = uniform(params.windTurbulence ?? 0.25);
+  const uBaseColor = uniform(new THREE.Vector3(...appearance.baseColor));
+  const uTipColor = uniform(new THREE.Vector3(...appearance.tipColor));
+  const uDryColor = uniform(new THREE.Vector3(...appearance.dryColor));
+  const uNormalPull = uniform(appearance.normalPull);
   const uFadeCenter = uniform(params.fadeCenter?.clone() ?? new THREE.Vector2());
   const ringSettings = params.ring ?? DEFAULT_GRASS_SETTINGS.ring;
   const lodSettings = params.lod ?? DEFAULT_GRASS_SETTINGS.lod;
@@ -133,14 +152,30 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const aTier: TslNode = aPacked1.w;
   const uvY: TslNode = uv().y;
   const bend: TslNode = uvY.mul(uvY);
-  const windTime: TslNode = uTime.mul(uWindSpeed).add(aPhase).add(aOffset.x.mul(0.071)).add(aOffset.z.mul(0.053));
-  const gustBase: TslNode = sin(windTime.mul(0.13)).mul(0.5).add(0.5);
-  const gustDetail: TslNode = sin(windTime.mul(0.73).add(aOffset.x.mul(0.19).add(aOffset.z.mul(0.14)))).mul(0.5).add(0.5);
+  const windTime: TslNode = uTime.mul(uWindSpeed);
+  // World-space directional wind: the wave phase advances along uWindDir so gusts
+  // roll across the field; per-blade phase only jitters, it does not steer.
+  const alongWind: TslNode = aOffset.x.mul(uWindDir.x).add(aOffset.z.mul(uWindDir.y));
+  const acrossWind: TslNode = aOffset.x.mul(uWindDir.y.negate()).add(aOffset.z.mul(uWindDir.x));
+  const wavePhase: TslNode = alongWind.mul(0.22).sub(windTime).add(aPhase.mul(0.35));
+  const gustTime: TslNode = windTime.add(aPhase).add(aOffset.x.mul(0.071)).add(aOffset.z.mul(0.053));
+  const gustBase: TslNode = sin(gustTime.mul(0.13)).mul(0.5).add(0.5);
+  const gustDetail: TslNode = sin(gustTime.mul(0.73).add(aOffset.x.mul(0.19).add(aOffset.z.mul(0.14)))).mul(0.5).add(0.5);
   const gust: TslNode = gustBase.mul(0.6).add(gustDetail.mul(0.4));
   const gustK: TslNode = aTerrainNormal4.w;
   const windAmp: TslNode = uWindStrength.mul(aHeight).mul(bend).mul(uGustStrength.mul(gust).mul(gustK).add(1.0).sub(uGustStrength));
-  const wind: TslNode = vec2(sin(windTime), cos(windTime.mul(0.83).add(aPhase.mul(0.37))))
-    .mul(windAmp);
+  const windWave: TslNode = sin(wavePhase).add(sin(wavePhase.mul(2.6).add(aPhase)).mul(0.35)).add(0.4);
+  const windTurb: TslNode = sin(windTime.mul(1.9).add(aPhase.mul(2.0)).add(acrossWind.mul(0.31))).mul(uWindTurbulence);
+  const windWorldX: TslNode = uWindDir.x.mul(windWave).sub(uWindDir.y.mul(windTurb)).mul(windAmp);
+  const windWorldZ: TslNode = uWindDir.y.mul(windWave).add(uWindDir.x.mul(windTurb)).mul(windAmp);
+  // Counter-rotate into blade-local space so the later per-instance yaw restores
+  // the world-space lean direction (all blades lean together).
+  const c: TslNode = cos(aRotY);
+  const s: TslNode = sin(aRotY);
+  const wind: TslNode = vec2(
+    c.mul(windWorldX).sub(s.mul(windWorldZ)),
+    s.mul(windWorldX).add(c.mul(windWorldZ)),
+  );
   let localX: TslNode;
   let localY: TslNode;
   let localZ: TslNode;
@@ -155,13 +190,10 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     localY = pos.y.mul(aHeight);
     localZ = pos.z.mul(uBladeWidth).mul(aWidthScale).add(wind.y);
 
-    const base = vec3(0.018, 0.055, 0.012);
-    const mid = vec3(0.075, 0.17, 0.035);
-    const tip = vec3(0.20, 0.30, 0.085);
-    const dry = vec3(0.30, 0.24, 0.09);
-    grassColor = mix(base, mid, smoothstep(0.0, 0.7, uvY));
-    grassColor = mix(grassColor, tip, smoothstep(0.62, 1.0, uvY));
-    grassColor = mix(grassColor, dry, aColorMix.mul(0.35));
+    const mid = mix(uBaseColor, uTipColor, 0.5);
+    grassColor = mix(uBaseColor, mid, smoothstep(0.0, 0.7, uvY));
+    grassColor = mix(grassColor, uTipColor, smoothstep(0.62, 1.0, uvY));
+    grassColor = mix(grassColor, uDryColor, aColorMix.mul(0.35));
     if (debugAttributes) {
       grassColor = vec3(edge, normalY, 0.08);
     }
@@ -170,17 +202,12 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     localY = pos.y.mul(aHeight);
     localZ = pos.z.mul(uBladeWidth).mul(aWidthScale).add(wind.y);
 
-    const darkGreen = vec3(0.018, 0.055, 0.012);
-    const midGreen = vec3(0.075, 0.16, 0.035);
-    const tipGreen = vec3(0.18, 0.28, 0.08);
-    const dryGrass = vec3(0.28, 0.22, 0.08);
-    grassColor = mix(darkGreen, midGreen, smoothstep(0.0, 0.62, uvY));
-    grassColor = mix(grassColor, tipGreen, smoothstep(0.58, 1.0, uvY));
-    grassColor = mix(grassColor, dryGrass, aColorMix.mul(0.48));
+    const mid = mix(uBaseColor, uTipColor, 0.5);
+    grassColor = mix(uBaseColor, mid, smoothstep(0.0, 0.62, uvY));
+    grassColor = mix(grassColor, uTipColor, smoothstep(0.58, 1.0, uvY));
+    grassColor = mix(grassColor, uDryColor, aColorMix.mul(0.48));
   }
 
-  const c: TslNode = cos(aRotY);
-  const s: TslNode = sin(aRotY);
   const rotX: TslNode = c.mul(localX).add(s.mul(localZ));
   const rotZ: TslNode = s.mul(localX).negate().add(c.mul(localZ));
   const worldPos: TslNode = vec3(aOffset.x, groundY, aOffset.z).add(vec3(rotX, localY, rotZ));
@@ -191,17 +218,18 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   const bladeNormal: TslNode = normalize(
     vec3(c.mul(localNormal.x).add(s.mul(localNormal.z)), localNormal.y, s.mul(localNormal.x).negate().add(c.mul(localNormal.z))),
   );
-  const terrainNormalPull: TslNode = isPatchV2 ? smoothstep(0.18, 1.0, uvY).mul(0.35) : 0.0;
-  const worldNormal: TslNode = isPatchV2
-    ? normalize(mix(bladeNormal, normalize(aTerrainNormal), terrainNormalPull))
-    : bladeNormal;
+  // Whole-blade pull toward the terrain normal (uNormalPull=1 shades the field
+  // like a continuous ground surface); the true blade normal is kept separately
+  // and only drives backlit transmission.
+  const worldNormal: TslNode = normalize(mix(bladeNormal, normalize(aTerrainNormal), uNormalPull));
 
   const n: TslNode = frontFacing.select(worldNormal, worldNormal.negate());
+  const bladeFacing: TslNode = frontFacing.select(bladeNormal, bladeNormal.negate());
   const lightDir: TslNode = uLight;
   const sun: TslNode = max(dot(n, lightDir), 0.0);
   const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
   const hemi: TslNode = mix(uGround, uSky, sky);
-  const back: TslNode = max(dot(n.negate(), lightDir), 0.0);
+  const back: TslNode = max(dot(bladeFacing.negate(), lightDir), 0.0);
   let litColor: TslNode;
   if (isPatchV2) {
     const wrap: TslNode = clamp(dot(n, lightDir).mul(0.45).add(0.55), 0.0, 1.0);
@@ -247,6 +275,19 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
       uWindStrength.value = settings.windStrength;
       uWindSpeed.value = settings.windSpeed;
       if ("gustStrength" in settings) uGustStrength.value = (settings as { gustStrength?: number }).gustStrength ?? 0.15;
+      const wind = settings.wind;
+      if (wind) {
+        uWindDir.value.copy(normalizedWindDirection(wind.direction));
+        if (wind.turbulence !== undefined) uWindTurbulence.value = wind.turbulence;
+        uGustStrength.value = wind.gustStrength;
+      }
+      const appearanceUpdate = settings.appearance;
+      if (appearanceUpdate) {
+        uBaseColor.value.set(...appearanceUpdate.baseColor);
+        uTipColor.value.set(...appearanceUpdate.tipColor);
+        uDryColor.value.set(...appearanceUpdate.dryColor);
+        uNormalPull.value = appearanceUpdate.normalPull;
+      }
       uNearDistance.value = Math.min(settings.distance * settings.lod.nearFraction, settings.ring.nearMeters);
       uMidDistance.value = Math.min(settings.distance * settings.lod.midFraction, settings.ring.midMeters);
       uFarDistance.value = Math.min(settings.distance * settings.ring.farDistanceFraction, settings.ring.farMeters);

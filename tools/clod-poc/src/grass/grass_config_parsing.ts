@@ -99,6 +99,7 @@ function parseWind(raw: RawObject, fallback: GrassSettings): GrassSettings["wind
     strength: readNumberAtLeast(wind.strength ?? raw.wind_strength, fallback.wind.strength, 0),
     speed: readNumberAtLeast(wind.speed ?? raw.wind_speed, fallback.wind.speed, 0),
     gustStrength: readNumberAtLeast(wind.gust_strength, fallback.wind.gustStrength, 0),
+    turbulence: readNumberAtLeast(wind.turbulence, fallback.wind.turbulence ?? 0.25, 0),
   };
 }
 

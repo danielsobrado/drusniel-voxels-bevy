@@ -20,6 +20,7 @@ interface PlayableSliceFrameProbe {
   maxFrameMs: number;
   lastFrameAtMs: number;
   samplesMs: number[];
+  tick(): void;
 }
 
 interface DrainedFrameProbe {
@@ -27,25 +28,29 @@ interface DrainedFrameProbe {
   samplesMs: number[];
 }
 
-function installFrameProbeInPage(): void {
+export function installFrameProbeInPage(): void {
   const target = window as typeof window & {
     __drusnielPlayableSliceFrameProbe?: PlayableSliceFrameProbe;
   };
   if (target.__drusnielPlayableSliceFrameProbe) return;
-  const state: PlayableSliceFrameProbe = { maxFrameMs: 0, lastFrameAtMs: 0, samplesMs: [] };
-  target.__drusnielPlayableSliceFrameProbe = state;
-  const tick = (): void => {
-    // Prefer the app's measured frame time over rAF interval (rAF ≠ GPU/render frame).
-    const stats = window.__drusnielClod?.stats;
-    const frameMs = typeof stats?.frameMs === "number" ? stats.frameMs : null;
-    if (frameMs !== null && Number.isFinite(frameMs) && frameMs >= 0) {
-      state.maxFrameMs = Math.max(state.maxFrameMs, frameMs);
-      state.samplesMs.push(frameMs);
-      state.lastFrameAtMs = performance.now();
-    }
-    requestAnimationFrame(tick);
+  const state: PlayableSliceFrameProbe = {
+    maxFrameMs: 0,
+    lastFrameAtMs: 0,
+    samplesMs: [],
+    tick() {
+      // Prefer the app's measured frame time over rAF interval (rAF ≠ GPU/render frame).
+      const stats = window.__drusnielClod?.stats;
+      const frameMs = typeof stats?.frameMs === "number" ? stats.frameMs : null;
+      if (frameMs !== null && Number.isFinite(frameMs) && frameMs >= 0) {
+        state.maxFrameMs = Math.max(state.maxFrameMs, frameMs);
+        state.samplesMs.push(frameMs);
+        state.lastFrameAtMs = performance.now();
+      }
+      requestAnimationFrame(state.tick);
+    },
   };
-  requestAnimationFrame(tick);
+  target.__drusnielPlayableSliceFrameProbe = state;
+  requestAnimationFrame(state.tick);
 }
 
 function drainFrameProbeInPage(): DrainedFrameProbe {
@@ -95,6 +100,7 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
   protected readonly page: Page;
   private readonly startedAtMs: number;
   private readonly frameSamplesMs: number[] = [];
+  private unlockedAimPoint: { x: number; y: number } | null = null;
 
   constructor(page: Page) {
     this.page = page;
@@ -135,8 +141,7 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
     await edit.check();
     this.record("pointer", "enable terrain editing");
     await this.page.keyboard.up("Tab");
-    this.record("keyboard", "release Tab and resume look");
-    await this.waitForPointerLock(true);
+    this.record("keyboard", "release Tab; gameplay click reacquires pointer lock if needed");
     await resetFrameProbe(this.page);
     this.frameSamplesMs.length = 0;
     this.maxFrameMs = 0;
@@ -190,7 +195,11 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
     if (!pointerLocked) {
       const viewport = this.page.viewportSize();
       if (!viewport) throw new Error("playable slice requires a fixed viewport");
-      await this.page.mouse.move(viewport.width * 0.5, viewport.height * 0.5);
+      const centerX = viewport.width * 0.5;
+      const aimY = viewport.height * 0.25;
+      this.unlockedAimPoint = { x: centerX, y: aimY };
+      await this.page.mouse.move(centerX + 1, aimY);
+      await this.page.mouse.move(centerX, aimY);
     }
     this.record("pointer", pointerLocked ? "retain locked center aim" : "move:center");
   }
@@ -203,7 +212,8 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
     } else {
       const viewport = this.page.viewportSize();
       if (!viewport) throw new Error("playable slice requires a fixed viewport");
-      await this.page.mouse.click(viewport.width * 0.5, viewport.height * 0.5, { button });
+      const aim = this.unlockedAimPoint ?? { x: viewport.width * 0.5, y: viewport.height * 0.5 };
+      await this.page.mouse.click(aim.x, aim.y, { button });
     }
     this.record("pointer", `click:${button}`);
   }

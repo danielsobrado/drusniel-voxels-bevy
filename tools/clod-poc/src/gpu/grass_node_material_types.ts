@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import type {
+  GrassAppearanceSettings,
   GrassLighting,
   GrassRingInstanceBuffers,
   GrassSettings,
@@ -14,6 +15,9 @@ export interface GrassNodeParams {
   windStrength: number;
   windSpeed: number;
   gustStrength?: number;
+  windDirection?: readonly [number, number];
+  windTurbulence?: number;
+  appearance?: GrassAppearanceSettings;
   mode?: GrassSettings["shaderMode"];
   alphaToCoverage?: boolean;
   distance?: number;
@@ -33,7 +37,7 @@ export interface GrassNodeMaterialHandle {
   material: MeshBasicNodeMaterial;
   setTime(t: number): void;
   setFadeCenter(x: number, z: number): void;
-  updateSettings(settings: Pick<GrassSettings, "bladeWidth" | "windStrength" | "windSpeed" | "distance" | "alphaToCoverage" | "ring" | "lod">): void;
+  updateSettings(settings: Pick<GrassSettings, "bladeWidth" | "windStrength" | "windSpeed" | "distance" | "alphaToCoverage" | "ring" | "lod"> & Partial<Pick<GrassSettings, "wind" | "appearance">>): void;
   updateLighting(lighting: EnvironmentLighting | GrassLighting): void;
 }
 

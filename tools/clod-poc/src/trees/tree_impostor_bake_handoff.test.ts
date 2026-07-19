@@ -3,7 +3,6 @@ import { cloneTreeSettings } from "./tree_config.js";
 import {
   executeTreeImpostorBakeHandoff,
   treeImpostorBakeHandoffAction,
-  type TreeImpostorBakeHandoffOperations,
 } from "./tree_impostor_bake_handoff.js";
 
 describe("tree impostor bake handoff", () => {
@@ -58,18 +57,20 @@ describe("tree impostor bake handoff", () => {
   });
 });
 
-function operationsForTest(): TreeImpostorBakeHandoffOperations & {
-  swapLive: ReturnType<typeof vi.fn>;
-  rebuildGpu: ReturnType<typeof vi.fn>;
-  rebuildCpu: ReturnType<typeof vi.fn>;
-  resetGpuConsumers: ReturnType<typeof vi.fn>;
-  resetCpuConsumers: ReturnType<typeof vi.fn>;
+type OperationMock = ReturnType<typeof vi.fn<() => void>>;
+
+function operationsForTest(): {
+  swapLive: OperationMock;
+  rebuildGpu: OperationMock;
+  rebuildCpu: OperationMock;
+  resetGpuConsumers: OperationMock;
+  resetCpuConsumers: OperationMock;
 } {
   return {
-    swapLive: vi.fn(),
-    rebuildGpu: vi.fn(),
-    rebuildCpu: vi.fn(),
-    resetGpuConsumers: vi.fn(),
-    resetCpuConsumers: vi.fn(),
+    swapLive: vi.fn<() => void>(),
+    rebuildGpu: vi.fn<() => void>(),
+    rebuildCpu: vi.fn<() => void>(),
+    resetGpuConsumers: vi.fn<() => void>(),
+    resetCpuConsumers: vi.fn<() => void>(),
   };
 }

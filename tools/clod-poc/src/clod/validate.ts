@@ -62,10 +62,10 @@ const PERIMETER_BAND = 1.0;
 // inside the page still hard-fail.
 //
 // GPU L1 parents observed open boundary vertices ~4.5–13.5 cells inside the footprint on the
-// dense coast route (deep-ocean / near-edge welded + simplify artifacts). Keep the base band
-// above that near-edge artifact while still rejecting mid-page holes (~half the L1 span is 64
-// cells on the 128-cell L1 footprint used by streamed roots).
-const GENERATED_PARENT_PERIMETER_BASE_BAND = 20.0;
+// dense coast route (deep-ocean / near-edge welded + simplify artifacts). Keep that wider band
+// scoped to GPU builds so CPU parent simplification still falls back when it creates such a hole.
+const GENERATED_PARENT_PERIMETER_BASE_BAND = 4.0;
+const GPU_GENERATED_PARENT_PERIMETER_BASE_BAND = 20.0;
 const GENERATED_CHILD_SEAM_BAND = 1.0;
 const COAST_BOUNDARY_BAND = 0.01;
 /** Parent GPU welded meshes can retain open borders on submerged / empty water floors. */
@@ -77,9 +77,13 @@ function isCoastOpenBoundary(x: number, z: number): boolean {
   return coastMask(x, z, coast.config.coast, coast.worldCellsX) > COAST_BOUNDARY_BAND;
 }
 
+function isGpuParentLabel(label?: string): boolean {
+  return label !== undefined && /\bgpu\b/i.test(label);
+}
+
 function isSubmergedFloorOpenBoundary(y: number, label?: string): boolean {
   const level = levelFromLabel(label);
-  return level !== null && level > 0 && Number.isFinite(y) && y <= SUBMERGED_FLOOR_Y;
+  return level !== null && level > 0 && isGpuParentLabel(label) && Number.isFinite(y) && y <= SUBMERGED_FLOOR_Y;
 }
 
 function isLod0SourceLabel(label: string): boolean {
@@ -104,13 +108,16 @@ function nearInteriorDyadicLine(value: number, min: number, max: number, divisio
   return false;
 }
 
-function generatedParentPerimeterBand(level: number): number {
-  return Math.max(GENERATED_PARENT_PERIMETER_BASE_BAND, 2 ** (level + 1));
+function generatedParentPerimeterBand(level: number, label?: string): number {
+  const baseBand = isGpuParentLabel(label)
+    ? GPU_GENERATED_PARENT_PERIMETER_BASE_BAND
+    : GENERATED_PARENT_PERIMETER_BASE_BAND;
+  return Math.max(baseBand, 2 ** (level + 1));
 }
 
 function isGeneratedParentPerimeterOpenBoundary(perimeterDistance: number, label?: string): boolean {
   const level = levelFromLabel(label);
-  return level !== null && level > 0 && perimeterDistance <= generatedParentPerimeterBand(level);
+  return level !== null && level > 0 && perimeterDistance <= generatedParentPerimeterBand(level, label);
 }
 
 /**

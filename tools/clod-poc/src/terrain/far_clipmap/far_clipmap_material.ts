@@ -4,6 +4,7 @@ import { max, mix, positionGeometry, select, smoothstep, storage, uniform, varyi
 import type { FarClipmapDebugMode } from "./far_clipmap_config.js";
 import type { FarClipmapSource } from "./far_clipmap_source.js";
 import { getActiveWebGpuRendererContext } from "../../rendering/webgpu_renderer_context.js";
+import { GRASS_SHARED_BASE_LINEAR } from "../../grass/grass_palette.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -116,7 +117,7 @@ vec3 farTerrainBaseColor(float height, vec3 normal) {
   float slope = 1.0 - saturate(normal.y);
   if (height <= 0.25) return vec3(0.07, 0.18, 0.25);
   if (height < 4.0) return vec3(0.42, 0.36, 0.20);
-  vec3 grass = vec3(0.20, 0.27, 0.18);
+  vec3 grass = vec3(${GRASS_SHARED_BASE_LINEAR.join(", ")});
   vec3 rock = vec3(0.35, 0.34, 0.30);
   vec3 highland = vec3(0.32, 0.36, 0.24);
   vec3 color = mix(grass, rock, smoothstep(0.32, 0.72, slope));
@@ -353,7 +354,7 @@ function createWebGpuFarClipmapMaterial(input: {
     positionGeometry.z.mul(uniforms.uCellSize),
   );
   const materialId: TslNode = sourceSample.w;
-  const meadowColor: TslNode = tslVec3(0.18, 0.34, 0.12);
+  const meadowColor: TslNode = tslVec3(...GRASS_SHARED_BASE_LINEAR);
   const forestColor: TslNode = tslVec3(0.08, 0.22, 0.07);
   const swampColor: TslNode = tslVec3(0.16, 0.25, 0.10);
   const mountainColor: TslNode = tslVec3(0.36, 0.35, 0.31);

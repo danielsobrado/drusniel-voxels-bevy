@@ -33,6 +33,7 @@ import type { StoneLighting } from "../stones/stone_instances.js";
 import { STONE_META_UNDERWATER_FLAG } from "../stones/stone_instance_meta.js";
 import { sampleCarvedBedBilinearTsl, sampleHydrologyBilinearTsl } from "./placement_height.js";
 import { readRiverMaterialSettings } from "../water/riverMaterialRuntime.js";
+import { GRASS_SHARED_BASE_LINEAR } from "../grass/grass_palette.js";
 
 export interface StoneHydrologyWater {
   /** RGBA32F hydrology field; G = wet mask, B = carved-bed Y. */
@@ -154,7 +155,7 @@ export function createStoneNodeMaterial(
   const up = clamp(n.y, 0.0, 1.0);
   rock = mix(rock, vec3(0.6, 0.55, 0.47), up.mul(0.18));
   const moss = clamp(vdata.z, 0.0, 1.0).mul(up);
-  rock = mix(rock, vec3(0.22, 0.3, 0.14), moss.mul(0.25));
+  rock = mix(rock, vec3(...GRASS_SHARED_BASE_LINEAR), moss.mul(0.25));
   rock = mix(rock, vec3(0.18, 0.15, 0.12), up.oneMinus().mul(0.18));
   if (wetRock) {
     const fleck: TslNode = smoothstep(0.78, 0.98, hash2(floor(worldPos.xz.mul(3.5).add(worldPos.y.mul(0.4))))).mul(wetRock).mul(0.42);

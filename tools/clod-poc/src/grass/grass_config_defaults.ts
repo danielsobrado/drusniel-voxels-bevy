@@ -1,4 +1,5 @@
 import type {
+  GrassAppearanceSettings,
   GrassBladeSettings,
   GrassDebugSettings,
   GrassLodSettings,
@@ -10,6 +11,7 @@ import type {
   GrassWindSettings,
 } from "./grass_config_types.js";
 import { DEFAULT_GRASS_SHADER_MODE } from "./grass_config_types.js";
+import { GRASS_DRY_LINEAR, GRASS_SHARED_BASE_LINEAR, GRASS_TIP_LINEAR } from "./grass_palette.js";
 
 export const DEFAULT_GRASS_PLACEMENT_SETTINGS: GrassPlacementSettings = {
   spacingM: 0.85,
@@ -47,6 +49,16 @@ export const DEFAULT_GRASS_WIND_SETTINGS: GrassWindSettings = {
   strength: 0.22,
   speed: 1.15,
   gustStrength: 0.12,
+  turbulence: 0.25,
+};
+
+export const DEFAULT_GRASS_APPEARANCE_SETTINGS: GrassAppearanceSettings = {
+  baseColor: [...GRASS_SHARED_BASE_LINEAR] as [number, number, number],
+  tipColor: [...GRASS_TIP_LINEAR] as [number, number, number],
+  dryColor: [...GRASS_DRY_LINEAR] as [number, number, number],
+  normalPull: 1.0,
+  patchScale: 18,
+  patchStrength: 0.55,
 };
 
 export const DEFAULT_GRASS_RENDER_SETTINGS: GrassRenderSettings = {
@@ -89,6 +101,12 @@ export const DEFAULT_GRASS_SETTINGS: GrassSettings = {
   lod: { ...DEFAULT_GRASS_LOD_SETTINGS },
   blade: { ...DEFAULT_GRASS_BLADE_SETTINGS },
   wind: { ...DEFAULT_GRASS_WIND_SETTINGS },
+  appearance: {
+    ...DEFAULT_GRASS_APPEARANCE_SETTINGS,
+    baseColor: [...DEFAULT_GRASS_APPEARANCE_SETTINGS.baseColor],
+    tipColor: [...DEFAULT_GRASS_APPEARANCE_SETTINGS.tipColor],
+    dryColor: [...DEFAULT_GRASS_APPEARANCE_SETTINGS.dryColor],
+  },
   render: { ...DEFAULT_GRASS_RENDER_SETTINGS },
   debug: { ...DEFAULT_GRASS_DEBUG_SETTINGS },
   alphaToCoverage: DEFAULT_GRASS_RENDER_SETTINGS.alphaToCoverage,
@@ -116,6 +134,13 @@ export function cloneGrassSettings(settings: GrassSettings = DEFAULT_GRASS_SETTI
     lod: { ...settings.lod },
     blade: { ...settings.blade },
     wind: { ...settings.wind, direction: [...settings.wind.direction] },
+    appearance: {
+      ...DEFAULT_GRASS_APPEARANCE_SETTINGS,
+      ...settings.appearance,
+      baseColor: [...(settings.appearance?.baseColor ?? DEFAULT_GRASS_APPEARANCE_SETTINGS.baseColor)],
+      tipColor: [...(settings.appearance?.tipColor ?? DEFAULT_GRASS_APPEARANCE_SETTINGS.tipColor)],
+      dryColor: [...(settings.appearance?.dryColor ?? DEFAULT_GRASS_APPEARANCE_SETTINGS.dryColor)],
+    },
     render: { ...settings.render },
     debug: { ...settings.debug },
     ring: { ...settings.ring },

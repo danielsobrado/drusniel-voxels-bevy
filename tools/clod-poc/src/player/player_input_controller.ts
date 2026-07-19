@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { tryRequestPlayerPointerLock } from "./request_player_pointer_lock.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { emitAudio } from "../audio/index.js";
 import {
@@ -84,10 +85,10 @@ export function createPlayerInputController(deps: PlayerInputControllerDeps): Pl
       deps.camera.getWorldDirection(digDirection);
       deps.scheduleDig(new THREE.Ray(deps.camera.position.clone(), digDirection.clone()));
       if (document.pointerLockElement !== deps.renderer.domElement) {
-        void deps.renderer.domElement.requestPointerLock();
+        void tryRequestPlayerPointerLock(deps.renderer.domElement);
       }
     } else if (deps.interaction.mode === "playing" && event.button === 0 && document.pointerLockElement !== deps.renderer.domElement) {
-      void deps.renderer.domElement.requestPointerLock();
+      void tryRequestPlayerPointerLock(deps.renderer.domElement);
     } else if (deps.interaction.mode === "playing" && event.button === 0 && document.pointerLockElement === deps.renderer.domElement) {
       deps.triggerSwordAttack?.();
     } else if (
@@ -189,7 +190,7 @@ export function createPlayerInputController(deps: PlayerInputControllerDeps): Pl
       deps.onTabUiHoldChange();
       deps.onPlayerModeUiChange();
       if (document.pointerLockElement !== deps.renderer.domElement) {
-        void deps.renderer.domElement.requestPointerLock();
+        void tryRequestPlayerPointerLock(deps.renderer.domElement);
       }
       return;
     }

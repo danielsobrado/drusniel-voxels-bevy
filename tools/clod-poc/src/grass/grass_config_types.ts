@@ -70,6 +70,21 @@ export interface GrassWindSettings {
   strength: number;
   speed: number;
   gustStrength: number;
+  /** Perpendicular turbulence amplitude relative to the primary wave (0..1). */
+  turbulence?: number;
+}
+
+export interface GrassAppearanceSettings {
+  /** Linear RGB. Shared with the terrain meadow color so blade roots match the soil. */
+  baseColor: [number, number, number];
+  tipColor: [number, number, number];
+  dryColor: [number, number, number];
+  /** 0..1 blend of the shading normal toward the terrain normal over the whole blade. */
+  normalPull: number;
+  /** Dry/lush patch noise wavelength in meters (ring compute side). */
+  patchScale: number;
+  /** 0..1 contribution of the patch noise to the dry color mix. */
+  patchStrength: number;
 }
 
 export interface GrassRenderSettings {
@@ -112,6 +127,7 @@ export interface GrassSettings {
   lod: GrassLodSettings;
   blade: GrassBladeSettings;
   wind: GrassWindSettings;
+  appearance?: GrassAppearanceSettings;
   render: GrassRenderSettings;
   debug: GrassDebugSettings;
   alphaToCoverage: boolean;

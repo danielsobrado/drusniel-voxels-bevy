@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { tryRequestPlayerPointerLock } from "./request_player_pointer_lock.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { emitAudio } from "../audio/index.js";
 import { createSpawnWaitIndicator } from "./spawn_wait_indicator.js";
@@ -218,7 +219,7 @@ export function createPlayerModeController(deps: PlayerModeControllerDeps): Play
       document.body.dataset.tfEdit = "true";
     }
     updatePlayerModeUi();
-    void deps.renderer.domElement.requestPointerLock();
+    void tryRequestPlayerPointerLock(deps.renderer.domElement);
   };
 
   deps.orbitModeButton.addEventListener("click", exitPlayerMode);

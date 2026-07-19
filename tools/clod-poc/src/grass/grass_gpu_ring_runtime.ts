@@ -228,6 +228,9 @@ export class GrassGpuRingRuntime {
       maxInstancesPerTier: grassGpuRingTierCapacity(settings),
       seed: settings.seed,
       jitter: settings.placement.jitter,
+      ...(settings.appearance
+        ? { patchScale: settings.appearance.patchScale, patchStrength: settings.appearance.patchStrength }
+        : {}),
       frustumPlanes,
     }, {
       near: this.indexCountFor(this.geometries.ringNearGeometry),

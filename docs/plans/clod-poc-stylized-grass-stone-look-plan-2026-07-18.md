@@ -271,9 +271,47 @@ contact dirt (G5) may close most of the stone gap.
 - Their cel-shaded WaterFloor — separate track (we have our own water work).
 - Copying any GLSL/R3F code — techniques only.
 
+## Canonical grass-look scene (discovered during Phase 0)
+
+Plain `scene=infinite-islands` boots **fail loud** at HEAD with
+`InternalBorderNotWelded: L2:1,1` on the CPU worker mesher path (any seed/world
+tried). Boots succeed with the acceptance streaming bundle (GPU root mesher).
+All grass-look shots/perf runs use this URL parameter set on top of
+`scene=infinite-islands&seed=1&world=16&hud=1`:
+
+```text
+farSummaryLayout=2&farClipmap=1&farClipmapMode=replace&webgpuSelection=1
+liveBubbleBudget=4&liveBubbleGpuChunkBudget=16&liveBubbleMaxInflightChunks=128&liveBubbleColliderRadius=128
+liveClodRootBudget=16&liveClodRootApplyBudget=4&liveClodRootMaxInflightBatches=1&liveClodRootMaxCached=512
+liveClodRootMaxLevel=1&liveClodRootRadius=384&liveClodRootGpuMesher=1&liveClodRootGpuBatchSize=4
+liveClodRootGpuMaxInflightBatches=2&liveClodRootGpuFallback=1&liveClodRootBoundsGuard=1
+farClipmapInnerRadius=384&farClipmapOuterRadius=4096&farSummaryMaxTileBuildsPerFrame=4&farSummaryMaxBuildMsPerFrame=6
+gpuReadbacks=acceptance   (for live grass counters in HUD)
+```
+
+Poses (freeze=0; teleports need streamed-roots convergence before capture or
+the safety system lifts the camera):
+
+- `grass-ground`: cam `2048,24,1728,2.65,-0.12,55` — forest-edge grass,
+  ~1.5-5k blades visible.
+- `overview`: cam `2048,96,2048,2.65,-0.43,55` — canonical acceptance view.
+- `stones-shore`: cam `2048,25,1280,2.65,-0.45,55` — cobble shore.
+
+Learned: grass blades are 4 cm wide — subpixel beyond ~30 m, so only
+ground-level poses judge blade shading; `clodPerf=1` disables vegetation;
+`freeze=1` at boot keeps the grass ring empty.
+
 ## Progress Log
 
 *(update after every commit-sized chunk — sessions can die, disk is durable)*
 
 - 2026-07-18: Plan created from reference-repo analysis + code audit. No
   implementation started.
+- 2026-07-19 Phase 0 DONE: baselines under `tools/clod-poc/shots/grass-look/`
+  (`baseline-overview.png`, `baseline-meadow-ground.png` = grass-ground pose,
+  `baseline-stones-shore.png`, + stats JSONs). Perf baseline (scratchpad
+  `perf-grass-pose.ts`, 240 warmup + 300 frames, grass-ground pose):
+  run1 p50 19.3 / p95 32.9 ms, run2 p50 19.1 / p95 31.9 ms @ 1,501 visible
+  blades (gpu n/m/f/s 386/955/160/0). Pre-existing findings to flag: broken
+  plain infinite-islands boot (weld error), grass-ring HUD counter lags ~1
+  probe behind after teleports.

@@ -87,6 +87,10 @@ export interface GrassGpuRingDispatchParams {
   maxInstancesPerTier: number;
   seed: number;
   jitter: number;
+  /** Dry/lush patch value-noise wavelength (m); packed into height_density_b.z. */
+  patchScale?: number;
+  /** 0..1 patch noise contribution to color_mix; packed into height_density_b.w. */
+  patchStrength?: number;
   materialDensity?: [number, number, number, number];
   heightDensity?: [number, number, number, number, number, number];
   frustumPlanes?: ArrayLike<number>;
@@ -267,6 +271,8 @@ export function packGrassGpuRingParams(
   f32[39] = height[3] ?? DEFAULT_HEIGHT_DENSITY[3];
   f32[40] = height[4] ?? DEFAULT_HEIGHT_DENSITY[4];
   f32[41] = height[5] ?? DEFAULT_HEIGHT_DENSITY[5];
+  f32[42] = params.patchScale ?? 0;
+  f32[43] = params.patchStrength ?? 0;
 
   if (params.frustumPlanes) {
     for (let i = 0; i < Math.min(24, params.frustumPlanes.length); i++) f32[44 + i] = params.frustumPlanes[i] ?? 0;

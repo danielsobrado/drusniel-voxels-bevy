@@ -152,6 +152,14 @@ export function createVegetationGui(
   grassFolder.add(state, "grassBladeWidth", 0.01, 0.4, 0.01).name("blade width").onChange(updateGrassUniforms);
   grassFolder.add(state, "grassWindStrength", 0, 1.5, 0.01).name("wind strength").onChange(updateGrassUniforms);
   grassFolder.add(state, "grassWindSpeed", 0, 4, 0.05).name("wind speed").onChange(updateGrassUniforms);
+  grassFolder.add(state, "grassWindDirectionDeg", 0, 360, 1).name("wind direction °").onChange(updateGrassUniforms);
+  grassFolder.add(state, "grassWindTurbulence", 0, 1, 0.01).name("wind turbulence").onChange(updateGrassUniforms);
+  grassFolder.addColor(state, "grassBaseColor").name("base color (shared)").onChange(updateGrassUniforms);
+  grassFolder.addColor(state, "grassTipColor").name("tip color").onChange(updateGrassUniforms);
+  grassFolder.addColor(state, "grassDryColor").name("dry color").onChange(updateGrassUniforms);
+  grassFolder.add(state, "grassNormalPull", 0, 1, 0.01).name("normal pull").onChange(updateGrassUniforms);
+  grassFolder.add(state, "grassPatchScale", 2, 64, 1).name("patch scale m").onFinishChange(grassActions.rebuild);
+  grassFolder.add(state, "grassPatchStrength", 0, 1, 0.01).name("patch strength").onFinishChange(grassActions.rebuild);
   grassFolder.add(state, "grassSlopeMinY", 0, 1, 0.01).name("slope min Y").onFinishChange(grassActions.rebuild);
   grassFolder.add(state, "grassMinHeight", 0, 128, 1).name("min height").onFinishChange(grassActions.rebuild);
   grassFolder.add(state, "grassMaxHeight", 0, 128, 1).name("max height").onFinishChange(grassActions.rebuild);

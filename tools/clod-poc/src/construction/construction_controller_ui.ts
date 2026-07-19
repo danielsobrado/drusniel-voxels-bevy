@@ -288,5 +288,26 @@ function isTextInputEvent(event: KeyboardEvent): boolean {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
-  return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+  return consumesConstructionShortcut(tag, target instanceof HTMLInputElement ? target.type : "", target.isContentEditable);
+}
+
+export function consumesConstructionShortcut(
+  tagName: string,
+  inputType: string,
+  contentEditable: boolean,
+): boolean {
+  if (contentEditable) return true;
+  if (tagName === "textarea" || tagName === "select") return true;
+  if (tagName !== "input") return false;
+  return ![
+    "button",
+    "checkbox",
+    "color",
+    "file",
+    "image",
+    "radio",
+    "range",
+    "reset",
+    "submit",
+  ].includes(inputType.toLowerCase());
 }

@@ -15,14 +15,14 @@ describe("tree GPU ring resource lifecycle", () => {
     const handle = fakeHandle();
     const first = mesh(sharedGeometry, handle.regularMaterial);
     const second = mesh(sharedGeometry, handle.regularMaterial);
-    const firstDispose = vi.spyOn(first as THREE.Mesh & { dispose(): void }, "dispose");
-    const secondDispose = vi.spyOn(second as THREE.Mesh & { dispose(): void }, "dispose");
+    const firstDispose = first.dispose;
+    const secondDispose = second.dispose;
     root.add(first, second);
 
     const twinMaterial = new THREE.MeshBasicMaterial();
     const twinMaterialDispose = vi.spyOn(twinMaterial, "dispose");
-    const twin = new THREE.Mesh(sharedGeometry, twinMaterial);
-    const twinDispose = vi.spyOn(twin as THREE.Mesh & { dispose(): void }, "dispose");
+    const twin = disposableMesh(sharedGeometry, twinMaterial);
+    const twinDispose = twin.dispose;
     root.add(twin);
 
     disposeTreeGpuRingOwnedResources({
@@ -47,8 +47,8 @@ describe("tree GPU ring resource lifecycle", () => {
     const geometryDispose = vi.spyOn(geometry, "dispose");
     const material = new THREE.MeshBasicMaterial();
     const materialDispose = vi.spyOn(material, "dispose");
-    const twin = new THREE.Mesh(geometry, material);
-    const twinDispose = vi.spyOn(twin as THREE.Mesh & { dispose(): void }, "dispose");
+    const twin = disposableMesh(geometry, material);
+    const twinDispose = twin.dispose;
     root.add(twin);
 
     disposeTreeGpuRingPrepassTwin(root, twin);
@@ -60,8 +60,16 @@ describe("tree GPU ring resource lifecycle", () => {
   });
 });
 
-function mesh(geometry: THREE.InstancedBufferGeometry, material: THREE.Material): TreeGpuRingMesh {
-  return new THREE.Mesh(geometry, material) as TreeGpuRingMesh;
+type DisposableMesh<T extends THREE.BufferGeometry = THREE.BufferGeometry> = THREE.Mesh<T> & {
+  dispose: ReturnType<typeof vi.fn<() => void>>;
+};
+
+function disposableMesh<T extends THREE.BufferGeometry>(geometry: T, material: THREE.Material): DisposableMesh<T> {
+  return Object.assign(new THREE.Mesh(geometry, material), { dispose: vi.fn<() => void>() });
+}
+
+function mesh(geometry: THREE.InstancedBufferGeometry, material: THREE.Material): TreeGpuRingMesh & DisposableMesh<THREE.InstancedBufferGeometry> {
+  return Object.assign(new THREE.Mesh(geometry, material) as TreeGpuRingMesh, { dispose: vi.fn<() => void>() });
 }
 
 function fakeHandle(): TreeMaterialHandle & { dispose: ReturnType<typeof vi.fn> } {

@@ -16,9 +16,9 @@ vi.mock("../state/environment_query_overrides.js", () => ({
   applyEnvironmentQueryOverrides: mocks.applyEnvironmentQueryOverrides,
 }));
 
-import { runAppStateStartup } from "./app_state_startup.js";
+import { runAppStateStartup, type AppStateStartupInput } from "./app_state_startup.js";
 
-function input(stagedImport: unknown, isWebGpu = true) {
+function input(stagedImport: unknown, isWebGpu = true): AppStateStartupInput {
   return {
     searchParams: new URLSearchParams("clodPerf=1&grass=0&postProcess=0&treeGpu=1&weather=storm"),
     clodRuntime: { digging: { holdIntervalMs: 180 } },
@@ -49,7 +49,7 @@ function input(stagedImport: unknown, isWebGpu = true) {
       forestLightingConfig: {},
       waterConfig: {},
     },
-  } as never;
+  } as AppStateStartupInput;
 }
 
 beforeEach(() => {

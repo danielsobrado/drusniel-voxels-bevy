@@ -16,7 +16,6 @@ export function playableSliceExtra(saveId?: string): Record<string, string> {
   return {
     acceptance: "1",
     world: String(PLAYABLE_SLICE_WORLD_PAGES),
-    hud: "1",
     liveBubble: "1",
     liveBubbleRadius: "200",
     liveBubbleColliderRadius: "160",
@@ -48,7 +47,6 @@ export function playableSliceGameplayUrl(saveId: string, plan: PlayableSliceRout
   return clodUrl({
     scene: "continent",
     seed: PLAYABLE_SLICE_SEED,
-    hud: true,
     extra: {
       ...playableSliceExtra(saveId),
       x: String(plan.spawn[0]),

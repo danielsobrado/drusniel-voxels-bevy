@@ -1,5 +1,7 @@
 import type { ProjectSessionState } from "../../project/voxel_project_archive.js";
 import type { GrassSettings } from "../../grass/grass_config.js";
+import { DEFAULT_GRASS_APPEARANCE_SETTINGS, DEFAULT_GRASS_WIND_SETTINGS } from "../../grass/grass_config.js";
+import { linearRgbToHex } from "../../grass/grass_palette.js";
 import type { StoneSettings } from "../../stones/stone_config.js";
 import type { TreeSettings } from "../../trees/tree_config.js";
 import type { UnderstorySettings } from "../../understory/understory_config.js";
@@ -26,6 +28,14 @@ export interface VegetationSliceState {
   grassBladeWidth: number;
   grassWindStrength: number;
   grassWindSpeed: number;
+  grassWindDirectionDeg: number;
+  grassWindTurbulence: number;
+  grassBaseColor: string;
+  grassTipColor: string;
+  grassDryColor: string;
+  grassNormalPull: number;
+  grassPatchScale: number;
+  grassPatchStrength: number;
   grassSlopeMinY: number;
   grassMinHeight: number;
   grassMaxHeight: number;
@@ -133,6 +143,16 @@ export function createVegetationSliceState(input: {
     grassBladeWidth: grassConfig.bladeWidth,
     grassWindStrength: grassConfig.windStrength,
     grassWindSpeed: grassConfig.windSpeed,
+    grassWindDirectionDeg: Math.round(
+      (Math.atan2(grassConfig.wind.direction[1], grassConfig.wind.direction[0]) * 180) / Math.PI + 360,
+    ) % 360,
+    grassWindTurbulence: grassConfig.wind.turbulence ?? DEFAULT_GRASS_WIND_SETTINGS.turbulence ?? 0.25,
+    grassBaseColor: linearRgbToHex((grassConfig.appearance ?? DEFAULT_GRASS_APPEARANCE_SETTINGS).baseColor),
+    grassTipColor: linearRgbToHex((grassConfig.appearance ?? DEFAULT_GRASS_APPEARANCE_SETTINGS).tipColor),
+    grassDryColor: linearRgbToHex((grassConfig.appearance ?? DEFAULT_GRASS_APPEARANCE_SETTINGS).dryColor),
+    grassNormalPull: (grassConfig.appearance ?? DEFAULT_GRASS_APPEARANCE_SETTINGS).normalPull,
+    grassPatchScale: (grassConfig.appearance ?? DEFAULT_GRASS_APPEARANCE_SETTINGS).patchScale,
+    grassPatchStrength: (grassConfig.appearance ?? DEFAULT_GRASS_APPEARANCE_SETTINGS).patchStrength,
     grassSlopeMinY: grassConfig.slopeMinY,
     grassMinHeight: grassConfig.minHeight,
     grassMaxHeight: grassConfig.maxHeight,

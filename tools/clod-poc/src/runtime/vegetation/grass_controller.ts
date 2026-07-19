@@ -5,10 +5,12 @@ import {
   type GrassGpuRingComputeFactory,
 } from "../../grass/grass_system.js";
 import {
+  DEFAULT_GRASS_APPEARANCE_SETTINGS,
   type GrassLighting,
   type GrassSettings,
   type GrassShaderMode,
 } from "../../grass/grass_config.js";
+import { hexToLinearRgb } from "../../grass/grass_palette.js";
 import {
   applyGrassDepthPrepassTier,
   clampGrassDepthPrepassTier,
@@ -33,6 +35,14 @@ export interface GrassControllerUiState {
   grassBladeWidth: number;
   grassWindStrength: number;
   grassWindSpeed: number;
+  grassWindDirectionDeg: number;
+  grassWindTurbulence: number;
+  grassBaseColor: string;
+  grassTipColor: string;
+  grassDryColor: string;
+  grassNormalPull: number;
+  grassPatchScale: number;
+  grassPatchStrength: number;
   grassAlphaToCoverage: boolean;
   grassNearCrossedQuads: boolean;
   grassSeed: number;
@@ -96,6 +106,20 @@ export function createGrassController(deps: GrassControllerDeps): GrassControlle
         ...deps.grassConfig.wind,
         strength: state.grassWindStrength,
         speed: state.grassWindSpeed,
+        direction: [
+          Math.cos((state.grassWindDirectionDeg * Math.PI) / 180),
+          Math.sin((state.grassWindDirectionDeg * Math.PI) / 180),
+        ],
+        turbulence: state.grassWindTurbulence,
+      },
+      appearance: {
+        ...(deps.grassConfig.appearance ?? DEFAULT_GRASS_APPEARANCE_SETTINGS),
+        baseColor: hexToLinearRgb(state.grassBaseColor, DEFAULT_GRASS_APPEARANCE_SETTINGS.baseColor),
+        tipColor: hexToLinearRgb(state.grassTipColor, DEFAULT_GRASS_APPEARANCE_SETTINGS.tipColor),
+        dryColor: hexToLinearRgb(state.grassDryColor, DEFAULT_GRASS_APPEARANCE_SETTINGS.dryColor),
+        normalPull: state.grassNormalPull,
+        patchScale: state.grassPatchScale,
+        patchStrength: state.grassPatchStrength,
       },
       render: {
         ...deps.grassConfig.render,

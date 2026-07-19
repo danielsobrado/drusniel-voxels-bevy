@@ -1,5 +1,6 @@
 import type { GrassSettings } from "./grass_config_types.js";
 import {
+  DEFAULT_GRASS_APPEARANCE_SETTINGS,
   DEFAULT_GRASS_BLADE_SETTINGS,
   DEFAULT_GRASS_DEBUG_SETTINGS,
   DEFAULT_GRASS_LOD_SETTINGS,
@@ -16,6 +17,16 @@ import {
   readNumberAtLeast,
   readWindDirection,
 } from "./grass_config_readers.js";
+
+function readLinearColor(
+  value: readonly number[] | undefined,
+  fallback: readonly [number, number, number],
+): [number, number, number] {
+  if (!value || value.length !== 3 || value.some((c) => !Number.isFinite(c) || c < 0)) {
+    return [fallback[0], fallback[1], fallback[2]];
+  }
+  return [value[0] as number, value[1] as number, value[2] as number];
+}
 
 export function resolveGrassSettings(settings: GrassSettings): GrassSettings {
   const distanceM = readNumberAtLeast(settings.distanceM ?? settings.distance, DEFAULT_GRASS_SETTINGS.distanceM, 0.1);
@@ -66,6 +77,18 @@ export function resolveGrassSettings(settings: GrassSettings): GrassSettings {
   wind.strength = readNumberAtLeast(wind.strength ?? settings.windStrength, DEFAULT_GRASS_WIND_SETTINGS.strength, 0);
   wind.speed = readNumberAtLeast(wind.speed ?? settings.windSpeed, DEFAULT_GRASS_WIND_SETTINGS.speed, 0);
   wind.gustStrength = readNumberAtLeast(wind.gustStrength, DEFAULT_GRASS_WIND_SETTINGS.gustStrength, 0);
+  wind.turbulence = readNumberAtLeast(wind.turbulence, DEFAULT_GRASS_WIND_SETTINGS.turbulence ?? 0.25, 0);
+
+  const appearance = {
+    ...DEFAULT_GRASS_APPEARANCE_SETTINGS,
+    ...settings.appearance,
+    baseColor: readLinearColor(settings.appearance?.baseColor, DEFAULT_GRASS_APPEARANCE_SETTINGS.baseColor),
+    tipColor: readLinearColor(settings.appearance?.tipColor, DEFAULT_GRASS_APPEARANCE_SETTINGS.tipColor),
+    dryColor: readLinearColor(settings.appearance?.dryColor, DEFAULT_GRASS_APPEARANCE_SETTINGS.dryColor),
+  };
+  appearance.normalPull = readFraction(appearance.normalPull, DEFAULT_GRASS_APPEARANCE_SETTINGS.normalPull);
+  appearance.patchScale = readNumberAtLeast(appearance.patchScale, DEFAULT_GRASS_APPEARANCE_SETTINGS.patchScale, 1);
+  appearance.patchStrength = readFraction(appearance.patchStrength, DEFAULT_GRASS_APPEARANCE_SETTINGS.patchStrength);
 
   const render = { ...DEFAULT_GRASS_RENDER_SETTINGS, ...settings.render };
   render.alphaToCoverage = readBoolean(render.alphaToCoverage ?? settings.alphaToCoverage, DEFAULT_GRASS_RENDER_SETTINGS.alphaToCoverage);
@@ -85,6 +108,7 @@ export function resolveGrassSettings(settings: GrassSettings): GrassSettings {
     lod,
     blade,
     wind,
+    appearance,
     render,
     debug,
     alphaToCoverage: render.alphaToCoverage,

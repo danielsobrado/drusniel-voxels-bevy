@@ -253,6 +253,18 @@ fn grass_thin(distance: f32) -> f32 {
   return clamp(base * far, far_density, 1.0);
 }
 
+// Smooth value noise for multi-meter dry/lush patches (hash-based, seed-stable).
+fn patch_value_noise(p: vec2<f32>, salt: u32) -> f32 {
+  let cell = floor(p);
+  let f = p - cell;
+  let u = f * f * (3.0 - 2.0 * f);
+  let a = pcg2d(cell, salt).x;
+  let b = pcg2d(cell + vec2<f32>(1.0, 0.0), salt).x;
+  let c = pcg2d(cell + vec2<f32>(0.0, 1.0), salt).x;
+  let d = pcg2d(cell + vec2<f32>(1.0, 1.0), salt).x;
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
 fn edge_fade(wpos: vec2<f32>, height: f32, normal_y: f32) -> f32 {
   let sample_distance = max(0.75, params.settings_a.x * 1.25);
   let world_size = max(1.0, params.center_radius.w);
@@ -292,7 +304,16 @@ fn append_candidate(tier: u32, wc: vec2<f32>, wpos: vec2<f32>, height: f32, norm
   let yaw = pcg2d(wc, seed + 1709u).x * TAU;
   let phase = pcg2d(wc, seed + 1801u).x * TAU;
   let color_hash = pcg2d(wc, seed + 1901u).x;
-  let color_mix = min(1.0, color_hash * color_hash + bank * 0.16 + weights.z * 0.12);
+  let jitter_dry = color_hash * color_hash;
+  // Spatially coherent dry/lush regions (height_density_b.z = wavelength m,
+  // .w = strength); strength 0 preserves the pure per-blade jitter.
+  let patch_scale = max(params.height_density_b.z, 1.0);
+  let patch_strength = clamp(params.height_density_b.w, 0.0, 1.0);
+  let patch_a = patch_value_noise(wpos / patch_scale, seed + 2311u);
+  let patch_b = patch_value_noise(wpos * (2.03 / patch_scale) + vec2<f32>(13.7, 7.1), seed + 2477u);
+  let patch_dry = smoothstep(0.45, 0.75, patch_a * 0.72 + patch_b * 0.28);
+  let dry_mix = mix(jitter_dry, patch_dry * 0.85 + jitter_dry * 0.25, patch_strength);
+  let color_mix = min(1.0, dry_mix + bank * 0.16 + weights.z * 0.12);
   let gust_k = pcg2d(wc, seed + 2003u).x * 0.6 + 0.7;
   let out_index = tier * max_per_tier + slot;
   out_offset[out_index] = vec4<f32>(wpos.x, height + 0.02, wpos.y, 1.0);

@@ -82,6 +82,20 @@ describe("assertNoInternalBorders generated child seams", () => {
     )).not.toThrow();
   });
 
+  it("keeps the wider L1 near-edge allowance scoped to GPU parent builds", () => {
+    const l1Footprint: PageFootprint = { minX: 384, maxX: 512, minZ: 256, maxZ: 384 };
+    expect(() => assertNoInternalBorders(
+      openQuad(441.5, 367.5),
+      l1Footprint,
+      "L1:3,2 final",
+    )).toThrow(/InternalBorderNotWelded/);
+    expect(() => assertNoInternalBorders(
+      openQuad(441.5, 367.5),
+      l1Footprint,
+      "L1:3,2 gpu final",
+    )).not.toThrow();
+  });
+
   it("allows submerged-floor open borders on parent GPU welded pages", () => {
     const l1Footprint: PageFootprint = { minX: 1408, maxX: 1536, minZ: 384, maxZ: 512 };
     const deep = openQuad(1455.5, 410.5);
@@ -104,6 +118,11 @@ describe("assertNoInternalBorders generated child seams", () => {
       l1Footprint,
       "L1:11,3 gpu welded last-resort",
     )).not.toThrow();
+    expect(() => assertNoInternalBorders(
+      sea,
+      l1Footprint,
+      "L1:11,3 final",
+    )).toThrow(/InternalBorderNotWelded/);
   });
 
   it("still rejects arbitrary internal open boundaries", () => {
