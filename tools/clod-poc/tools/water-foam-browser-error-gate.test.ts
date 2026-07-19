@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   evaluateWaterFoamBrowserErrorGate,
+  isWaterFoamBrowserWarning,
   type WaterFoamBrowserError,
 } from "./water-foam-browser-error-gate.js";
 
@@ -42,10 +43,33 @@ describe("water foam browser error gate", () => {
     expect(SOURCE).toContain('addEventListener("webglcontextlost"');
   });
 
-  it("captures only shader-specific warnings while recording all console errors", () => {
-    expect(SOURCE).toContain("console.error = (...values)");
-    expect(SOURCE).toContain("webgl(?:program|shader|context)?");
-    expect(SOURCE).toContain("program\\\\s+(?:link|compile)");
+  it("captures shader, program, and WebGL warnings", () => {
+    for (const message of [
+      "THREE.WebGLProgram: Shader Error 0 - VALIDATE_STATUS false",
+      "fragment shader compilation failed",
+      "program link failed",
+      "WebGL context may be lost",
+    ]) {
+      expect(isWaterFoamBrowserWarning(message), message).toBe(true);
+    }
+  });
+
+  it("ignores unrelated warnings containing generic words", () => {
+    for (const message of [
+      "Open this link to learn more",
+      "Application program loaded successfully",
+      "Compilation completed successfully",
+      "The navigation link is deprecated",
+    ]) {
+      expect(isWaterFoamBrowserWarning(message), message).toBe(false);
+    }
+  });
+
+  it("uses the same matcher in Node and the injected browser source", () => {
+    expect(SOURCE).toContain("WATER_FOAM_BROWSER_WARNING_PATTERN.source");
+    expect(SOURCE).toContain("WATER_FOAM_BROWSER_WARNING_PATTERN.flags");
+    expect(SOURCE).toContain("const warningPattern = new RegExp");
+    expect(SOURCE).toContain("warningPattern.test(message)");
     expect(SOURCE).not.toContain("/webgl|shader|program|compile|link/i");
   });
 });
