@@ -23,9 +23,13 @@ describe("water foam shade acceptance override", () => {
     expect(ATLAS_NODES_SOURCE).toContain("Math.min(1, Math.max(0, value))");
   });
 
-  it("exposes the control only through the existing debug API installation", () => {
+  it("loads the TSL override only through the existing debug API", () => {
     expect(WATER_DEBUG_SOURCE).toContain("setWaterFoamSunVisibilityOverride");
-    expect(WATER_DEBUG_SOURCE).toContain("setSunLightGpuAtlasDebugOverride(null)");
-    expect(WATER_DEBUG_SOURCE).not.toContain("searchParams.get(\"foamSun");");
+    expect(WATER_DEBUG_SOURCE).toContain("await import(");
+    expect(WATER_DEBUG_SOURCE).toContain("setSunLightGpuAtlasDebugOverride(visibility)");
+    expect(WATER_DEBUG_SOURCE).not.toContain(
+      'import { setSunLightGpuAtlasDebugOverride } from',
+    );
+    expect(WATER_DEBUG_SOURCE).not.toContain('searchParams.get("foamSun")');
   });
 });
