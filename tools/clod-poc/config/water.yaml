@@ -42,10 +42,10 @@ water:
       fallback_tributaries: true
       flow_speed_multiplier: 1.15
       lake_surface_drop_m: 2.0
-    # Visual-only deterministic bar field. It does not raise terrain or alter river
-    # continuity; consumers use the shared mask for gravel/cobble dressing.
+    # Shared deterministic visual bar field; stone dressing can be changed live.
     gravel_bars:
       enabled: true
+      stones_enabled: false
       strength: 1.0
       seed_salt: 58193
       longitudinal_period_m: 96.0

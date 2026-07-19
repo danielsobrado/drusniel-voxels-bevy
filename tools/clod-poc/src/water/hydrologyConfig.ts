@@ -40,6 +40,7 @@ export interface HydrologyRiversConfig {
 
 export interface HydrologyGravelBarsConfig {
   enabled: boolean;
+  stonesEnabled: boolean;
   strength: number;
   seedSalt: number;
   longitudinalPeriodM: number;
@@ -162,6 +163,7 @@ export const DEFAULT_HYDROLOGY_CONFIG: HydrologyConfig = {
   },
   gravelBars: {
     enabled: true,
+    stonesEnabled: false,
     strength: 1.0,
     seedSalt: 58193,
     longitudinalPeriodM: 96,

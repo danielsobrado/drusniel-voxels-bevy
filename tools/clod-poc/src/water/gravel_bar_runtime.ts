@@ -10,6 +10,7 @@ const GRAVEL_BAR_QUERY_KEYS = [
 ] as const;
 
 let settings = cloneGravelBarSettings(DEFAULT_HYDROLOGY_CONFIG.gravelBars);
+let stonesEnabledOverride: boolean | null = null;
 
 export function setGravelBarSettings(next: HydrologyGravelBarsConfig): void {
   settings = cloneGravelBarSettings(next);
@@ -19,14 +20,17 @@ export function readGravelBarSettings(): HydrologyGravelBarsConfig {
   return settings;
 }
 
+export function setGravelBarStonesEnabled(enabled: boolean): void {
+  stonesEnabledOverride = Boolean(enabled);
+}
+
+export function resetGravelBarRuntimeOverrides(): void {
+  stonesEnabledOverride = null;
+}
+
 export function gravelBarStonesEnabled(search = currentSearch()): boolean {
   if (!settings.enabled || settings.strength <= 0) return false;
-  const params = new URLSearchParams(search);
-  for (const key of GRAVEL_BAR_QUERY_KEYS) {
-    if (!params.has(key)) continue;
-    return parseFlag(params.get(key));
-  }
-  return false;
+  return stonesEnabledOverride ?? queryOverride(search) ?? settings.stonesEnabled;
 }
 
 function cloneGravelBarSettings(config: HydrologyGravelBarsConfig): HydrologyGravelBarsConfig {
@@ -36,6 +40,15 @@ function cloneGravelBarSettings(config: HydrologyGravelBarsConfig): HydrologyGra
 function currentSearch(): string {
   const location = (globalThis as typeof globalThis & { location?: { search?: string } }).location;
   return typeof location?.search === "string" ? location.search : "";
+}
+
+function queryOverride(search: string): boolean | null {
+  const params = new URLSearchParams(search);
+  for (const key of GRAVEL_BAR_QUERY_KEYS) {
+    if (!params.has(key)) continue;
+    return parseFlag(params.get(key));
+  }
+  return null;
 }
 
 function parseFlag(value: string | null): boolean {
