@@ -21,7 +21,7 @@ export interface WaterFoamRuntimeDiagnostics {
   readonly riverShoreAttenuation: number;
   readonly shadeCoverageFloor: number;
   readonly rapidEligibility: "speed-times-drop-times-river";
-  readonly cpuFieldSamples: 0;
+  readonly cpuFieldSamples: number;
   readonly sunAtlas: {
     readonly valid: number;
     readonly version: number;
