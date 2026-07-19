@@ -71,25 +71,38 @@ export function installBiomeVisualMaterialRouting(
     handle.onMaterialChanged((material) => bindMaterial(material, "terrain"));
   };
 
-  const scanVegetationRoot = (
-    rootName: string,
+  const bindObjectMaterials = (
+    object: THREE.Object3D,
     domain: Exclude<BiomeMaterialDomain, "terrain">,
   ): void => {
-    const root = findNamedRoot(input.scene, rootName);
-    if (!root) return;
-
     uniqueMaterials.clear();
-    root.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) return;
-      const materials = Array.isArray(object.material) ? object.material : [object.material];
+    object.traverse((candidate) => {
+      if (!(candidate instanceof THREE.Mesh)) return;
+      const materials = Array.isArray(candidate.material) ? candidate.material : [candidate.material];
       for (const material of materials) uniqueMaterials.add(material);
     });
     for (const material of uniqueMaterials) bindMaterial(material, domain);
   };
 
+  const scanVegetationRoot = (
+    rootName: string,
+    domain: Exclude<BiomeMaterialDomain, "terrain">,
+  ): void => {
+    const root = findNamedRoot(input.scene, rootName);
+    if (root) bindObjectMaterials(root, domain);
+  };
+
+  const scanFarCanopyMaterials = (): void => {
+    for (const child of input.scene.children) {
+      if (child.userData.canopyTextureSetRevision === undefined) continue;
+      bindObjectMaterials(child, "tree");
+    }
+  };
+
   const scanActiveMaterials = (): void => {
     for (const handle of input.materialController.materials) bindTerrainHandle(handle);
     for (const root of VEGETATION_ROOTS) scanVegetationRoot(root.name, root.domain);
+    scanFarCanopyMaterials();
   };
 
   const tick = (): void => {
