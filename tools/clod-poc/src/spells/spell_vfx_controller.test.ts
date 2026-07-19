@@ -95,7 +95,7 @@ describe("spell node materials", () => {
     expect(material.transparent).toBe(true);
     expect(material.depthWrite).toBe(false);
     expect(material.depthTest).toBe(true);
-    expect(material.side).toBe(THREE.DoubleSide);
+    expect(material.side).toBe(THREE.FrontSide);
     expect(material.blending).toBe(blending);
     expect(material.toneMapped).toBe(false);
     expect(uProgress.value).toBe(0);

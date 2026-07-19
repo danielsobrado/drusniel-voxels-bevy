@@ -188,7 +188,7 @@ export function createFireballSpellVfx(deps: FireballSpellVfxDeps): FireballSpel
   const ringGeometry = new THREE.RingGeometry(0.62, 1, 48);
   const ringMaterial = additiveMaterial(config.glowColor, 0);
   ringMaterial.vertexColors = false;
-  ringMaterial.side = THREE.DoubleSide;
+  ringMaterial.side = THREE.FrontSide;
   const ring = new THREE.Mesh(ringGeometry, ringMaterial);
   ring.name = "fireball-spell-impact-ring";
   ring.renderOrder = 4300;
