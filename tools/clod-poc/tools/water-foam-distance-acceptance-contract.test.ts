@@ -14,7 +14,9 @@ function metrics(
     midNearRatio: 0.50,
     farNearRatio: 0,
     monotonicFraction: 0.995,
+    nearActiveMonotonicFraction: 0.99,
     linearSampleCount: 800,
+    linearMonotonicFraction: 0.99,
     linearMidNearRatio: 0.50,
     linearFarNearRatio: 0,
     ...overrides,
@@ -71,12 +73,15 @@ describe("water foam distance acceptance contract", () => {
     expect(result.failures.join("\n")).toMatch(/far\/near/);
   });
 
-  it("rejects non-monotonic per-pixel response", () => {
+  it("rejects non-monotonic active and uncapped foam response", () => {
     const result = evaluateWaterFoamDistanceAcceptance(metrics({
-      monotonicFraction: 0.80,
+      monotonicFraction: 0.99,
+      nearActiveMonotonicFraction: 0.70,
+      linearMonotonicFraction: 0.65,
     }));
 
     expect(result.passed).toBe(false);
-    expect(result.failures.join("\n")).toMatch(/monotonic water-pixel fraction/);
+    expect(result.failures.join("\n")).toMatch(/near-active monotonic fraction/);
+    expect(result.failures.join("\n")).toMatch(/uncapped monotonic fraction/);
   });
 });
