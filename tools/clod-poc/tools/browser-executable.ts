@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { win32 } from "node:path";
 
 const BROWSER_COMMANDS = [
   "chrome",
@@ -51,12 +51,12 @@ export function browserExecutableCandidates(
     const programFiles = env.ProgramFiles ?? env.PROGRAMFILES;
     const programFilesX86 = env["ProgramFiles(x86)"] ?? env["PROGRAMFILES(X86)"];
 
-    add(localAppData && join(localAppData, "Google", "Chrome", "Application", "chrome.exe"));
-    add(programFiles && join(programFiles, "Google", "Chrome", "Application", "chrome.exe"));
-    add(programFilesX86 && join(programFilesX86, "Google", "Chrome", "Application", "chrome.exe"));
-    add(localAppData && join(localAppData, "Microsoft", "Edge", "Application", "msedge.exe"));
-    add(programFiles && join(programFiles, "Microsoft", "Edge", "Application", "msedge.exe"));
-    add(programFilesX86 && join(programFilesX86, "Microsoft", "Edge", "Application", "msedge.exe"));
+    add(localAppData && win32.join(localAppData, "Google", "Chrome", "Application", "chrome.exe"));
+    add(programFiles && win32.join(programFiles, "Google", "Chrome", "Application", "chrome.exe"));
+    add(programFilesX86 && win32.join(programFilesX86, "Google", "Chrome", "Application", "chrome.exe"));
+    add(localAppData && win32.join(localAppData, "Microsoft", "Edge", "Application", "msedge.exe"));
+    add(programFiles && win32.join(programFiles, "Microsoft", "Edge", "Application", "msedge.exe"));
+    add(programFilesX86 && win32.join(programFilesX86, "Microsoft", "Edge", "Application", "msedge.exe"));
   } else {
     add("/mnt/c/Program Files/Google/Chrome/Application/chrome.exe");
     add("/mnt/c/Program Files/Microsoft/Edge/Application/msedge.exe");
