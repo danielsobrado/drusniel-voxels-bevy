@@ -25,15 +25,26 @@ const listeners = new Set<WaterFoamDistanceFadeListener>();
 export function resolveWaterFoamDistanceFade(
   foam: Pick<WaterFoamVisualConfig, "detailFadeStartM" | "detailFadeEndM">,
 ): WaterFoamDistanceFade {
-  const resolved = resolveDistanceFade(foam);
-  publishResolvedDistanceFade(resolved);
-  return resolved;
+  const startM = nonNegativeFinite(foam.detailFadeStartM);
+  const requestedEndM = nonNegativeFinite(foam.detailFadeEndM);
+  return {
+    startM,
+    endM: Math.max(startM + MIN_FADE_WIDTH_M, requestedEndM),
+  };
 }
 
 export function publishWaterFoamDistanceFade(
   foam: Pick<WaterFoamVisualConfig, "detailFadeStartM" | "detailFadeEndM">,
 ): WaterFoamDistanceFadeState {
-  return publishResolvedDistanceFade(resolveDistanceFade(foam));
+  const resolved = resolveWaterFoamDistanceFade(foam);
+  if (state.valid && state.startM === resolved.startM && state.endM === resolved.endM) return state;
+  state = {
+    ...resolved,
+    valid: true,
+    version: state.version + 1,
+  };
+  for (const listener of listeners) listener(state);
+  return state;
 }
 
 export function getWaterFoamDistanceFadeState(): WaterFoamDistanceFadeState {
@@ -54,28 +65,6 @@ export function evaluateWaterFoamDistanceFade(
   const t = clamp01((distance - fade.startM) / Math.max(MIN_FADE_WIDTH_M, fade.endM - fade.startM));
   const smooth = t * t * (3 - 2 * t);
   return 1 - smooth;
-}
-
-function resolveDistanceFade(
-  foam: Pick<WaterFoamVisualConfig, "detailFadeStartM" | "detailFadeEndM">,
-): WaterFoamDistanceFade {
-  const startM = nonNegativeFinite(foam.detailFadeStartM);
-  const requestedEndM = nonNegativeFinite(foam.detailFadeEndM);
-  return {
-    startM,
-    endM: Math.max(startM + MIN_FADE_WIDTH_M, requestedEndM),
-  };
-}
-
-function publishResolvedDistanceFade(resolved: WaterFoamDistanceFade): WaterFoamDistanceFadeState {
-  if (state.valid && state.startM === resolved.startM && state.endM === resolved.endM) return state;
-  state = {
-    ...resolved,
-    valid: true,
-    version: state.version + 1,
-  };
-  for (const listener of listeners) listener(state);
-  return state;
 }
 
 function nonNegativeFinite(value: number): number {
