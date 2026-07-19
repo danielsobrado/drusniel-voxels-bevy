@@ -1,5 +1,4 @@
 import { clamp, float, max, mix, smoothstep, texture, vec2 } from "three/tsl";
-import { getSunLightGpuAtlas } from "../terrain/sun_visibility/sun_light_gpu_atlas.js";
 import { buildSunLightGpuAtlasNodes } from "../terrain/sun_visibility/sun_light_gpu_atlas_nodes.js";
 import {
   WATER_FOAM_BANK_DROP_BASE,
@@ -97,10 +96,7 @@ export function buildWaterFoamNodes(input: WaterFoamNodeInputs): WaterFoamNodes 
     .mul(input.shoreStrength)
     .mul(shoreBodyWeight)
     .add(rapid.add(bank).mul(input.riverStrength));
-  const sunVisibility = buildSunLightGpuAtlasNodes(
-    input.worldXZ,
-    getSunLightGpuAtlas(),
-  ).visibility;
+  const sunVisibility = buildSunLightGpuAtlasNodes(input.worldXZ).visibility;
   const shadeCoverage = mix(
     float(WATER_FOAM_SHADE_COVERAGE_FLOOR),
     float(1),
