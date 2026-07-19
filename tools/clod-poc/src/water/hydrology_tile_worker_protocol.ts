@@ -9,6 +9,10 @@
 import type { TerrainFieldConfigInput } from "../terrain/terrain_surface.js";
 import type { HydrologyGraph } from "../world/hydrology_graph/hydrology_graph.js";
 import type { GraphTerrainCarveConfig } from "./graph_hydrology.js";
+import type {
+  HydrologyGravelBarsConfig,
+  HydrologyGravelBedConfig,
+} from "./hydrologyConfig.js";
 import type { WaterConfig } from "./waterConfig.js";
 
 export interface HydrologyTileWorkerConfigureRequest {
@@ -21,6 +25,8 @@ export interface HydrologyTileWorkerConfigureRequest {
   drySentinelDepthM: number;
   hydrologyGraph: HydrologyGraph | null;
   hydrologyCarve: GraphTerrainCarveConfig | null;
+  gravelBars: HydrologyGravelBarsConfig;
+  gravelBed: HydrologyGravelBedConfig;
 }
 
 export interface HydrologyTileWorkerBuildRequest {
