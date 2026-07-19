@@ -12,6 +12,8 @@ import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpec
 import { TREE_CROWN_PROXY_INDEX_COUNT } from "./tree_crown_proxy_math.js";
 import type { TreeDepthPrepassMaxLod } from "./tree_depth_prepass_runtime.js";
 import {
+  disposeTreeGpuRingGeometry,
+  disposeTreeGpuRingMaterialHandle,
   disposeTreeGpuRingMeshState,
   disposeTreeGpuRingOwnedResources,
   disposeTreeGpuRingPrepassTwin,
@@ -226,7 +228,7 @@ function createTreeGpuRingMaterialHandle(
       handle = decorateTreeRingLodCrossfade(handle, input.settings, buffers, lod);
       return applyCurrentTreeGpuRingForestLighting(handle, input.currentForestLighting);
     } catch (error) {
-      handle.dispose();
+      disposeTreeGpuRingMaterialHandle(handle);
       throw error;
     }
   }
@@ -258,7 +260,7 @@ function createTreeGpuRingMaterialHandle(
     handle = decorateTreeRingLodCrossfade(handle, input.settings, buffers, lod);
     return applyCurrentTreeGpuRingForestLighting(handle, input.currentForestLighting);
   } catch (error) {
-    handle.dispose();
+    disposeTreeGpuRingMaterialHandle(handle);
     throw error;
   }
 }
@@ -305,7 +307,7 @@ function createGpuRingTierDraw(
     return mesh;
   } catch (error) {
     if (mesh) disposeTreeGpuRingMeshState(mesh);
-    geometry.dispose();
+    disposeTreeGpuRingGeometry(geometry);
     throw error;
   }
 }
@@ -337,7 +339,7 @@ function createTreeGpuRingShadowMaterialHandle(
     });
     return handle;
   } catch (error) {
-    handle.dispose();
+    disposeTreeGpuRingMaterialHandle(handle);
     throw error;
   }
 }
@@ -363,7 +365,7 @@ function createGpuRingShadowTierDraw(
     return mesh;
   } catch (error) {
     if (mesh) disposeTreeGpuRingMeshState(mesh);
-    geometry.dispose();
+    disposeTreeGpuRingGeometry(geometry);
     throw error;
   }
 }
