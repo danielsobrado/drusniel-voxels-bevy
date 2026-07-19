@@ -60,8 +60,8 @@ describe("water foam renderer parity contract", () => {
           stripeAnisotropy: 0.26,
         },
         smoothRiver: { waterPixelCount: 10_400, activeFraction: 0.025 },
-        lakeShore: { waterPixelCount: 9_300, meanCoverage: 0.04 },
-        rapidLighting: { meanLuminance: 0.48, standardDeviation: 0.05 },
+        lakeShore: { waterPixelCount: 9_300, activeFraction: 0.12, meanCoverage: 0.04 },
+        rapidLighting: { meanLuminance: 0.48, p95Luminance: 0.70, standardDeviation: 0.05 },
         rapidTemporal: { meanAbsoluteDelta: 0.03, binaryIou: 0.48 },
       }),
     );
@@ -69,14 +69,18 @@ describe("water foam renderer parity contract", () => {
     expect(result.passed).toBe(true);
   });
 
-  it("rejects a different water mask at the same canonical pose", () => {
+  it("rejects a different water mask or shoreline activation at the same pose", () => {
     const result = evaluateWaterFoamRendererParity(
       fixture(),
-      fixture({ rapid: { waterPixelCount: 4_000 } }),
+      fixture({
+        rapid: { waterPixelCount: 4_000 },
+        lakeShore: { activeFraction: 0.17 },
+      }),
     );
 
     expect(result.passed).toBe(false);
     expect(result.failures.join("\n")).toMatch(/rapid water-pixel ratio/);
+    expect(result.failures.join("\n")).toMatch(/lake-shore active delta/);
   });
 
   it("rejects WebGL rapid foam that disappears or over-expands", () => {
@@ -95,11 +99,12 @@ describe("water foam renderer parity contract", () => {
     expect(excessive.failures.join("\n")).toMatch(/rapid active ratio/);
   });
 
-  it("rejects renderer-specific ribbons, stripes, and smooth-river foam", () => {
+  it("rejects renderer-specific fragmentation, ribbons, and smooth-river foam", () => {
     const result = evaluateWaterFoamRendererParity(
       fixture(),
       fixture({
         rapid: {
+          componentDensityPerK: 40,
           largestComponentFraction: 0.78,
           stripeAnisotropy: 0.48,
           isolatedActiveFraction: 0.28,
@@ -109,6 +114,7 @@ describe("water foam renderer parity contract", () => {
     );
 
     expect(result.passed).toBe(false);
+    expect(result.failures.join("\n")).toMatch(/component-density delta/);
     expect(result.failures.join("\n")).toMatch(/largest-component delta/);
     expect(result.failures.join("\n")).toMatch(/stripe delta/);
     expect(result.failures.join("\n")).toMatch(/smooth-river active excess/);
@@ -118,13 +124,18 @@ describe("water foam renderer parity contract", () => {
     const result = evaluateWaterFoamRendererParity(
       fixture(),
       fixture({
-        rapidLighting: { meanLuminance: 0.82, standardDeviation: 0.01 },
+        rapidLighting: {
+          meanLuminance: 0.82,
+          p95Luminance: 0.50,
+          standardDeviation: 0.01,
+        },
         rapidTemporal: { meanAbsoluteDelta: 0.08, binaryIou: 0.10 },
       }),
     );
 
     expect(result.passed).toBe(false);
     expect(result.failures.join("\n")).toMatch(/mean luminance delta/);
+    expect(result.failures.join("\n")).toMatch(/p95 luminance delta/);
     expect(result.failures.join("\n")).toMatch(/luminance-variation ratio/);
     expect(result.failures.join("\n")).toMatch(/temporal-delta ratio/);
     expect(result.failures.join("\n")).toMatch(/temporal IoU delta/);
