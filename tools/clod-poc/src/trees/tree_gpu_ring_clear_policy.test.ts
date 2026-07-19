@@ -2,6 +2,21 @@ import { describe, expect, it } from "vitest";
 import type { TreeGpuRingRuntimeState } from "./tree_system_gpu_ring_runtime.js";
 import { treeGpuRingRequiresClear } from "./tree_gpu_ring_clear_policy.js";
 
+const clearCases: ReadonlyArray<readonly [string, Partial<TreeGpuRingRuntimeState>]> = [
+  ["compute", { compute: {} as TreeGpuRingRuntimeState["compute"] }],
+  ["initialization", { init: Promise.resolve() }],
+  ["draw resources", { draw: {} as TreeGpuRingRuntimeState["draw"] }],
+  ["ring meshes", { ringMeshes: [{} as TreeGpuRingRuntimeState["ringMeshes"][number]] }],
+  ["prepass twins", { prepassTwins: [{} as TreeGpuRingRuntimeState["prepassTwins"][number]] }],
+  ["active key", { key: "ring-key" }],
+  ["failed key", { failedKey: "failed-key" }],
+  ["visible count", { visibleCount: 1 }],
+  ["overflow", { overflowed: true }],
+  ["dispatch timing", { dispatchMs: 0.2 }],
+  ["validation signature", { lastValidationSignature: "validation" }],
+  ["non-idle stats", { stats: stats("ready") }],
+];
+
 describe("tree GPU ring clear policy", () => {
   it("skips an already-cleared idle ring", () => {
     expect(treeGpuRingRequiresClear(state())).toBe(false);
@@ -11,20 +26,7 @@ describe("tree GPU ring clear policy", () => {
     expect(treeGpuRingRequiresClear(state({ stats: stats("disabled") }))).toBe(false);
   });
 
-  it.each([
-    ["compute", { compute: {} }],
-    ["initialization", { init: Promise.resolve() }],
-    ["draw resources", { draw: {} }],
-    ["ring meshes", { ringMeshes: [{}] }],
-    ["prepass twins", { prepassTwins: [{}] }],
-    ["active key", { key: "ring-key" }],
-    ["failed key", { failedKey: "failed-key" }],
-    ["visible count", { visibleCount: 1 }],
-    ["overflow", { overflowed: true }],
-    ["dispatch timing", { dispatchMs: 0.2 }],
-    ["validation signature", { lastValidationSignature: "validation" }],
-    ["non-idle stats", { stats: stats("ready") }],
-  ])("requires cleanup for %s", (_label, patch) => {
+  it.each(clearCases)("requires cleanup for %s", (_label, patch) => {
     expect(treeGpuRingRequiresClear(state(patch))).toBe(true);
   });
 });
@@ -52,7 +54,7 @@ function state(patch: Partial<TreeGpuRingRuntimeState> = {}): TreeGpuRingRuntime
     clusterVisibilityProviderRevision: 0,
     clusterVisibilitySampler: undefined,
     ...patch,
-  } as TreeGpuRingRuntimeState;
+  };
 }
 
 function stats(status: TreeGpuRingRuntimeState["stats"]["status"]): TreeGpuRingRuntimeState["stats"] {
