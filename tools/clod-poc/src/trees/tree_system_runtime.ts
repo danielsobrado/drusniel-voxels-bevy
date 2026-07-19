@@ -27,7 +27,8 @@ import { removeTreePatchResources } from "./tree_system_lifecycle.js";
 import type { TreeMeshBoundsState } from "./tree_system_mesh_bounds.js";
 import { buildVisibleTreeLightingProxies } from "./tree_system_lighting_proxies.js";
 import { createTreeLodCounts, refreshTreePatchesForCenter, resetTreeLodCounts, updateTreePatchLods } from "./tree_system_cpu_runtime.js";
-import { createTreeGpuRingRuntimeState, treeGpuRingMaterialHandles, updateTreeGpuRingTrees } from "./tree_system_gpu_ring_runtime.js";
+import { createTreeGpuRingRuntimeState, treeGpuRingMaterialHandles } from "./tree_system_gpu_ring_runtime.js";
+import { updateTreeGpuRingTreesSafely } from "./tree_system_gpu_ring_safe_update.js";
 import { TreeSystemAssets } from "./tree_system_assets_runtime.js";
 import { TreeGpuLightingProxyCache } from "./tree_system_gpu_lighting_proxy_cache.js";
 import { TreePlacementDebugOverlay } from "./tree_placement_debug_overlay.js";
@@ -182,7 +183,7 @@ export class TreeSystem {
     if (!this.settings.enabled) { resetTreeLodCounts(this.lodCounts); this.updateStats(); return; }
     if (treeSystemUsesGpuRingDraw(this.settings)) {
       if (this.patches.length > 0) this.clearPatches();
-      if (updateTreeGpuRingTrees(treeGpuRingInput(this), center, camera)) { this.updateStats(); return; }
+      if (updateTreeGpuRingTreesSafely(treeGpuRingInput(this), center, camera)) { this.updateStats(); return; }
       if (!this.settings.gpu.fallbackToCpu) {
         resetTreeLodCounts(this.lodCounts);
         this.updateStats();
