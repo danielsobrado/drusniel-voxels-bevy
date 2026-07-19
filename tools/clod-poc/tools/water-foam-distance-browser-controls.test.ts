@@ -5,6 +5,7 @@ import {
   assertWaterFoamDistanceState,
   assertWaterFoamTimeState,
   resetWaterFoamDistanceControls,
+  runWaterFoamDistanceCapture,
   setWaterFoamAuxiliaryOverlaysHidden,
   setWaterFoamDistanceOverride,
   setWaterFoamTimeFrozen,
@@ -14,6 +15,14 @@ function pageWithEvaluate(
   evaluate: (expression: string) => unknown | Promise<unknown>,
 ): CdpPage {
   return { evaluate } as unknown as CdpPage;
+}
+
+function successfulResetPage(): CdpPage {
+  return pageWithEvaluate((expression) => {
+    if (expression.includes("DistanceOverride")) return { enabled: false, distanceM: 0 };
+    if (expression.includes("TimeFrozen")) return { frozen: false };
+    return { hidden: false, matched: 0 };
+  });
 }
 
 describe("water foam distance browser controls", () => {
@@ -87,6 +96,43 @@ describe("water foam distance browser controls", () => {
     expect(evaluate).toHaveBeenCalledTimes(3);
     expect(evaluate.mock.calls[1]?.[0]).toContain("setWaterFoamTimeFrozen(false)");
     expect(evaluate.mock.calls[2]?.[0]).toContain("setWaterFoamAuxiliaryOverlaysHidden(false)");
+  });
+
+  it("returns capture value and verified reset state", async () => {
+    const result = await runWaterFoamDistanceCapture(
+      successfulResetPage(),
+      async () => ({ captured: true }),
+    );
+
+    expect(result).toEqual({
+      value: { captured: true },
+      reset: {
+        distance: { enabled: false, distanceM: 0 },
+        time: { frozen: false },
+        auxiliary: { hidden: false, matched: 0 },
+      },
+    });
+  });
+
+  it("preserves the capture failure when cleanup succeeds", async () => {
+    await expect(runWaterFoamDistanceCapture(
+      successfulResetPage(),
+      async () => {
+        throw new Error("capture failure");
+      },
+    )).rejects.toThrow(/^capture failure$/);
+  });
+
+  it("reports capture and cleanup failures together", async () => {
+    const page = pageWithEvaluate(() => {
+      throw new Error("cleanup failure");
+    });
+
+    await expect(runWaterFoamDistanceCapture(page, async () => {
+      throw new Error("capture failure");
+    })).rejects.toThrow(
+      /foam distance capture failed: capture failure; cleanup failed: foam distance control cleanup failed/,
+    );
   });
 
   it("rejects incorrect reset states and insufficient isolation", async () => {
