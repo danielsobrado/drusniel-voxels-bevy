@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   evaluateWaterFoamDistanceFade,
+  getWaterFoamDistanceDebugOverride,
+  getWaterFoamDistanceDebugUniforms,
   getWaterFoamDistanceFadeState,
   publishWaterFoamDistanceFade,
   resolveWaterFoamDistanceFade,
+  setWaterFoamDistanceDebugOverrideM,
+  subscribeWaterFoamDistanceDebugOverride,
   subscribeWaterFoamDistanceFade,
 } from "./water_foam_distance.js";
 
@@ -46,5 +50,43 @@ describe("water foam distance policy", () => {
     expect(getWaterFoamDistanceFadeState()).toBe(changed);
 
     unsubscribe();
+  });
+
+  it("publishes one synthetic distance to listeners and shared WebGL uniforms", () => {
+    setWaterFoamDistanceDebugOverrideM(null);
+    const listener = vi.fn();
+    const unsubscribe = subscribeWaterFoamDistanceDebugOverride(listener);
+    const uniforms = getWaterFoamDistanceDebugUniforms();
+
+    expect(listener).toHaveBeenLastCalledWith({ enabled: false, distanceM: 0 });
+    expect(setWaterFoamDistanceDebugOverrideM(220)).toEqual({ enabled: true, distanceM: 220 });
+    expect(getWaterFoamDistanceDebugOverride()).toEqual({ enabled: true, distanceM: 220 });
+    expect(uniforms.enabled.value).toBe(1);
+    expect(uniforms.distanceM.value).toBe(220);
+    expect(listener).toHaveBeenLastCalledWith({ enabled: true, distanceM: 220 });
+
+    unsubscribe();
+    setWaterFoamDistanceDebugOverrideM(null);
+  });
+
+  it("clamps negative synthetic distance and rejects non-finite values", () => {
+    expect(setWaterFoamDistanceDebugOverrideM(-10)).toEqual({ enabled: true, distanceM: 0 });
+    expect(() => setWaterFoamDistanceDebugOverrideM(Number.NaN)).toThrow(/must be finite or null/);
+    expect(() => setWaterFoamDistanceDebugOverrideM(Number.POSITIVE_INFINITY)).toThrow(/must be finite or null/);
+    expect(setWaterFoamDistanceDebugOverrideM(null)).toEqual({ enabled: false, distanceM: 0 });
+  });
+
+  it("does not notify listeners when the synthetic state is unchanged", () => {
+    setWaterFoamDistanceDebugOverrideM(null);
+    const listener = vi.fn();
+    const unsubscribe = subscribeWaterFoamDistanceDebugOverride(listener);
+
+    setWaterFoamDistanceDebugOverrideM(120);
+    const callsAfterChange = listener.mock.calls.length;
+    setWaterFoamDistanceDebugOverrideM(120);
+
+    expect(listener).toHaveBeenCalledTimes(callsAfterChange);
+    unsubscribe();
+    setWaterFoamDistanceDebugOverrideM(null);
   });
 });
