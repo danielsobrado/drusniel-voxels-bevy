@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { treeGpuRingGroupIndex } from "../gpu/tree_ring_compute.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeGeometryMap, TreeSpeciesGeometryMap } from "./tree_geometry.js";
@@ -21,6 +21,29 @@ describe("TREE-10 hero tree fidelity audit", () => {
     expect(stats.triangleCount).toBe(2);
     expect(stats.foliageTriangleCount).toBe(1);
     expect(stats.hasRealFoliage).toBe(true);
+  });
+
+  it("reuses immutable geometry summaries and invalidates changed attributes", () => {
+    const geometry = geometryWithFoliageMask([1, 1, 1, 0, 0, 0]);
+    const foliage = geometry.getAttribute("treeFoliageMask") as THREE.BufferAttribute;
+    const getX = vi.spyOn(foliage, "getX");
+
+    const first = treeHeroGeometryStats(geometry);
+    const firstScanCalls = getX.mock.calls.length;
+    expect(firstScanCalls).toBeGreaterThan(0);
+
+    expect(treeHeroGeometryStats(geometry)).toBe(first);
+    expect(getX).toHaveBeenCalledTimes(firstScanCalls);
+
+    foliage.setX(0, 0);
+    foliage.setX(1, 0);
+    foliage.setX(2, 0);
+    foliage.needsUpdate = true;
+    const updated = treeHeroGeometryStats(geometry);
+
+    expect(updated).not.toBe(first);
+    expect(updated.foliageTriangleCount).toBe(0);
+    expect(getX.mock.calls.length).toBeGreaterThan(firstScanCalls);
   });
 
   it("sums visible near-tree triangle counts from patch LOD state", () => {
