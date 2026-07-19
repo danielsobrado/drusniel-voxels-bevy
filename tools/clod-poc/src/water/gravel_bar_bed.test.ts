@@ -100,6 +100,26 @@ describe("gravel bar bed elevation", () => {
     expect(result.rejection).toBe("disabled");
   });
 
+  it("fails closed for malformed elevation limits", () => {
+    const { x, z } = candidate();
+    const result = evaluateGravelBarBedElevation(
+      x,
+      z,
+      BASE_SAMPLE,
+      FIELD_CONFIG,
+      {
+        enabled: true,
+        maxElevationM: Number.NaN,
+        minWetDepthM: -1,
+        continuityReserveM: Number.POSITIVE_INFINITY,
+        bankClearanceM: -1,
+      },
+    );
+
+    expect(result.elevationOffsetM).toBe(0);
+    expect(result.rejection).toBe("disabled");
+  });
+
   it("records deterministic acceptance and rejection counters", () => {
     const counters = createGravelBarBedCounters();
     const accepted = candidate().result;
