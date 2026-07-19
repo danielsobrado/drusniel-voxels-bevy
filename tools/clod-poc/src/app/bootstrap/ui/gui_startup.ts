@@ -142,6 +142,12 @@ export function runGuiStartup(
       postProcess,
       applyTreeQualityPreset: applyGlobalTreeQualityPreset,
     },
+    environmentQuery: {
+      getCameraPosition: () => {
+        const camera = input.floatingOrigin?.getWorldCamera(input.camera) ?? input.camera;
+        return { x: camera.position.x, z: camera.position.z };
+      },
+    },
     weather: {
       weatherController,
       applyWeatherSettings,
