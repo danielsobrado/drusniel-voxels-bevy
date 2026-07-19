@@ -79,7 +79,9 @@ async function main(): Promise<void> {
   const fixedPoses = poseReportPath
     ? extractWaterFoamAcceptancePoses(JSON.parse(readFileSync(poseReportPath, "utf8")))
     : null;
-  const defaultFolder = rendererProfile.outputSuffix ?? profile.outputFolder;
+  const defaultFolder = rendererProfile.outputSuffix
+    ? join(rendererProfile.outputSuffix, profile.outputFolder)
+    : profile.outputFolder;
   const defaultOut = join("shots/water/foam-acceptance", defaultFolder);
   const outRoot = resolveOutputPath(stringArg(args, "out", defaultOut));
   mkdirSync(outRoot, { recursive: true });
