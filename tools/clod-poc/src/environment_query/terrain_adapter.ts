@@ -39,6 +39,7 @@ export interface TerrainEnvironmentSample {
 
 export interface TerrainEnvironmentAuthority {
   sample(x: number, z: number, hintM: number): TerrainEnvironmentSample;
+  revision?(): number;
 }
 
 export interface TerrainEnvironmentQueryOptions {
@@ -46,10 +47,18 @@ export interface TerrainEnvironmentQueryOptions {
   readonly terrain: TerrainEnvironmentAuthority;
 }
 
+interface CachedTerrainSample {
+  readonly x: number;
+  readonly z: number;
+  readonly hintM: number;
+  readonly authorityRevision: number;
+  readonly sample: TerrainEnvironmentSample;
+}
+
 export class TerrainEnvironmentQuery implements EnvironmentQuery, EnvironmentBatchSampler {
   private readonly base: EnvironmentQuery & EnvironmentBatchSampler;
   private readonly terrain: TerrainEnvironmentAuthority;
-  private cached: { x: number; z: number; hintM: number; sample: TerrainEnvironmentSample } | null = null;
+  private cached: CachedTerrainSample | null = null;
 
   constructor(options: TerrainEnvironmentQueryOptions) {
     this.base = options.base;
@@ -59,9 +68,10 @@ export class TerrainEnvironmentQuery implements EnvironmentQuery, EnvironmentBat
   surfaceHeightBestEffort(x: number, z: number, hintM?: number): SurfaceQueryResult {
     const hint = resolveEnvironmentSampleHint(hintM);
     const sample = this.sampleTerrain(x, z, hint);
+    const valid = sample.valid && Number.isFinite(sample.height);
     return {
-      height: sample.valid && Number.isFinite(sample.height) ? sample.height : null,
-      meta: terrainMeta(sample, hint),
+      height: valid ? sample.height : null,
+      meta: terrainMeta(sample, hint, valid),
     };
   }
 
@@ -150,11 +160,31 @@ export class TerrainEnvironmentQuery implements EnvironmentQuery, EnvironmentBat
   }
 
   private sampleTerrain(x: number, z: number, hintM: number): TerrainEnvironmentSample {
+    const authorityRevision = this.authorityRevision();
     const cached = this.cached;
-    if (cached && cached.x === x && cached.z === z && cached.hintM === hintM) return cached.sample;
+    if (
+      cached
+      && authorityRevision >= 0
+      && cached.x === x
+      && cached.z === z
+      && cached.hintM === hintM
+      && cached.authorityRevision === authorityRevision
+    ) {
+      return cached.sample;
+    }
+
     const sample = this.terrain.sample(x, z, hintM);
-    this.cached = { x, z, hintM, sample };
+    if (authorityRevision >= 0) {
+      this.cached = { x, z, hintM, authorityRevision, sample };
+    } else {
+      this.cached = null;
+    }
     return sample;
+  }
+
+  private authorityRevision(): number {
+    const value = this.terrain.revision?.();
+    return Number.isFinite(value) && (value as number) >= 0 ? Math.floor(value as number) : -1;
   }
 }
 
