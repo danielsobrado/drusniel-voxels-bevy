@@ -32,7 +32,7 @@ describe("tree GPU ring safe update", () => {
       input.state.prepassTwins = [];
       input.state.stats = stats("idle");
     });
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -52,16 +52,18 @@ describe("tree GPU ring safe update", () => {
     expect(input.state.stats.status).toBe("failed");
     expect(input.state.stats.reason).toBe("tree dispatch failed");
     expect(input.state.failedKey).not.toBe("");
-    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith(
+      "[trees-gpu-ring] falling back to CPU: tree dispatch failed",
+    );
 
     expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
     expect(runtime.update).toHaveBeenCalledTimes(1);
-    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledTimes(1);
 
     input.settings.seed++;
     expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
     expect(runtime.update).toHaveBeenCalledTimes(2);
-    expect(console.warn).toHaveBeenCalledTimes(2);
+    expect(console.error).toHaveBeenCalledTimes(2);
   });
 
   it("tears down same-frame failed stats", () => {
@@ -75,6 +77,9 @@ describe("tree GPU ring safe update", () => {
     expect(runtime.clear).toHaveBeenCalledTimes(1);
     expect(input.state.status).toBe("fallback-cpu");
     expect(input.state.stats.reason).toBe("tree readback failed");
+    expect(console.error).toHaveBeenCalledWith(
+      "[trees-gpu-ring] falling back to CPU: tree readback failed",
+    );
   });
 
   it("reports an error when CPU fallback is disabled", () => {
@@ -86,19 +91,36 @@ describe("tree GPU ring safe update", () => {
     expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
     expect(input.state.status).toBe("error");
     expect(input.state.stats.reason).toBe("tree queue submit failed");
-    expect(console.warn).toHaveBeenCalledWith(
+    expect(console.error).toHaveBeenCalledWith(
       "[trees-gpu-ring] GPU ring disabled: tree queue submit failed",
     );
   });
 
-  it("does not repeat cleanup for failures already handled by the runtime", () => {
+  it("emits one console error for a previously silent CPU fallback", () => {
     const input = fixture(true);
+    input.gpuDevice = null;
     input.state.status = "fallback-cpu";
     runtime.update.mockReturnValue(false);
 
     expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
+    expect(input.state.loggedError).toBe("WebGPU device is unavailable");
+    expect(console.error).toHaveBeenCalledWith(
+      "[trees-gpu-ring] falling back to CPU: WebGPU device is unavailable",
+    );
+
+    expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
+    expect(console.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not duplicate an error already handled by the runtime", () => {
+    const input = fixture(true);
+    input.state.status = "fallback-cpu";
+    input.state.loggedError = "tree init failed";
+    runtime.update.mockReturnValue(false);
+
+    expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
     expect(runtime.clear).not.toHaveBeenCalled();
-    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it("returns a successful update without changing runtime state", () => {
@@ -108,7 +130,7 @@ describe("tree GPU ring safe update", () => {
     expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(true);
     expect(runtime.clear).not.toHaveBeenCalled();
     expect(input.state.failedKey).toBe("");
-    expect(console.warn).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
   });
 });
 
