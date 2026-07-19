@@ -14,6 +14,7 @@ import {
   withWaterHarness,
   type CameraPoseArgs,
   type CdpPage,
+  type WaterDebugInfo,
 } from "./water-harness.js";
 import { findWaterShotPose } from "./water-shot-scenes.js";
 import {
@@ -21,8 +22,20 @@ import {
   getWaterFoamAcceptanceProfile,
   parseWaterFoamAcceptanceQuality,
 } from "./water-foam-acceptance-profile.js";
+import {
+  evaluateWaterFoamBrowserErrorGate,
+  installWaterFoamBrowserErrorCapture,
+  readWaterFoamBrowserErrors,
+} from "./water-foam-browser-error-gate.js";
 import { extractWaterFoamAcceptancePoses } from "./water-foam-pose-parity.js";
+import {
+  applyWaterFoamRendererProfile,
+  getWaterFoamRendererProfile,
+  parseWaterFoamAcceptanceRenderer,
+  type WaterFoamAcceptanceRenderer,
+} from "./water-foam-renderer-profile.js";
 import { evaluateWaterFoamRuntimeContract } from "./water-foam-runtime-contract.js";
+import { evaluateWaterFoamWebGlRuntimeContract } from "./water-foam-webgl-runtime-contract.js";
 import {
   deriveWaterPixelMask,
   measureFoamImage,
@@ -52,12 +65,18 @@ interface SceneCapture<TPose extends CameraPoseArgs> {
   readonly files: CaptureFiles;
 }
 
+interface RendererWaterDebugInfo extends WaterDebugInfo {
+  readonly rendererBackend: WaterFoamAcceptanceRenderer;
+}
+
 async function main(): Promise<void> {
   const args = parseCliArgs(process.argv.slice(2));
   const world = Math.max(1, Math.floor(numberArg(args, "world", 16)));
   const seed = stringArg(args, "seed", "1");
   const quality = parseWaterFoamAcceptanceQuality(stringArg(args, "quality", "high"));
+  const renderer = parseWaterFoamAcceptanceRenderer(stringArg(args, "renderer", "webgpu"));
   const profile = getWaterFoamAcceptanceProfile(quality);
+  const rendererProfile = getWaterFoamRendererProfile(renderer);
   const sourceUrl = typeof args.url === "string" ? args.url : undefined;
   const poseReportPath = typeof args["pose-report"] === "string"
     ? resolveOutputPath(args["pose-report"])
@@ -65,15 +84,21 @@ async function main(): Promise<void> {
   const fixedPoses = poseReportPath
     ? extractWaterFoamAcceptancePoses(JSON.parse(readFileSync(poseReportPath, "utf8")))
     : null;
-  const defaultOut = join("shots/water/foam-acceptance", profile.outputFolder);
+  const defaultFolder = rendererProfile.outputSuffix
+    ? join(rendererProfile.outputSuffix, profile.outputFolder)
+    : profile.outputFolder;
+  const defaultOut = join("shots/water/foam-acceptance", defaultFolder);
   const outRoot = resolveOutputPath(stringArg(args, "out", defaultOut));
   mkdirSync(outRoot, { recursive: true });
 
   const report = await withWaterHarness({ url: sourceUrl, world, width: 1280, height: 720 }, async ({ page, url: baseUrl }) => {
-    const targetUrl = buildWaterFoamAcceptanceUrl(baseUrl, seed, world, quality);
+    const qualityUrl = buildWaterFoamAcceptanceUrl(baseUrl, seed, world, quality);
+    const targetUrl = applyWaterFoamRendererProfile(qualityUrl, renderer);
+    if (renderer === "webgl") await installWaterFoamBrowserErrorCapture(page);
     await navigateToFoamProfile(page, targetUrl);
-    const info = await waterDebugInfo(page);
+    const info = await waterDebugInfo(page) as RendererWaterDebugInfo;
     assertRequiredDebugModes(info.debugModes);
+    assertRendererBackend(renderer, info.rendererBackend);
 
     const rapidPose = fixedPoses?.rapid
       ?? await findWaterShotPose(page, "rapid-bed-step", info.worldCells);
@@ -104,24 +129,41 @@ async function main(): Promise<void> {
     const runtimeDiagnostics = await page.evaluate<WaterFoamRuntimeDiagnostics>(
       "window.waterDebugInfo().foam",
     );
-    const runtimeAcceptance = evaluateWaterFoamRuntimeContract(quality, runtimeDiagnostics);
+    const runtimeAcceptance = renderer === "webgl"
+      ? evaluateWaterFoamWebGlRuntimeContract(quality, runtimeDiagnostics)
+      : evaluateWaterFoamRuntimeContract(quality, runtimeDiagnostics);
+    const browserErrors = renderer === "webgl"
+      ? await readWaterFoamBrowserErrors(page)
+      : [];
+    const browserAcceptance = evaluateWaterFoamBrowserErrorGate(browserErrors);
     const acceptance = {
-      passed: visualAcceptance.passed && runtimeAcceptance.passed,
-      failures: [...visualAcceptance.failures, ...runtimeAcceptance.failures],
+      passed: visualAcceptance.passed && runtimeAcceptance.passed && browserAcceptance.passed,
+      failures: [
+        ...visualAcceptance.failures,
+        ...runtimeAcceptance.failures,
+        ...browserAcceptance.failures,
+      ],
       visual: visualAcceptance,
       runtime: runtimeAcceptance,
+      browser: browserAcceptance,
     };
     return {
-      schemaVersion: 3 as const,
+      schemaVersion: 4 as const,
       targetUrl,
       seed,
       world,
       quality,
+      renderer: {
+        requested: renderer,
+        actual: info.rendererBackend,
+        query: rendererProfile.query,
+      },
       profileQuery: profile.query,
       poseSource: poseReportPath
         ? { kind: "canonical-report" as const, path: poseReportPath }
         : { kind: "discovered" as const },
       runtimeDiagnostics,
+      browserErrors,
       captures: { rapid, smoothRiver, lakeShore },
       metrics,
       acceptance,
@@ -132,9 +174,11 @@ async function main(): Promise<void> {
   writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`foam visual report: ${reportPath}`);
   if (!report.acceptance.passed) {
-    throw new Error(`water foam visual acceptance failed for ${quality}:\n- ${report.acceptance.failures.join("\n- ")}`);
+    throw new Error(
+      `water foam visual acceptance failed for ${renderer}/${quality}:\n- ${report.acceptance.failures.join("\n- ")}`,
+    );
   }
-  console.log(`water foam visual acceptance passed for ${quality}`);
+  console.log(`water foam visual acceptance passed for ${renderer}/${quality}`);
 }
 
 async function captureScene<TPose extends CameraPoseArgs>(
@@ -275,6 +319,15 @@ function assertRequiredDebugModes(available: Readonly<Record<string, number>>): 
   const required = ["bodyMask", "depth", "foam", "final"];
   const missing = required.filter((mode) => !(mode in available));
   if (missing.length > 0) throw new Error(`water debug API is missing modes: ${missing.join(", ")}`);
+}
+
+function assertRendererBackend(
+  expected: WaterFoamAcceptanceRenderer,
+  actual: WaterFoamAcceptanceRenderer,
+): void {
+  if (actual !== expected) {
+    throw new Error(`water foam acceptance requested ${expected} but runtime reported ${String(actual)}`);
+  }
 }
 
 function delay(ms: number): Promise<void> {
