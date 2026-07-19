@@ -22,6 +22,11 @@ import {
   getWaterFoamAcceptanceProfile,
   parseWaterFoamAcceptanceQuality,
 } from "./water-foam-acceptance-profile.js";
+import {
+  evaluateWaterFoamBrowserErrorGate,
+  installWaterFoamBrowserErrorCapture,
+  readWaterFoamBrowserErrors,
+} from "./water-foam-browser-error-gate.js";
 import { extractWaterFoamAcceptancePoses } from "./water-foam-pose-parity.js";
 import {
   applyWaterFoamRendererProfile,
@@ -89,6 +94,7 @@ async function main(): Promise<void> {
   const report = await withWaterHarness({ url: sourceUrl, world, width: 1280, height: 720 }, async ({ page, url: baseUrl }) => {
     const qualityUrl = buildWaterFoamAcceptanceUrl(baseUrl, seed, world, quality);
     const targetUrl = applyWaterFoamRendererProfile(qualityUrl, renderer);
+    if (renderer === "webgl") await installWaterFoamBrowserErrorCapture(page);
     await navigateToFoamProfile(page, targetUrl);
     const info = await waterDebugInfo(page) as RendererWaterDebugInfo;
     assertRequiredDebugModes(info.debugModes);
@@ -126,11 +132,20 @@ async function main(): Promise<void> {
     const runtimeAcceptance = renderer === "webgl"
       ? evaluateWaterFoamWebGlRuntimeContract(quality, runtimeDiagnostics)
       : evaluateWaterFoamRuntimeContract(quality, runtimeDiagnostics);
+    const browserErrors = renderer === "webgl"
+      ? await readWaterFoamBrowserErrors(page)
+      : [];
+    const browserAcceptance = evaluateWaterFoamBrowserErrorGate(browserErrors);
     const acceptance = {
-      passed: visualAcceptance.passed && runtimeAcceptance.passed,
-      failures: [...visualAcceptance.failures, ...runtimeAcceptance.failures],
+      passed: visualAcceptance.passed && runtimeAcceptance.passed && browserAcceptance.passed,
+      failures: [
+        ...visualAcceptance.failures,
+        ...runtimeAcceptance.failures,
+        ...browserAcceptance.failures,
+      ],
       visual: visualAcceptance,
       runtime: runtimeAcceptance,
+      browser: browserAcceptance,
     };
     return {
       schemaVersion: 4 as const,
@@ -148,6 +163,7 @@ async function main(): Promise<void> {
         ? { kind: "canonical-report" as const, path: poseReportPath }
         : { kind: "discovered" as const },
       runtimeDiagnostics,
+      browserErrors,
       captures: { rapid, smoothRiver, lakeShore },
       metrics,
       acceptance,
