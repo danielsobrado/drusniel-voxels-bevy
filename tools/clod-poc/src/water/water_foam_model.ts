@@ -1,3 +1,4 @@
+export const WATER_FOAM_MODEL_REVISION = 3;
 export const WATER_FOAM_MAX_COVERAGE = 0.52;
 export const WATER_FOAM_PATTERN_START = 0.52;
 export const WATER_FOAM_PATTERN_END = 0.88;
