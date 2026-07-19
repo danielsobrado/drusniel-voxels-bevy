@@ -136,8 +136,11 @@
     "water:foam:accept:high": "tsx tools/water-foam-visual-acceptance.ts --quality=high",
     "water:foam:accept:low": "tsx tools/water-foam-visual-acceptance.ts --quality=low",
     "water:foam:accept:matrix": "tsx tools/water-foam-quality-matrix.ts",
+    "water:foam:accept:shade": "npm run water:foam:accept:shade:high && npm run water:foam:accept:shade:low",
+    "water:foam:accept:shade:high": "tsx tools/water-foam-shade-acceptance.ts --quality=high",
+    "water:foam:accept:shade:low": "tsx tools/water-foam-shade-acceptance.ts --quality=low",
     "water:verify": "npm run water:report && npm run water:find && npm run water:probe && npm run water:shot -- --scene all --out shots/water/verify",
-    "water:verify:full": "npm run water:verify && npm run water:foam:accept:matrix"
+    "water:verify:full": "npm run water:verify && npm run water:foam:accept:matrix && npm run water:foam:accept:shade"
   },
   "dependencies": {
     "fflate": "^0.8.3",

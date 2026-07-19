@@ -1,4 +1,5 @@
 import { getSunLightGpuAtlas } from "../terrain/sun_visibility/sun_light_gpu_atlas.js";
+import { getWaterFoamDistanceFadeState } from "./water_foam_distance.js";
 import {
   WATER_FOAM_MAX_COVERAGE,
   WATER_FOAM_MODEL_REVISION,
@@ -12,7 +13,7 @@ import { resolveWaterQualityTier, type WaterQualityTier } from "./water_quality_
 
 export interface WaterFoamRuntimeDiagnostics {
   readonly modelRevision: number;
-  readonly modelName: "coherent-fbm-flow-sun-v3";
+  readonly modelName: "coherent-fbm-flow-sun-distance-v4";
   readonly qualityTier: WaterQualityTier;
   readonly maxCoverage: number;
   readonly patternStart: number;
@@ -22,6 +23,13 @@ export interface WaterFoamRuntimeDiagnostics {
   readonly shadeCoverageFloor: number;
   readonly rapidEligibility: "speed-times-drop-times-river";
   readonly cpuFieldSamples: number;
+  readonly distanceFade: {
+    readonly valid: boolean;
+    readonly version: number;
+    readonly startM: number;
+    readonly endM: number;
+    readonly authority: "camera-distance-shared";
+  };
   readonly sunAtlas: {
     readonly valid: number;
     readonly version: number;
@@ -38,9 +46,10 @@ export function getWaterFoamRuntimeDiagnostics(
 ): WaterFoamRuntimeDiagnostics {
   const atlas = getSunLightGpuAtlas();
   const image = atlas.texture.image as { width?: unknown; height?: unknown };
+  const distanceFade = getWaterFoamDistanceFadeState();
   return {
     modelRevision: WATER_FOAM_MODEL_REVISION,
-    modelName: "coherent-fbm-flow-sun-v3",
+    modelName: "coherent-fbm-flow-sun-distance-v4",
     qualityTier: resolveWaterQualityTier(searchParams),
     maxCoverage: WATER_FOAM_MAX_COVERAGE,
     patternStart: WATER_FOAM_PATTERN_START,
@@ -50,6 +59,13 @@ export function getWaterFoamRuntimeDiagnostics(
     shadeCoverageFloor: WATER_FOAM_SHADE_COVERAGE_FLOOR,
     rapidEligibility: "speed-times-drop-times-river",
     cpuFieldSamples: 0,
+    distanceFade: {
+      valid: distanceFade.valid,
+      version: distanceFade.version,
+      startM: distanceFade.startM,
+      endM: distanceFade.endM,
+      authority: "camera-distance-shared",
+    },
     sunAtlas: {
       valid: atlas.valid,
       version: atlas.version,

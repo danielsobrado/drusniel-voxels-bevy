@@ -1,8 +1,22 @@
+import {
+  createTreeImpostorMipJob,
+  type TreeImpostorMipLevel,
+} from "./tree_impostor_mipmaps.js";
+
 const BYTES_PER_PIXEL = 4;
 const COVERAGE_THRESHOLD = 8;
 const DEFAULT_DILATION_OPERATIONS = 1024;
 const MAX_ROW_FLIP_OPERATIONS = 16;
 const MAX_DILATION_OPERATIONS = 4096;
+
+export type TreeImpostorPixelChannel = "albedo" | "normal-depth";
+
+export interface TreeImpostorPixelLayout {
+  tileSize: number;
+  channel: TreeImpostorPixelChannel;
+  coveragePixels: Uint8Array;
+  mipmaps: readonly TreeImpostorMipLevel[] | null;
+}
 
 export interface TreeImpostorAtlasPixels {
   albedo: Uint8Array;
@@ -28,6 +42,12 @@ interface TileDilationState {
   tail: number;
   cursor: number;
   phase: "coverage" | "seed" | "flood";
+}
+
+const PIXEL_LAYOUTS = new WeakMap<Uint8Array, TreeImpostorPixelLayout>();
+
+export function treeImpostorPixelLayoutFor(pixels: Uint8Array): TreeImpostorPixelLayout | null {
+  return PIXEL_LAYOUTS.get(pixels) ?? null;
 }
 
 export function viewTreeImpostorPixels(raw: ArrayBufferView, expectedLength: number): Uint8Array {
@@ -86,14 +106,13 @@ export function flipTreeImpostorPixelRows(pixels: Uint8Array, width: number, hei
   }
 }
 
-export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixels): TreeImpostorPixelJob {
+function createTreeImpostorDilationJob(input: TreeImpostorAtlasPixels): TreeImpostorPixelJob {
   const { albedo, normalDepth, width, height, tileSize } = input;
   validatePixelBuffer(albedo, width, height, "tree impostor albedo dilation");
   validatePixelBuffer(normalDepth, width, height, "tree impostor normal-depth dilation");
   if (!Number.isInteger(tileSize) || tileSize <= 0 || width % tileSize !== 0 || height % tileSize !== 0) {
     throw new Error(`tree impostor tile size ${tileSize} does not divide ${width}x${height}`);
   }
-
   const tilesX = width / tileSize;
   const tilesY = height / tileSize;
   const totalTiles = tilesX * tilesY;
@@ -235,11 +254,60 @@ export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixel
   };
 }
 
+export function createTreeImpostorAtlasDilationJob(input: TreeImpostorAtlasPixels): TreeImpostorPixelJob {
+  const layouts = registerPixelLayouts(input.albedo, input.normalDepth, input.tileSize);
+  const dilation = createTreeImpostorDilationJob(input);
+  const mipmaps = createTreeImpostorMipJob(input);
+  let phase: "dilation" | "mipmaps" | "done" = "dilation";
+
+  return {
+    step(maxOperations = DEFAULT_DILATION_OPERATIONS): boolean {
+      if (phase === "dilation") {
+        if (!dilation.step(maxOperations)) return false;
+        phase = "mipmaps";
+        return false;
+      }
+      if (phase === "mipmaps") {
+        if (!mipmaps.step(maxOperations)) return false;
+        const result = mipmaps.result();
+        layouts.albedo.mipmaps = result.albedo;
+        layouts.normalDepth.mipmaps = result.normalDepth;
+        phase = "done";
+      }
+      return true;
+    },
+    completed: () => dilation.completed(),
+    total: () => dilation.total(),
+  };
+}
+
 export function dilateTreeImpostorAtlasTiles(input: TreeImpostorAtlasPixels): void {
   const job = createTreeImpostorAtlasDilationJob(input);
   while (!job.step(Number.MAX_SAFE_INTEGER)) {
     // Synchronous compatibility path.
   }
+}
+
+function registerPixelLayouts(
+  albedo: Uint8Array,
+  normalDepth: Uint8Array,
+  tileSize: number,
+): { albedo: TreeImpostorPixelLayout; normalDepth: TreeImpostorPixelLayout } {
+  const albedoLayout: TreeImpostorPixelLayout = {
+    tileSize,
+    channel: "albedo",
+    coveragePixels: albedo,
+    mipmaps: null,
+  };
+  const normalDepthLayout: TreeImpostorPixelLayout = {
+    tileSize,
+    channel: "normal-depth",
+    coveragePixels: albedo,
+    mipmaps: null,
+  };
+  PIXEL_LAYOUTS.set(albedo, albedoLayout);
+  PIXEL_LAYOUTS.set(normalDepth, normalDepthLayout);
+  return { albedo: albedoLayout, normalDepth: normalDepthLayout };
 }
 
 function validatePixelBuffer(pixels: Uint8Array, width: number, height: number, operation: string): void {
