@@ -57,6 +57,7 @@ import { buildWaterBodyPresetNodes } from "./water_node_body_presets.js";
 import { buildWaterStaticGridNodes } from "./water_node_static_grid.js";
 import { buildWaterAtlasGridNodes } from "./water_node_atlas_grid.js";
 import { buildWaterGlitter, buildWaterSuspendedScatter } from "./water_node_optics.js";
+import { buildWaterFoamNodes } from "./water_foam_nodes.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // three 0.184's TSL node graph types are intentionally loose: extension methods
@@ -113,11 +114,9 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uRiverRapidNormalBoost = uniform(riverMaterial.rapidNormalBoost) as TslNode;
   const uRiverBankFoamStrength = uniform(riverMaterial.bankFoamStrength) as TslNode;
   const uRiverRapidFoamStrength = uniform(riverMaterial.rapidFoamStrength) as TslNode;
-  const uRiverFoamStreakStrength = uniform(riverMaterial.foamStreakStrength) as TslNode;
   const uRiverShallowBankTintStrength = uniform(riverMaterial.shallowBankTintStrength) as TslNode;
   const uRiverCenterChannelDarkening = uniform(riverMaterial.centerChannelDarkening) as TslNode;
 
-  // Refraction uniforms
   const uRefrStrength = uniform(u.uRefraction.strength) as TslNode;
   const uRefrValidationBias = uniform(u.uRefraction.depthValidationBias) as TslNode;
   const uRefrAbsorption = uniform(new THREE.Vector3(u.uRefraction.absorptionR, u.uRefraction.absorptionG, u.uRefraction.absorptionB)) as TslNode;
@@ -125,7 +124,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uRefrEnabled = uniform(u.uRefraction.enabled ? 1 : 0) as TslNode;
   const uRefrMaxThickness = uniform(u.uRefraction.maxThickness) as TslNode;
 
-  // Reflection uniforms
   const uReflSSREnabled = uniform(u.uReflection.ssrEnabled ? 1 : 0) as TslNode;
   const uReflMaxSteps = uniform(u.uReflection.maxSteps) as TslNode;
   const uReflStepScale = uniform(u.uReflection.stepScale) as TslNode;
@@ -134,7 +132,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uReflSkyStrength = uniform(u.uReflection.skyFallbackStrength) as TslNode;
   const uReflTerrainStrength = uniform(u.uReflection.terrainFallbackStrength) as TslNode;
 
-  // Caustics uniforms
   const uCausticsEnabled = uniform(u.uCausticsEnabled.value) as TslNode;
   const uCausticsGain = uniform(u.uCausticsGain.value) as TslNode;
   const uCausticsScale = uniform(u.uCausticsScale.value) as TslNode;
@@ -145,8 +142,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uCausticsSunGateStart = uniform(causticsCfg.sunGateStart) as TslNode;
   const uCausticsSunGateEnd = uniform(causticsCfg.sunGateEnd) as TslNode;
 
-  // Atlas-driven (Phase W2) or static-topology (Phase 5b) vertex-stage sampling,
-  // matching waterPerfNodeMaterial so the HQ and perf paths cannot drift.
   const atlasGrid = params.atlasGrid ? buildWaterAtlasGridNodes(params.atlasGrid) : null;
   const staticGrid = !atlasGrid && params.staticGrid ? buildWaterStaticGridNodes(params.staticGrid) : null;
   const grid = atlasGrid ?? staticGrid;
@@ -157,7 +152,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const aShoreDistance = (grid ? grid.shoreDistance : attribute("aShoreDistance", "float")) as TslNode;
   const aLevel = attribute("aLevel", "float") as TslNode;
   const body = buildWaterBodyPresetNodes(aBodyKind, params.visual.bodies);
-
   const worldPos: TslNode = positionWorld;
 
   const fragment = Fn(() => {
@@ -175,27 +169,15 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       .and(pz.greaterThan(uInnerRect.y))
       .and(pz.lessThan(uInnerRect.w));
     const depth: TslNode = worldPos.y.sub(aTerrainY);
-    // Discard clipmap-hole pixels, dry vertices, outside world, and outside body mask.
     const baseDiscard: TslNode = or(
       outsideWorld,
-      or(
-        insideInner,
-        or(
-          depth.lessThanEqual(float(0)),
-          aBodyMask.lessThanEqual(float(0))
-        )
-      )
+      or(insideInner, or(depth.lessThanEqual(float(0)), aBodyMask.lessThanEqual(float(0)))),
     );
     (grid ? or(baseDiscard, grid.wallDiscard(depth, aFlow.z)) : baseDiscard).discard();
 
-    // Per-channel Beer–Lambert depth response from the fragment's body preset (Phase
-    // 7b), matching waterPerfNodeMaterial and the WebGL fragment so water colour does
-    // not depend on which material path renders it. Secondary terms keep a scalar mean.
     const depthMixRgb: TslNode = float(1).sub(exp(depth.negate().mul(body.absorption)));
     const depthNorm: TslNode = depthMixRgb.x.add(depthMixRgb.y).add(depthMixRgb.z).div(3);
 
-    // Procedural caustics: layered sine waves, fading with depth.
-    // Gated by uCausticsEnabled — produces 0 when disabled.
     const causticVal: TslNode = Fn(() => {
       const cuv: TslNode = worldPos.xz.mul(uCausticsScale);
       const ct: TslNode = uTime.mul(uCausticsSpeed);
@@ -219,18 +201,21 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     const riverWeight: TslNode = smoothstep(0.001, 0.02, flowSpeed);
     const rapidSpeed: TslNode = smoothstep(uFoamSpeedStart, uFoamSpeedEnd, flowSpeed);
     const rapidDrop: TslNode = smoothstep(uFoamDropStart, uFoamDropEnd, flowDrop);
-    const rapidMask: TslNode = clamp(rapidSpeed.mul(0.45).add(rapidDrop.mul(0.85)).mul(riverWeight), 0.0, 1.0);
-    const mixedDir: TslNode = mix(breezeDir, riverDir, riverWeight) as TslNode;
-    const advectDir: TslNode = normalize(mixedDir);
+    const rapidMask: TslNode = rapidSpeed.mul(rapidDrop).mul(riverWeight);
+    const advectDir: TslNode = normalize(mix(breezeDir, riverDir, riverWeight) as TslNode);
     const breezeSpeed: TslNode = max(abs(uLakeBreeze.x), abs(uLakeBreeze.y));
-    const advectSpeed: TslNode = max(breezeSpeed, flowSpeed.mul(float(1.0).add(rapidMask.mul(0.9)))).mul(uRippleSpeed);
+    const advectSpeed: TslNode = max(
+      breezeSpeed,
+      flowSpeed.mul(float(1.0).add(rapidMask.mul(0.9))),
+    ).mul(uRippleSpeed);
     const phaseA: TslNode = fract(uTime.mul(uRippleCycle));
     const phaseB: TslNode = fract(uTime.mul(uRippleCycle).add(0.5));
     const blend: TslNode = abs(phaseA.sub(0.5)).mul(2.0);
     const advectA: TslNode = advectDir.mul(phaseA.mul(uRippleLoopDistance).mul(advectSpeed));
     const advectB: TslNode = advectDir.mul(phaseB.mul(uRippleLoopDistance).mul(advectSpeed));
     const tau = 6.28318530718;
-    const uvA: TslNode = worldPos.xz.mul(uRippleScaleA).add(advectDir.mul(phaseA.mul(uRippleLoopDistance).mul(advectSpeed)));
+    const uvA: TslNode = worldPos.xz.mul(uRippleScaleA)
+      .add(advectDir.mul(phaseA.mul(uRippleLoopDistance).mul(advectSpeed)));
     const uvB: TslNode = worldPos.xz.mul(uRippleScaleB)
       .add(advectDir.mul(phaseB.mul(uRippleLoopDistance).mul(advectSpeed)))
       .add(vec2(17.31, -9.47));
@@ -244,8 +229,16 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       .add(cos(uvB.x.sub(uvB.y).mul(0.61).add(phaseB.mul(tau * 0.9))).mul(uRippleStrengthB));
     const flowCoord: TslNode = vec2(dot(worldPos.xz, riverDir), dot(worldPos.xz, sideDir));
     const channelPhase: TslNode = uTime.mul(advectSpeed).mul(1.35);
-    const channelWave: TslNode = sin(flowCoord.x.mul(uRippleScaleA.mul(5.5)).sub(channelPhase).add(sin(flowCoord.y.mul(0.08)).mul(0.7)));
-    const sideRipple: TslNode = cos(flowCoord.y.mul(uRippleScaleB.mul(4.0)).add(flowCoord.x.mul(0.018)).add(channelPhase.mul(0.45)));
+    const channelWave: TslNode = sin(
+      flowCoord.x.mul(uRippleScaleA.mul(5.5))
+        .sub(channelPhase)
+        .add(sin(flowCoord.y.mul(0.08)).mul(0.7)),
+    );
+    const sideRipple: TslNode = cos(
+      flowCoord.y.mul(uRippleScaleB.mul(4.0))
+        .add(flowCoord.x.mul(0.018))
+        .add(channelPhase.mul(0.45)),
+    );
     const channelGrad: TslNode = riverDir.mul(channelWave.mul(uRippleStrengthA).mul(uRiverFlowNormalStrength))
       .add(sideDir.mul(sideRipple.mul(uRippleStrengthB).mul(uRiverCrossCurrentStrength)))
       .mul(riverWeight)
@@ -267,7 +260,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     const reflY: TslNode = reflectDir.y;
     const reflYClamped: TslNode = max(reflY, float(0.0));
     const sunDot: TslNode = max(dot(reflectDir, sunDir), float(0.0));
-
     const horizonColor: TslNode = mix(
       vec3(0.85, 0.55, 0.35),
       vec3(0.55, 0.70, 0.90),
@@ -303,17 +295,34 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     const shallowTeal: TslNode = mix(body.shallow, vec3(0.0, 0.45, 0.62), float(0.35));
     const shallowEdge: TslNode = float(1).sub(smoothstep(float(0.18), float(1.8), depth));
     const channelCenter: TslNode = smoothstep(float(0.85), float(3.6), depth).mul(riverWeight);
-    const shallowBankColor: TslNode = mix(shallowTeal, vec3(0.02, 0.50, 0.46), clamp(uRiverShallowBankTintStrength.mul(0.42), 0.0, 1.0));
-    const riverCenterColor: TslNode = mix(deepBlue, vec3(0.0, 0.055, 0.13), clamp(uRiverCenterChannelDarkening.mul(0.35), 0.0, 1.0));
+    const shallowBankColor: TslNode = mix(
+      shallowTeal,
+      vec3(0.02, 0.50, 0.46),
+      clamp(uRiverShallowBankTintStrength.mul(0.42), 0.0, 1.0),
+    );
+    const riverCenterColor: TslNode = mix(
+      deepBlue,
+      vec3(0.0, 0.055, 0.13),
+      clamp(uRiverCenterChannelDarkening.mul(0.35), 0.0, 1.0),
+    );
     const riverTintColor: TslNode = mix(shallowBankColor, riverCenterColor, channelCenter);
     const waterColorRaw: TslNode = mix(shallowTeal, deepBlue, depthMixRgb);
-    const waterColor: TslNode = mix(waterColorRaw, riverTintColor, clamp(riverWeight.mul(0.72).mul(uRiverShallowBankTintStrength), 0.0, 1.0));
+    const waterColor: TslNode = mix(
+      waterColorRaw,
+      riverTintColor,
+      clamp(riverWeight.mul(0.72).mul(uRiverShallowBankTintStrength), 0.0, 1.0),
+    );
     const waterTint: TslNode = mix(
       waterColor,
       shallowBankColor,
-      body.turbidity.mul(float(1).sub(depthNorm)).mul(0.50).add(shallowEdge.mul(riverWeight).mul(0.18).mul(uRiverShallowBankTintStrength)),
+      body.turbidity
+        .mul(float(1).sub(depthNorm))
+        .mul(0.50)
+        .add(shallowEdge.mul(riverWeight).mul(0.18).mul(uRiverShallowBankTintStrength)),
     );
-    const waterBase: TslNode = waterTint.add(causticVal.mul(vec3(0.10, 0.18, 0.16))).add(suspended.color);
+    const waterBase: TslNode = waterTint
+      .add(causticVal.mul(vec3(0.10, 0.18, 0.16)))
+      .add(suspended.color);
 
     const screenAvail = getWaterScreenResources().available;
     const refrFallback: TslNode = waterBase;
@@ -321,7 +330,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
 
     const refrCol: TslNode = Fn(() => {
       if (!screenAvail) return refrFallback;
-
       const dist: TslNode = cameraPosition.sub(worldPos).length();
       const refrK: TslNode = clamp(float(9).div(dist.max(1)), 0.04, 1).mul(uRefrStrength);
       const ruv: TslNode = screenUV.add(normal.xz.mul(refrK));
@@ -349,7 +357,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     const ssrHit: TslNode = float(0).toVar();
     const ssrCol: TslNode = Fn(() => {
       if (!screenAvail) return ssrFallback;
-
       const toCam: TslNode = cameraPosition.sub(worldPos);
       const camDist: TslNode = toCam.length();
       const viewDirN: TslNode = toCam.div(camDist.max(1e-4));
@@ -366,12 +373,10 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
         const t: TslNode = float(i).add(jitter).mul(stepLen);
         const pV: TslNode = positionView.add(dirV.mul(t));
         const uvS: TslNode = getScreenPosition(pV, cameraProjectionMatrix);
-
         If(
           uvS.x.lessThan(0).or(uvS.x.greaterThan(1)).or(uvS.y.lessThan(0)).or(uvS.y.greaterThan(1)),
           () => { Break(); },
         );
-
         const zS: TslNode = perspectiveDepthToViewZ(viewportDepthTexture(uvS).x, cameraNear, cameraFar);
         If(
           zS.greaterThan(pV.z.add(0.06)).and(zS.lessThan(pV.z.add(stepLen.mul(2.6).add(0.7)))),
@@ -388,7 +393,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       const edge: TslNode = hitUv.sub(0.5).abs().mul(2);
       const edgeFade: TslNode = smoothstep(uReflEdgeFadeStart, uReflEdgeFadeEnd, edge.x.max(edge.y));
       const scene: TslNode = viewportSharedTexture(hitUv).rgb;
-
       return mix(missFallback, scene, ssrHit.mul(edgeFade));
     })();
 
@@ -397,49 +401,33 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       mix(waterBase, waterEmissive, float(0.6)),
       mix(waterBase, skyReflection, clamp(fres.mul(0.72).mul(body.reflectionDamping), 0.0, 0.82)),
     );
-    // Two-phase decorrelated foam : two noise scales, each blended
-    // across both phases, with variance renormalization to avoid flat midpoints.
-    const foamHashA1: TslNode = fract(sin(dot(worldPos.xz.mul(uFoamNoiseScale).add(advectA.mul(float(0.7))), vec2(12.9898, 78.233))).mul(43758.5453));
-    const foamHashB1: TslNode = fract(sin(dot(worldPos.xz.add(vec2(3.71, 1.13)).mul(uFoamNoiseScale).add(advectB.mul(float(0.7))), vec2(12.9898, 78.233))).mul(43758.5453));
-    const foamHashA2: TslNode = fract(sin(dot(worldPos.xz.mul(uFoamNoiseScale.mul(0.37)).add(advectA.mul(float(0.41))).add(vec2(5.17, -3.29)), vec2(12.9898, 78.233))).mul(43758.5453));
-    const foamHashB2: TslNode = fract(sin(dot(worldPos.xz.add(vec2(7.43, 2.81)).mul(uFoamNoiseScale.mul(0.37)).add(advectB.mul(float(0.41))), vec2(12.9898, 78.233))).mul(43758.5453));
-    const streakA: TslNode = smoothstep(float(0.48), float(0.82), sin(flowCoord.x.mul(0.17).sub(uTime.mul(advectSpeed).mul(2.8)).add(sin(flowCoord.y.mul(0.33)).mul(0.6))).mul(0.5).add(0.5));
-    const streakB: TslNode = smoothstep(float(0.52), float(0.86), sin(flowCoord.x.mul(0.31).add(flowCoord.y.mul(0.19)).sub(uTime.mul(advectSpeed).mul(3.7))).mul(0.5).add(0.5));
-    const varNorm: TslNode = blend.mul(blend).add(float(1).sub(blend).mul(float(1).sub(blend))).sqrt();
-    const foamBlend: TslNode = mix(foamHashA1, foamHashB1, blend).sub(0.5).div(varNorm.max(0.01)).add(0.5);
-    const foamDetail: TslNode = mix(foamHashA2, foamHashB2, blend).sub(0.5).div(varNorm.max(0.01)).add(0.5);
-    const flowBreakup: TslNode = clamp(
-      foamBlend.mul(0.42)
-        .add(foamDetail.mul(0.26))
-        .add(streakA.mul(0.20).mul(uRiverFoamStreakStrength))
-        .add(streakB.mul(0.12).mul(uRiverFoamStreakStrength)),
-      0.0,
-      1.0,
-    );
-    const breakup: TslNode = smoothstep(
-      0.35,
-      0.82,
-      mix(foamBlend.mul(0.62).add(foamDetail.mul(0.38)), flowBreakup, clamp(riverWeight.mul(0.85).mul(uRiverFoamStreakStrength), 0.0, 1.0)),
-    );
-    const wetFade: TslNode = smoothstep(0.005, 0.05, depth).mul(aBodyMask);
-    // Shore contact from real metres-to-shoreline where hydrology provides it, with the
-    // depth band as the fallback for sources without a shoreline metric.
-    const bankContact: TslNode = max(
-      float(1).sub(smoothstep(uShoreFoamStart, uShoreFoamEnd, depth)),
-      float(1).sub(smoothstep(uShoreDistFoamStart, uShoreDistFoamEnd, aShoreDistance)),
-    );
-    const shore: TslNode = bankContact.mul(wetFade).mul(breakup).mul(uFoamShoreStrength);
-    const riverRapids: TslNode = clamp(rapidSpeed.mul(0.35).add(rapidDrop.mul(0.95)).add(rapidSpeed.mul(rapidDrop).mul(0.70)), 0.0, 1.0)
-      .mul(uRiverRapidFoamStrength);
-    const riverBankFoam: TslNode = bankContact.mul(riverWeight).mul(float(0.35).add(rapidDrop.mul(0.65)));
-    const riverFoam: TslNode = clamp(riverRapids.add(riverBankFoam.mul(uRiverBankFoamStrength)), 0.0, 1.0)
-      .mul(uFoamRiverStrength)
-      .mul(wetFade)
-      .mul(float(0.18).add(breakup.mul(0.82)));
-    const foam: TslNode = clamp(shore.add(riverFoam), 0.0, 1.0);
+    const foamNodes = buildWaterFoamNodes({
+      worldXZ: worldPos.xz,
+      advectA,
+      advectB,
+      phaseBlend: blend,
+      noiseScale: uFoamNoiseScale,
+      depth,
+      shoreDistance: aShoreDistance,
+      bodyMask: aBodyMask,
+      riverWeight,
+      rapidSpeed,
+      rapidDrop,
+      shoreFoamStart: uShoreFoamStart,
+      shoreFoamEnd: uShoreFoamEnd,
+      shoreDistanceStart: uShoreDistFoamStart,
+      shoreDistanceEnd: uShoreDistFoamEnd,
+      shoreStrength: uFoamShoreStrength,
+      riverStrength: uFoamRiverStrength,
+      bankStrength: uRiverBankFoamStrength,
+      rapidStrength: uRiverRapidFoamStrength,
+    });
+    const foam: TslNode = foamNodes.coverage;
 
     const backlit: TslNode = pow(max(dot(viewDir, sunDir.negate()), float(0.0)), float(4.0)).mul(0.30);
-    const crestScatter: TslNode = smoothstep(float(0.45), float(0.95), foamBlend).mul(0.24).add(rapidMask.mul(0.18));
+    const crestScatter: TslNode = smoothstep(float(0.45), float(0.95), foamNodes.pattern)
+      .mul(0.24)
+      .add(rapidMask.mul(0.18));
     const sss: TslNode = mix(vec3(0.01, 0.04, 0.14), shallowTeal, float(0.55))
       .mul(backlit.add(crestScatter))
       .mul(float(1).sub(depthNorm.mul(0.45)));
@@ -454,13 +442,21 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     });
 
     const finalWater: TslNode = finalLit.add(sss).add(sunSpec);
+    const waterLuminance: TslNode = dot(finalLit, vec3(0.2126, 0.7152, 0.0722));
+    const foamLighting: TslNode = clamp(
+      waterLuminance
+        .mul(0.55)
+        .add(max(dot(normal, sunDir), float(0.0)).mul(0.35))
+        .add(0.22),
+      0.18,
+      0.95,
+    );
+    const litFoam: TslNode = uFoam.mul(foamLighting);
     const finalColor: TslNode = mix(
-      mix(finalWater, uFoam, foam),
+      mix(finalWater, litFoam, foam),
       waterLevelColorTsl(aLevel),
       uClipmapTint.mul(0.18),
     );
-    // Soft waterline (W3): dissolve alpha over the first ~35 cm of depth so shorelines
-    // fade out on the terrain instead of ending on a hard texel-staircase edge.
     const shoreFade: TslNode = smoothstep(float(0.02), float(0.35), depth);
     const alpha: TslNode = clamp(uAlpha.add(fres.mul(0.18)), 0.0, 1.0).mul(shoreFade);
 
@@ -469,7 +465,11 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     const fresCol: TslNode = vec3(fres);
     const maskCol: TslNode = vec3(aBodyMask);
     const lv: TslNode = waterLevelColorTsl(aLevel);
-    const flowCol: TslNode = vec3(riverDir.x.mul(0.5).add(0.5), riverDir.y.mul(0.5).add(0.5), clamp(riverRapids, 0.0, 1.0));
+    const flowCol: TslNode = vec3(
+      riverDir.x.mul(0.5).add(0.5),
+      riverDir.y.mul(0.5).add(0.5),
+      clamp(foamNodes.rapid, 0.0, 1.0),
+    );
     const refrDebugCol: TslNode = waterTint;
     const reflDebugCol: TslNode = skyReflection;
     const ssrHitCol: TslNode = vec3(ssrHit, float(0).sub(ssrHit).add(1).mul(0.3), float(0));
@@ -581,10 +581,16 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       uInnerRect.value.set(minX, minZ, maxX, maxZ);
     },
     setLevelId: () => { /* level carried per-vertex via aLevel */ },
-    setClipmapTint: (enabled) => { u.uClipmapTint.value = enabled ? 1 : 0; uClipmapTint.value = u.uClipmapTint.value; },
+    setClipmapTint: (enabled) => {
+      u.uClipmapTint.value = enabled ? 1 : 0;
+      uClipmapTint.value = u.uClipmapTint.value;
+    },
     setWireframe: (enabled) => { material.wireframe = enabled; material.needsUpdate = true; },
     updateCamera: (pos) => { u.uCameraPos.value.copy(pos); uCameraPos.value.copy(pos); },
-    updateSunDirection: (dir) => { u.uSunDir.value.copy(dir).normalize(); uSunDir.value.copy(u.uSunDir.value); },
+    updateSunDirection: (dir) => {
+      u.uSunDir.value.copy(dir).normalize();
+      uSunDir.value.copy(u.uSunDir.value);
+    },
     updateVisual: syncVisual,
     dispose: () => { material.dispose(); },
   };
