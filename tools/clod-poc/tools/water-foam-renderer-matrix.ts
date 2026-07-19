@@ -1,22 +1,27 @@
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   WATER_FOAM_ACCEPTANCE_QUALITIES,
+  type WaterFoamAcceptanceQuality,
+} from "./water-foam-acceptance-profile.js";
+import {
   numberArg,
   parseCliArgs,
   resolveOutputPath,
   stringArg,
 } from "./water-harness.js";
-import type { WaterFoamAcceptanceQuality } from "./water-foam-acceptance-profile.js";
 import {
   assertWaterFoamAcceptancePosesMatch,
   extractWaterFoamAcceptancePoses,
   type WaterFoamAcceptancePoses,
 } from "./water-foam-pose-parity.js";
-import { evaluateWaterFoamQualityParity } from "./water-foam-quality-parity-contract.js";
+import {
+  evaluateWaterFoamQualityParity,
+  type WaterFoamQualityParityResult,
+} from "./water-foam-quality-parity-contract.js";
 import {
   evaluateWaterFoamRendererParity,
   type WaterFoamRendererParityResult,
@@ -165,6 +170,7 @@ function runLeg(options: {
   const output = join(options.outRoot, options.renderer, options.quality);
   const reportPath = join(output, "report.json");
   mkdirSync(output, { recursive: true });
+  rmSync(reportPath, { force: true });
   const failures: string[] = [];
 
   if (options.renderer !== "webgpu" || options.quality !== "high") {
@@ -187,16 +193,16 @@ function runLeg(options: {
   if (options.sourceUrl) childArgs.push(`--url=${options.sourceUrl}`);
   if (options.canonicalReportPath) childArgs.push(`--pose-report=${options.canonicalReportPath}`);
 
-  const process = spawnSync(process.execPath, childArgs, {
+  const child = spawnSync(process.execPath, childArgs, {
     cwd: process.cwd(),
     env: process.env,
     stdio: "inherit",
   });
-  if (process.error) failures.push(process.error.message);
-  if (process.status !== 0) failures.push(`acceptance process exited with status ${String(process.status)}`);
+  if (child.error) failures.push(child.error.message);
+  if (child.status !== 0) failures.push(`acceptance process exited with status ${String(child.status)}`);
   if (!existsSync(reportPath)) {
     failures.push(`acceptance report was not written: ${reportPath}`);
-    return failedLeg(options.renderer, options.quality, reportPath, failures, process.status);
+    return failedLeg(options.renderer, options.quality, reportPath, failures, child.status);
   }
 
   let parsed: ParsedReport;
@@ -204,7 +210,7 @@ function runLeg(options: {
     parsed = JSON.parse(readFileSync(reportPath, "utf8")) as ParsedReport;
   } catch (error) {
     failures.push(`could not parse acceptance report: ${message(error)}`);
-    return failedLeg(options.renderer, options.quality, reportPath, failures, process.status, true);
+    return failedLeg(options.renderer, options.quality, reportPath, failures, child.status, true);
   }
   if (parsed.quality !== options.quality) {
     failures.push(`report quality ${String(parsed.quality)} did not equal ${options.quality}`);
@@ -215,10 +221,7 @@ function runLeg(options: {
   if (parsed.renderer?.actual !== options.renderer) {
     failures.push(`actual renderer ${String(parsed.renderer?.actual)} did not equal ${options.renderer}`);
   }
-  if (parsed.acceptance?.passed !== true) {
-    failures.push(...reportFailures(parsed.acceptance?.failures));
-    if (failures.length === 0) failures.push("acceptance report did not pass");
-  }
+  if (parsed.acceptance?.passed !== true) failures.push(...reportFailures(parsed.acceptance?.failures));
 
   let metrics: FoamVisualAcceptanceInput | null = null;
   let poses: WaterFoamAcceptancePoses | null = null;
@@ -247,7 +250,7 @@ function runLeg(options: {
     renderer: options.renderer,
     quality: options.quality,
     reportPath,
-    processStatus: process.status,
+    processStatus: child.status,
     reportFound: true,
     passed: failures.length === 0 && metrics !== null && poses !== null && poseParity,
     poseParity,
@@ -261,8 +264,10 @@ function evaluateQualityParity(
   high: LegResult | undefined,
   low: LegResult | undefined,
   label: string,
-) {
-  if (!high?.metrics || !low?.metrics) return unavailableParity(`${label} metrics are unavailable`);
+): WaterFoamQualityParityResult {
+  if (!high?.passed || !low?.passed || !high.metrics || !low.metrics) {
+    return unavailableQualityParity(`${label} passing metrics are unavailable`);
+  }
   return evaluateWaterFoamQualityParity(high.metrics, low.metrics);
 }
 
@@ -271,11 +276,13 @@ function evaluateRendererParity(
   webGl: LegResult | undefined,
   label: string,
 ): WaterFoamRendererParityResult {
-  if (!webGpu?.metrics || !webGl?.metrics) return unavailableRendererParity(`${label} metrics are unavailable`);
+  if (!webGpu?.passed || !webGl?.passed || !webGpu.metrics || !webGl.metrics) {
+    return unavailableRendererParity(`${label} passing metrics are unavailable`);
+  }
   return evaluateWaterFoamRendererParity(webGpu.metrics, webGl.metrics);
 }
 
-function unavailableParity(failure: string) {
+function unavailableQualityParity(failure: string): WaterFoamQualityParityResult {
   return { passed: false, failures: [failure], measurements: {} };
 }
 
@@ -313,8 +320,8 @@ function reportFailures(value: unknown): string[] {
 
 function collectFailures(
   legs: readonly LegResult[],
-  webGpuQualityParity: { readonly failures: readonly string[] },
-  webGlQualityParity: { readonly failures: readonly string[] },
+  webGpuQualityParity: WaterFoamQualityParityResult,
+  webGlQualityParity: WaterFoamQualityParityResult,
   rendererParity: Readonly<Record<WaterFoamAcceptanceQuality, WaterFoamRendererParityResult>>,
 ): string[] {
   return [
