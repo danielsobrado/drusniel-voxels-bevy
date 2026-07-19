@@ -51,10 +51,10 @@ describe("shared water foam camera-distance fade", () => {
   });
 
   it("publishes and synchronizes the range without a TSL import in WebGL state", () => {
-    expect(UNIFORMS_SOURCE).toContain("resolveWaterFoamDistanceFade(visual.foam)");
+    expect(UNIFORMS_SOURCE).toContain("publishWaterFoamDistanceFade(visual.foam)");
     expect(UNIFORMS_SOURCE).toContain("uFoamDetailFadeStartM");
     expect(UNIFORMS_SOURCE).not.toContain('from "three/tsl"');
-    expect(MATERIAL_SOURCE).toContain("resolveWaterFoamDistanceFade(v.foam)");
+    expect(MATERIAL_SOURCE).toContain("publishWaterFoamDistanceFade(v.foam)");
     expect(MATERIAL_SOURCE).toContain("uFoamDetailFadeEndM.value = foamDistance.endM");
   });
 
