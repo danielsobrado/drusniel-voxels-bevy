@@ -4,6 +4,7 @@ import type {
 } from "./hydrologyConfig.js";
 import {
   HYDROLOGY_BODY_RIVER,
+  sampleGridBilinear,
   type HydrologyGrid,
   type HydrologySample,
 } from "./hydrologyGrid.js";
@@ -14,15 +15,13 @@ import {
   recordGravelBarBedDecision,
   type GravelBarBedCounters,
 } from "./gravel_bar_bed.js";
-import { sampleGridBilinear } from "./hydrologyGrid.js";
-import type {
-  HydrologyWorldSampler,
-} from "./hydrologyTileSource.js";
+import type { HydrologyWorldSampler } from "./hydrologyTileSource.js";
 import type { TerrainHeightSampler } from "./water_field_types.js";
 
 const MIN_BANK_PROBE_M = 1;
 
 export interface GravelBarBedAuthority {
+  readonly enabled: boolean;
   readonly counters: GravelBarBedCounters;
   apply(x: number, z: number, sample: HydrologySample): HydrologySample;
   wrap(base: HydrologyWorldSampler): HydrologyWorldSampler;
@@ -57,9 +56,12 @@ export function createGravelBarBedAuthority(
   };
 
   return {
+    enabled,
     counters,
     apply,
-    wrap: (base) => (x, z, sampler, options) => apply(x, z, base(x, z, sampler, options)),
+    wrap: (base) => enabled
+      ? (x, z, sampler, options) => apply(x, z, base(x, z, sampler, options))
+      : base,
   };
 }
 
