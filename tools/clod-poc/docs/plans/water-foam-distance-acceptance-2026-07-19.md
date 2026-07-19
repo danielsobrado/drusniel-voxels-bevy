@@ -11,6 +11,10 @@ changes.
 
 ## Controlled proof
 
+Before browser startup, the runner removes the previous report and every expected
+capture image from its output directory. A failed rerun therefore cannot leave an
+old green report or stale screenshots that look current.
+
 The acceptance runner discovers one real `rapid-bed-step`, places the camera once,
 and waits for the scene to settle. It then:
 
@@ -21,8 +25,11 @@ and waits for the scene to settle. It then:
 5. captures the foam-debug output;
 6. substitutes the exact fade midpoint and captures again;
 7. substitutes a distance beyond the fade end and captures again;
-8. resets synthetic distance, unfreezes time, and restores exact overlay visibility
-   in a fail-loud `finally` block.
+8. resets synthetic distance, unfreezes time, and restores exact overlay visibility.
+
+Capture and cleanup outcomes are retained independently. When both fail, the final
+error includes the original capture failure and the cleanup failure instead of
+allowing the cleanup exception to hide the root cause.
 
 The synthetic value replaces only the measured camera distance. The real
 configuration-owned `smoothstep(startM, endM, distanceM)` remains active in every
@@ -104,6 +111,7 @@ npm --prefix tools/clod-poc run test -- \
   src/water/water_foam_distance_shader_contract.test.ts \
   tools/water-foam-distance-acceptance-profile.test.ts \
   tools/water-foam-distance-browser-controls.test.ts \
+  tools/water-foam-distance-evidence.test.ts \
   tools/water-foam-distance-visual-metrics.test.ts \
   tools/water-foam-distance-acceptance-contract.test.ts \
   tools/water-foam-distance-acceptance-wiring.test.ts
