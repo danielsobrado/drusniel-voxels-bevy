@@ -38,13 +38,13 @@ export function resolveRockFlourWaterBodyPresets(
   const amount = effectiveWaterRockFlour(config, state, enabled);
   if (amount <= 0) return base;
 
-  const lake = resolveBodyColor(
+  const lake = resolveBodyPreset(
     base.lake,
     config.lakeColor,
     amount * nonNegative(config.lakeStrength),
     config,
   );
-  const river = resolveBodyColor(
+  const river = resolveBodyPreset(
     base.river,
     config.riverColor,
     amount * nonNegative(config.riverStrength),
@@ -70,26 +70,56 @@ export function resolveRockFlourWaterVisual(
   return bodies === visual.bodies ? visual : { ...visual, bodies };
 }
 
-function resolveBodyColor(
+function resolveBodyPreset(
   base: WaterBodyVisualPreset,
   target: [number, number, number],
   amount: number,
   config: WaterRockFlourConfig,
 ): WaterBodyVisualPreset {
   const bodyAmount = clampFraction(amount);
+  if (bodyAmount <= 0) return base;
+
   const shallowAmount = bodyAmount * clampFraction(config.shallowBlend);
   const deepAmount = bodyAmount * clampFraction(config.deepBlend);
-  if (shallowAmount <= 0 && deepAmount <= 0) return base;
-
   const safeTarget = sanitizeColor(target, base.shallowColor);
   const shallowColor = mixColor(base.shallowColor, safeTarget, shallowAmount);
   const deepColor = mixColor(base.deepColor, safeTarget, deepAmount);
-  if (sameColor(shallowColor, base.shallowColor) && sameColor(deepColor, base.deepColor)) return base;
+  const scatterColor = mixColor(base.scatterColor, safeTarget, bodyAmount);
+  const scatterExtinction = lerp(
+    nonNegative(base.scatterExtinction),
+    nonNegative(config.scatterExtinction),
+    bodyAmount,
+  );
+  const scatterStrength = lerp(
+    nonNegative(base.scatterStrength),
+    nonNegative(config.scatterStrength),
+    bodyAmount,
+  );
+  const scatterAmbient = lerp(
+    nonNegative(base.scatterAmbient),
+    nonNegative(config.scatterAmbient),
+    bodyAmount,
+  );
+
+  if (
+    sameColor(shallowColor, base.shallowColor)
+    && sameColor(deepColor, base.deepColor)
+    && sameColor(scatterColor, base.scatterColor)
+    && scatterExtinction === base.scatterExtinction
+    && scatterStrength === base.scatterStrength
+    && scatterAmbient === base.scatterAmbient
+  ) {
+    return base;
+  }
 
   return {
     ...base,
     shallowColor,
     deepColor,
+    scatterColor,
+    scatterExtinction,
+    scatterStrength,
+    scatterAmbient,
   };
 }
 
