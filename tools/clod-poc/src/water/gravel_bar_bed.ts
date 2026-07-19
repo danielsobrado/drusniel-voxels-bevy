@@ -1,23 +1,17 @@
-import type { HydrologyGravelBarsConfig } from "./hydrologyConfig.js";
+import {
+  DEFAULT_HYDROLOGY_CONFIG,
+  type HydrologyGravelBarsConfig,
+  type HydrologyGravelBedConfig,
+} from "./hydrologyConfig.js";
 import type { HydrologySample } from "./hydrologyGrid.js";
 import { evaluateGravelBarMask } from "./gravel_bar_field.js";
 
 const ELEVATION_EPSILON_M = 1e-5;
 
-export interface GravelBarBedConfig {
-  readonly enabled: boolean;
-  readonly maxElevationM: number;
-  readonly minWetDepthM: number;
-  readonly continuityReserveM: number;
-  readonly bankClearanceM: number;
-}
+export type GravelBarBedConfig = HydrologyGravelBedConfig;
 
 export const DEFAULT_GRAVEL_BAR_BED_CONFIG: GravelBarBedConfig = {
-  enabled: false,
-  maxElevationM: 0.7,
-  minWetDepthM: 0.18,
-  continuityReserveM: 0.32,
-  bankClearanceM: 0.12,
+  ...DEFAULT_HYDROLOGY_CONFIG.gravelBed,
 };
 
 export type GravelBarBedRejection =
@@ -136,6 +130,21 @@ export function evaluateGravelBarBedElevation(
     );
   }
   return decision(mask, desiredElevationM, elevationOffsetM, null);
+}
+
+export function applyGravelBarBedDecision(
+  sample: HydrologySample,
+  decision: GravelBarBedDecision,
+): HydrologySample {
+  if (decision.elevationOffsetM <= ELEVATION_EPSILON_M) return sample;
+  const terrainY = sample.terrainY + decision.elevationOffsetM;
+  const depth = Math.max(0, sample.waterY - terrainY);
+  return {
+    ...sample,
+    terrainY,
+    depth,
+    riverDepth: sample.riverMask > 0 ? depth : sample.riverDepth,
+  };
 }
 
 function decision(
