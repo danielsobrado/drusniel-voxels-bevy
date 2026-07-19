@@ -141,6 +141,10 @@ export interface WaterFoamVisualConfig {
    *  depth-based band, which stays as the fallback where shoreDistance is unavailable. */
   shoreDistanceStart: number;
   shoreDistanceEnd: number;
+  /** Camera distance where close-range foam detail begins fading. */
+  detailFadeStartM: number;
+  /** Camera distance where close-range foam detail reaches zero. */
+  detailFadeEndM: number;
 }
 
 export interface WaterFresnelVisualConfig {

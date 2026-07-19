@@ -15,6 +15,7 @@ const BASE = {
   pattern: 1,
   wetFade: 1,
   sunVisibility: 1,
+  detailFade: 1,
   shoreStrength: 0.52,
   riverStrength: 0.38,
   bankStrength: 0.45,
@@ -93,6 +94,26 @@ describe("water foam parity model", () => {
 
     expect(shaded.shadeCoverage).toBe(WATER_FOAM_SHADE_COVERAGE_FLOOR);
     expect(shaded.coverage).toBeCloseTo(sunlit.coverage * WATER_FOAM_SHADE_COVERAGE_FLOOR);
+  });
+
+  it("applies one continuous detail fade to every foam source", () => {
+    const fixture = {
+      ...BASE,
+      shoreContact: 1,
+      rapidSpeed: 1,
+      rapidDrop: 1,
+      shoreStrength: 0.1,
+      riverStrength: 0.1,
+      bankStrength: 0.1,
+      rapidStrength: 0.1,
+    };
+    const full = evaluateWaterFoam({ ...fixture, detailFade: 1 });
+    const half = evaluateWaterFoam({ ...fixture, detailFade: 0.5 });
+    const absent = evaluateWaterFoam({ ...fixture, detailFade: 0 });
+
+    expect(half.coverage).toBeCloseTo(full.coverage * 0.5);
+    expect(half.detailFade).toBe(0.5);
+    expect(absent.coverage).toBe(0);
   });
 
   it("caps bright whitewater coverage at the parity limit", () => {
