@@ -24,6 +24,16 @@ describe("WebGL water foam runtime contract", () => {
     expect(evaluateWaterFoamWebGlRuntimeContract("low", diagnostics).passed).toBe(true);
   });
 
+  it("does not gate the WebGPU-only uncaptured-error counter", () => {
+    const diagnostics = getWaterFoamRuntimeDiagnostics(new URLSearchParams("waterQuality=high"));
+    const result = evaluateWaterFoamWebGlRuntimeContract("high", {
+      ...diagnostics,
+      webGpuUncapturedErrors: 3,
+    });
+
+    expect(result.passed).toBe(true);
+  });
+
   it("rejects stale foam authority, wrong tier, or CPU sampling", () => {
     const diagnostics = getWaterFoamRuntimeDiagnostics(new URLSearchParams("waterQuality=high"));
     const result = evaluateWaterFoamWebGlRuntimeContract("low", {
