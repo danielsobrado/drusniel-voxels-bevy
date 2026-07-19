@@ -19,6 +19,7 @@ type TslNode = any;
 
 export interface WaterFoamNodeInputs {
   readonly worldXZ: TslNode;
+  readonly cameraXZ: TslNode;
   readonly advectA: TslNode;
   readonly advectB: TslNode;
   readonly phaseBlend: TslNode;
@@ -33,6 +34,8 @@ export interface WaterFoamNodeInputs {
   readonly shoreFoamEnd: TslNode;
   readonly shoreDistanceStart: TslNode;
   readonly shoreDistanceEnd: TslNode;
+  readonly detailFadeStartM: TslNode;
+  readonly detailFadeEndM: TslNode;
   readonly shoreStrength: TslNode;
   readonly riverStrength: TslNode;
   readonly bankStrength: TslNode;
@@ -45,6 +48,7 @@ export interface WaterFoamNodes {
   readonly rapid: TslNode;
   readonly bankContact: TslNode;
   readonly sunVisibility: TslNode;
+  readonly detailFade: TslNode;
 }
 
 export function buildWaterFoamNodes(input: WaterFoamNodeInputs): WaterFoamNodes {
@@ -102,11 +106,15 @@ export function buildWaterFoamNodes(input: WaterFoamNodeInputs): WaterFoamNodes 
     float(1),
     sunVisibility,
   );
+  const cameraDistanceM = input.worldXZ.sub(input.cameraXZ).length();
+  const detailFade = float(1).sub(
+    smoothstep(input.detailFadeStartM, input.detailFadeEndM, cameraDistanceM),
+  );
   const coverage = clamp(
-    source.mul(pattern).mul(wetFade).mul(shadeCoverage),
+    source.mul(pattern).mul(wetFade).mul(shadeCoverage).mul(detailFade),
     0.0,
     WATER_FOAM_MAX_COVERAGE,
   );
 
-  return { coverage, pattern, rapid, bankContact, sunVisibility };
+  return { coverage, pattern, rapid, bankContact, sunVisibility, detailFade };
 }
