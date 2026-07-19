@@ -3,309 +3,255 @@
 > Updated: 2026-07-19  
 > Target: `tools/clod-poc` on `main`  
 > Execution plan: `docs/plans/clod-poc-glacial-valley-effects-performance-execution-plan-2026-07-18.md`  
-> Status: **IN PROGRESS — foundations and first visual slices landed; completion and headed acceptance pending**
+> Status: **IN PROGRESS — shared query foundations landed; water optics and production integration pending**
 
 ## Purpose
 
-This document is the live status companion for the Glacial Valley effects and performance execution plan.
+This is the live delivery record for the Glacial Valley execution plan.
 
-The execution plan remains the design and acceptance contract. This file records current implementation state so future work does not:
+The parent plan owns architecture, constraints, performance gates, and the final definition of done. This document owns current implementation state, merged PRs, open PRs, evidence still owed, and the next safe PR order.
 
-- rebuild features already present on `main`;
-- confuse unit-tested plumbing with headed acceptance;
-- create overlapping pull requests;
-- default-enable experimental effects without performance evidence;
-- lose the ordered dependency chain between shared environmental data, masks, effects, and acceptance.
-
-Every future Glacial Valley implementation PR must update this file in the same PR or in its immediately following documentation PR.
+Every Glacial Valley PR must update this document in the same PR or in its immediately following documentation PR.
 
 ## Status definitions
 
 | Status | Meaning |
 |---|---|
-| `implemented` | Production code is on `main` and focused tests exist. |
-| `acceptance_pending` | Code is on `main`, but headed visual/performance evidence or default-enablement decision is still missing. |
-| `partial` | Some contract or rendering work exists, but the execution-plan result is incomplete. |
-| `open_pr` | Work exists in an open PR and is not part of `main`. |
+| `implemented` | Code and focused tests are on `main`. |
+| `acceptance_pending` | Code is on `main`, but headed visual/performance evidence or default enablement is still missing. |
+| `partial` | Some contract or renderer work exists, but the planned result is incomplete. |
+| `open_pr` | Work exists in an open PR and is not on `main`. |
 | `pending` | No production implementation found. |
-| `deferred` | Explicitly postponed until profiling or a prerequisite justifies it. |
+| `deferred` | Explicitly postponed with a measured or architectural reason. |
 
 ## Executive status
 
 Estimated completion against the full execution plan:
 
-- implementation code: approximately **45–55%**;
-- integrated and acceptance-ready: approximately **30–40%**;
-- final headed acceptance: **not complete**;
-- normal-gameplay readback policy: preserved for landed slices;
-- original water W1–W4 baseline: already complete and remains the regression foundation.
+- implementation code: approximately **55–60%**;
+- integrated and acceptance-ready: approximately **35–45%**;
+- cumulative headed acceptance: **not complete**;
+- normal-gameplay GPU readback policy: preserved for landed slices;
+- original water W1–W4 acceptance remains the regression foundation.
 
-The strongest completed areas are:
+The estimate separates code presence from proof. Several merged slices have focused tests, but this connected environment did not run the local TypeScript toolchain or headed WebGPU acceptance. They therefore remain acceptance-pending until evidence is attached.
 
-- shared query contracts and hydrology adapter;
-- biome visual state;
-- deterministic environmental-mask formulas;
-- glacial water optical controls;
-- clipmap-distance SSR reduction;
-- GPU underwater river cobbles;
-- deterministic gravel-bar dressing;
-- camera-local river mist;
-- deterministic glacial-water capture tooling.
+## Merged Glacial Valley PRs
 
-The largest remaining areas are:
-
-- complete EnvironmentQuery authority composition;
-- real carved-bed gravel bars and visibly braided reaches;
-- full glacial suspended-particle scattering and glitter;
-- large-prop occlusion overlay;
-- remaining GPU ambience effects;
-- GPU ground-debris ring;
-- complete biome-state consumer routing;
-- consolidated headed performance and visual acceptance.
-
-## Workstream status
-
-| Workstream | Status | Current state | Completion requirement |
-|---|---|---|---|
-| GV-CLOD-00 Baseline/status | `open_pr` | Consolidated plan exists. PR #187 adds this live status owner. Reference pin and deterministic before-state inventory still need confirmation. | Merge #187, pin the reference revision, and record canonical before/after poses and metrics. |
-| GV-CLOD-01 EnvironmentQuery | `partial` | Typed scalar contracts, caller-owned batch buffers, field masks, hint propagation, hydrology adapter, diagnostics, and focused tests exist. PR #188 batches mask consumption. PR #189 adds live sun-atlas visibility queries. | Validate and merge #188/#189; compose real terrain normals and material weights; install the composed query in production; route dressing consumers through it. |
-| GV-CLOD-02 Far sun visibility | `partial` | Existing budgeted CPU/worker tile builder, atlas, far terrain, fog, and god-ray consumers are production foundations. Worker failover is hardened. PR #189 exposes CPU/query parity over the live atlas. | Validate and merge #189; profile the builder; add remaining consumers; add a GPU builder only if measurements justify it; integrate prop overlay when available. |
-| GV-CLOD-03 Gravel bars/cobbles | `acceptance_pending` | Deterministic visual gravel-bar field, GPU hydrology packing, GPU gravel-bar stones, and underwater river cobbles exist behind controls. | Add safe bed elevation integration and one real braided reach; prove 100% continuity, non-zero accepted cobbles, no floating instances, and cost gates. |
-| GV-CLOD-04 Glacial water | `partial` | Biome-driven absorption/turbidity/reflection damping, rock-flour colour response, reflection clipmap tiers, live GUI controls, and deterministic capture tooling exist. | Add explicit thickness-based suspended scattering, two-lobe glitter, intended mid-distance terrain reflection approximation, and measured A/B evidence. |
-| GV-CLOD-05 Prop occlusion overlay | `pending` | No shared large-prop height/occupancy overlay is on `main`. | Add dirty-region, stale-safe overlay; integrate with far sun visibility, mid-water reflection, and mist clipping. |
-| GV-CLOD-06 Environmental masks | `open_pr` | CPU formulas and typed outputs exist for river cobble, river mist, rapid splash, sunbeam mote, calm pool, frost, dew, and shore debris. PR #188 replaces repeated scalar queries with one batch authority call and shared scalar/batch math. | Validate and merge #188; use complete authoritative query inputs; add debug visualizations and numeric probes. |
-| GV-CLOD-07 Ambient effects | `partial` | Camera-local river mist is on `main`. Sunbeam motes are currently in PR #186. | Finish and accept motes; add GPU/procedural rapid droplets, calm-water rings, dew, and frost; keep combined budget within gate. |
-| GV-CLOD-08 Ground debris | `pending` | No shared GPU debris ring found. | Implement grouped compute/indirect debris ring for pebbles, twigs, bark, litter, and gravel with no CPU transforms or visible seams. |
-| GV-CLOD-09 Biome visual state | `partial` | Shared state, YAML parsing, season interpolation, sun-elevation morning mist, weather wetness, runtime binding, and water/mist consumers exist. PR #186 adds a mote consumer. | Validate #186; route terrain, grass, understory, trees, dew/frost, bloom, and look-development controls through the shared state. |
-| GV-CLOD-10 QA/rollout | `partial` | Glacial water capture tooling and existing water W4 gates exist. Focused unit tests exist for landed slices. | Add river-detail, atmosphere, debris, time-of-day, movement, and cumulative performance acceptance; make final default-enable decisions. |
+| PR | Result | Current classification |
+|---|---|---|
+| #106 | Shared EnvironmentQuery contract | `implemented` |
+| #125 | Initial Glacial Valley foundations integration | `implemented` |
+| #133 | Clipmap-distance water reflection tiers | `acceptance_pending` |
+| #138 | Deterministic glacial-water capture tooling | `implemented` |
+| #142 | Deterministic environmental-mask formulas | `implemented` |
+| #150 | GPU underwater river cobbles | `acceptance_pending` |
+| #159 | Glacial-water live GUI controls | `implemented` |
+| #168 | Camera-local river mist | `acceptance_pending` |
+| #174 | Gravel-bar dressing and live mist toggle | `acceptance_pending` |
+| #186 | Sunbeam motes with live controls | `acceptance_pending` |
+| #187 | Live Glacial Valley completion status | `implemented` |
+| #188 | Batched environmental-mask queries | `implemented`, runtime/perf proof pending |
+| #189 | Live sun-visibility EnvironmentQuery adapter | `implemented`, production composition pending |
+| #192 | Live terrain EnvironmentQuery adapter | `implemented`, production composition pending |
 
 ## Open pull requests
 
-### PR #186 — Sunbeam motes
+### PR #196 — Physical glacial water scatter and glitter
 
 Status: `open_pr`
 
-Current scope:
+Scope:
 
-- reuses the existing meadow particle draw;
-- adds YAML tuning and lil-gui controls;
-- gates motes using sun visibility, view alignment, mist, pollen, and frost state;
-- adds focused config/runtime/GUI/GPU-error tests.
+- per-body suspended-scatter colour, extinction, strength, and ambient response;
+- path-thickness scattering using `1 - exp(-opticalThickness * extinction)`;
+- YAML-owned tight and broad glitter lobes with low-sun gain;
+- shared TSL optics helper for WebGPU high and performance tiers;
+- equivalent WebGL fallback implementation;
+- `suspendedScatter` debug mode;
+- deterministic scatter capture;
+- focused config, clone, body-preset, rock-flour, glitter, and acceptance tests.
 
 Required before merge:
 
 - typecheck;
 - focused tests;
-- build;
-- headed WebGPU capture confirming shaft-local appearance;
-- no particle leakage outside the visibility/mist gate;
-- zero WebGPU validation errors;
-- measured cumulative ambience cost.
+- production build;
+- WebGPU high and performance material compile;
+- WebGL fallback smoke;
+- clear-water feature-off visual parity;
+- shallow glacial river, deep lake, and low-sun captures;
+- `suspendedScatter` debug capture;
+- zero uncaptured GPU errors;
+- suspended-scatter render delta `<= 0.20 ms p95`;
+- existing W4 water budget remains green.
 
-Do not create another sunbeam-mote implementation while PR #186 is open.
+Do not mark Workstream 4 complete when #196 merges. The far-summary-assisted middle reflection tier and cumulative acceptance still remain.
 
-### PR #187 — Live completion status
+## Workstream status
 
-Status: `open_pr`
+| Workstream | Status | Current state | Remaining completion requirement |
+|---|---|---|---|
+| GV-CLOD-00 Baseline/status | `partial` | Consolidated plan and live status owner are on `main`. | Pin the Glacial Valley source revision and record canonical before/after poses and baseline metrics. |
+| GV-CLOD-01 EnvironmentQuery | `partial` | Hydrology, live terrain, and live sun-atlas adapters exist. Scalar/batch contracts, diagnostics, hint propagation, and batched mask consumption exist. | Add and install one production composition root; route river dressing and CPU stone fallback; expose source/validity/revision debug. |
+| GV-CLOD-02 Far sun visibility | `partial` | Existing budgeted cache/worker, GPU atlas, terrain, fog, and god-ray consumers exist. CPU EnvironmentQuery sampling now exists. | Profile the builder, add remaining consumers, integrate large-prop overlay, and add GPU production only if measurements justify it. |
+| GV-CLOD-03 Gravel bars/cobbles | `acceptance_pending` | Visual bar mask, GPU packing, gravel-bar stones, and underwater cobbles exist. | Integrate safe bed elevation, produce a real braided reach, add rejection counters, and prove continuity/non-floating/performance gates. |
+| GV-CLOD-04 Glacial water | `open_pr` | Murkiness, body optics, reflection step tiers, GUI, and capture tooling are on `main`; PR #196 adds physical scattering and config-driven glitter. | Validate #196, implement the far-summary middle reflection approximation, and attach measured clear/glacial A/B evidence. |
+| GV-CLOD-05 Prop occlusion overlay | `pending` | No shared large-prop height/occupancy overlay is on `main`. | Add dirty-region, stale-safe overlay and integrate it with sun visibility, water reflection, and mist clipping. |
+| GV-CLOD-06 Environmental masks | `partial` | Eight deterministic mask formulas and one-batch query evaluation are on `main`. | Install the composed production query so normal/visibility are valid everywhere; add debug overlays, cursor probes, and runtime distribution counters. |
+| GV-CLOD-07 Ambient effects | `partial` | River mist and sunbeam motes are on `main`. | Add rapid droplets, calm-water rise rings, dew/frost accents, quality policies, and cumulative ambience performance evidence. |
+| GV-CLOD-08 Ground debris | `pending` | No grouped GPU debris ring found. | Implement one toroidal compute/indirect system for pebbles, twigs, bark, litter, and gravel; prove no walking seam. |
+| GV-CLOD-09 Biome visual state | `partial` | Shared season, wetness, glacial murkiness, morning mist, pollen, and frost state exist; water, mist, and motes consume parts of it. | Route terrain, grass, understory, trees, dew/frost, and bloom; add authoring controls and seasonal acceptance. |
+| GV-CLOD-10 QA/rollout | `partial` | Water W4 and glacial capture tooling exist. | Add river-detail, atmosphere, ground-detail, time-of-day, movement, integrated-GPU, and cumulative performance acceptance. |
 
-Current scope:
+## P0 — Production EnvironmentQuery composition
 
-- introduces this status document;
-- records current workstream state and blockers;
-- records the ordered remaining PR sequence;
-- makes document updates part of the completion contract.
+This is the next shared architecture PR after PR #196 is validated or while it remains independently reviewable.
 
-Required before merge:
-
-- verify all classifications against current `main`;
-- confirm PR references and commands;
-- squash merge as a documentation-only change.
-
-### PR #188 — Batched environmental masks
-
-Status: `open_pr`
-
-Current scope:
-
-- centralizes environmental-mask formulas for scalar and batch parity;
-- performs one `EnvironmentBatchSampler` call per finite `Float32Array` mask batch;
-- requests only water, river, normal, and visibility;
-- caches one workspace per caller-owned output;
-- preserves scalar fallback for non-batch callers;
-- adds fast-path and parity tests.
-
-Required before merge:
-
-- typecheck;
-- environment-mask and EnvironmentQuery focused tests;
-- build;
-- runtime proof of one authority batch call;
-- no allocation growth after workspace warm-up;
-- no fine hydrology-cache construction from far hints.
-
-### PR #189 — Live sun-visibility EnvironmentQuery adapter
-
-Status: `open_pr`
-
-Current scope:
-
-- adds a CPU sampler over the existing red-channel sun-visibility atlas;
-- reports source, validity, atlas revision, and texel cell size;
-- treats disabled, missing, outside, and malformed samples as lit-but-invalid;
-- adds a scalar and batch query decorator that replaces only visibility;
-- adds atlas/query tests.
-
-Required before merge:
-
-- typecheck;
-- sun-atlas and EnvironmentQuery focused tests;
-- build;
-- CPU/GPU debug parity probes;
-- follow-up production composition root before claiming runtime completion.
-
-## Detailed remaining backlog
-
-### P0 — Finish shared environmental authority
-
-This is the highest-priority architecture work.
-
-- [ ] Validate and merge PR #188.
-- [ ] Validate and merge PR #189.
-- [ ] Add a composed EnvironmentQuery implementation that delegates each field to its canonical owner.
-- [ ] Surface height: live terrain/tile/CLOD/far-summary hierarchy with source metadata.
-- [ ] Surface normal: authoritative terrain normal, not `(0, 1, 0)` fallback.
-- [ ] Material weights: canonical terrain material/splat weights.
-- [x] Water and river: existing hydrology authority.
-- [~] Visibility: PR #189 exposes the existing far sun-visibility atlas; production composition remains.
-- [x] Preserve real cell-size hints through existing hydrology and batch adapters.
-- [ ] Keep scalar APIs for diagnostics and sparse probes only.
-- [~] Convert environmental-mask batch evaluation to one batch query plus vectorized mask evaluation: PR #188 open.
-- [ ] Route river dressing and CPU stone fallback through the facade.
-- [ ] Add source/validity/revision debug overlay.
-- [ ] Prove no fine hydrology tile construction from far consumers.
+- [x] Hydrology authority adapter.
+- [x] Live terrain height/normal/material adapter.
+- [x] Live sun-visibility atlas adapter.
+- [x] Allocation-reusable batch buffers and field masks.
+- [x] Batched environmental-mask consumption.
+- [ ] Create one composed query in the application composition root.
+- [ ] Order ownership as hydrology base -> terrain decorator -> sun-visibility decorator.
+- [ ] Preserve real sample-size hints through every layer.
+- [ ] Expose the composed query through runtime state rather than creating private instances.
+- [ ] Route ambience-mask production through the composed query.
+- [ ] Route river dressing and CPU stone fallback through the composed query.
+- [ ] Add source, validity, revision, and cell-size debug probes.
+- [ ] Add integration tests proving all requested fields come from the correct owners.
+- [ ] Add an edit test proving terrain revision invalidates scalar terrain reuse.
+- [ ] Add a sun-atlas update test proving visibility revision changes without rebuilding hydrology.
+- [ ] Prove far hints do not trigger fine hydrology tile construction.
 
 Exit gate:
 
-- all mask inputs can be valid in normal gameplay;
-- scalar and batch parity passes;
-- environment-query management remains within plan budget;
-- no new per-frame allocation hot path.
+- normal, material, water, river, and visibility can all be valid in normal gameplay;
+- scalar and batch values agree;
+- no new per-frame allocation hot path;
+- no authority is sampled when its field is not requested.
 
-### P1 — Complete gravel bars and underwater cobbles
+## P1 — Safe gravel-bed integration and braided reach
 
-- [ ] Add bounded bar `elevationOffsetM` to the carved-bed stage.
-- [ ] Preserve minimum wet channel width and downstream continuity.
-- [ ] Prevent bars from affecting lakes unless a separate delta/sandbar mode is enabled.
-- [ ] Publish the same deterministic mask to terrain material, vegetation suppression, cobbles, and water breakup.
-- [ ] Add dedicated river-detail counters for candidates, acceptance, rejection reasons, visible and underwater counts.
-- [ ] Add a deterministic braided-reach acceptance scene.
-- [ ] Gate acceptance on non-zero river cobbles after convergence.
-- [ ] Prove no floating stones and correct carved-bed seating.
-- [ ] Decide default enablement from headed and performance evidence.
+- [ ] Extend the deterministic bar result with bounded `elevationOffsetM`.
+- [ ] Apply the offset inside the carved-bed stage, not as render-only displacement.
+- [ ] Clamp against minimum wet depth, water Y, local banks, and continuity reserve.
+- [ ] Preserve the traced channel as authority; never replace it with a sine centerline.
+- [ ] Keep lakes unchanged unless a separate delta/sandbar mode is explicitly enabled.
+- [ ] Publish one bar mask to terrain material, vegetation suppression, cobbles, and water breakup.
+- [ ] Add counters for candidates, accepted bars, rejected continuity, rejected depth, and rejected bank safety.
+- [ ] Add cobble candidates, accepted, visible, underwater, shore, rapid, and rejection-reason counters.
+- [ ] Add deterministic close and aerial braided-reach captures.
+- [ ] Gate acceptance on non-zero underwater cobbles after convergence.
+- [ ] Prove no floating cobbles and carved-bed seating.
 
 Exit gate:
 
-- 100% river continuity retained;
-- at least one real split/braided reach;
-- non-zero underwater cobbles;
-- render and update cost within plan limits.
+- river continuity remains 100%;
+- at least one deterministic reach visibly splits around emergent bars;
+- no dry wall blocks the main channel;
+- river-detail cost remains inside the plan budget.
 
-### P2 — Complete glacial water shader behavior
+## P2 — Finish water reflection policy
 
-- [ ] Add path-thickness-dependent suspended rock-flour in-scattering.
-- [ ] Use existing path thickness and per-body optical state; add no duplicate body shader fork.
-- [ ] Add tight glint and broad sheen lobes using existing normal, sun, and view vectors.
-- [ ] Add low-sun gain control in YAML.
-- [ ] Implement the intended middle reflection approximation using far terrain/visibility summaries.
-- [ ] Keep near SSR and far analytic sky behavior.
+After PR #196:
+
+- [ ] Keep current SSR for near water.
+- [ ] Keep reduced-step SSR for current middle clipmap levels as a fallback policy.
+- [ ] Add the intended short far-summary terrain/occupancy march for middle distance.
+- [ ] Use five to eight growing steps and the existing far terrain/visibility data.
+- [ ] Include large-prop overlay once Workstream 5 exists.
+- [ ] Use analytic sky/atmosphere reflection for far water.
 - [ ] Add reflection-tier debug output.
-- [ ] Capture clear/glacial A/B, shallow river, deep lake, rapid and low-sun poses.
-- [ ] Measure render delta for scatter, glitter, and tier policy separately.
+- [ ] Measure full SSR, reduced SSR, far-summary middle tier, and far analytic fallback separately.
 
 Exit gate:
 
-- glacial look is body/state-driven rather than a global shader fork;
-- high-quality water remains inside W4 budgets;
-- middle tier is cheaper than near SSR at its activation distance.
+- middle tier is cheaper than near SSR;
+- distant terrain can interrupt reflected sky without another scene render;
+- no readback and no extra full-scene reflection pass.
 
-### P3 — Large-prop occlusion overlay
+## P3 — Large-prop occlusion overlay
 
-- [ ] Define compact height/occupancy/validity layout.
-- [ ] Include only large and hero boulders initially.
+- [ ] Define compact height, occupancy, validity, and revision storage.
+- [ ] Include large and hero boulders only in the first slice.
 - [ ] Build conservative footprints from stable transforms and bounds.
-- [ ] Update dirty regions only.
+- [ ] Update dirty cells only.
 - [ ] Keep old valid overlay live until replacement is ready.
-- [ ] Integrate with far sun-visibility march.
-- [ ] Integrate with middle water reflection.
+- [ ] Integrate with far sun visibility.
+- [ ] Integrate with middle-distance water reflection.
 - [ ] Integrate as soft mist density clipping.
-- [ ] Add terrain-versus-prop debug colors and stale validity display.
+- [ ] Add terrain-versus-prop and stale-validity debug modes.
 
 Exit gate:
 
-- large boulders influence far lighting/reflection without terrain edits;
+- hero boulders affect far lighting/reflection without terrain edits;
 - no full per-frame rebuild;
-- update and upload costs remain within plan limits.
+- no visible pop caused by overlay lag.
 
-### P4 — Finish ambience effects
+## P4 — Remaining ambience
 
-After PR #186 is resolved:
-
-- [ ] Rapid splash droplets: deterministic sources, procedural lifetime/ballistic arc, no CPU particle simulation.
-- [ ] Optional rapid-rock spray using large-prop proximity.
-- [ ] Calm-water fish-rise rings: hydrology-placed, sparse, shader-expanded, excluded from rapids and shore shallows.
-- [ ] Dew: shader-only grass/leaf sparkle first.
-- [ ] Frost: shared mask/state-driven tint first.
-- [ ] Refactor river mist toward shared mask input and shader-driven motion if profiling shows CPU upload cost or architectural duplication is material.
-- [ ] Enforce off/low/high policies and integrated-GPU defaults.
-- [ ] Measure all ambience enabled together, not only each effect in isolation.
+- [x] Camera-local river mist prototype.
+- [x] Sunbeam motes with live controls.
+- [ ] Rapid splash droplets with deterministic sources and shader lifetime/ballistic arc.
+- [ ] Optional rapid-rock spray after prop overlay exists.
+- [ ] Calm-water rise rings placed by hydrology and excluded from rapids/shore shallows.
+- [ ] Shader-only dew sparkle first.
+- [ ] Shared frost-mask tint first.
+- [ ] Off/low/high policies for every effect.
+- [ ] Integrated-GPU defaults with transparent layers disabled or reduced.
+- [ ] Cumulative mist + motes + droplets + rings measurement.
 
 Exit gate:
 
-- combined ambience render delta and CPU update meet the plan;
-- no gameplay readbacks;
-- no effect leaks outside its deterministic mask.
+- combined ambience render delta `<= 0.50 ms p95`;
+- CPU update `<= 0.20 ms p95`;
+- zero gameplay readbacks;
+- no effect appears outside its deterministic mask.
 
-### P5 — GPU ground debris
+## P5 — GPU ground debris
 
-- [ ] One toroidal compute ring, not one ring per debris class.
-- [ ] Group append buffers and indirect draw arguments.
+- [ ] One toroidal compute ring, not one grid per debris class.
+- [ ] Grouped append buffers and indirect arguments.
 - [ ] Tiny cobbles, flat pebbles, twigs, bark chips, litter clusters, and gravel patches.
-- [ ] Material/biome/hydrology/construction exclusion in compute.
+- [ ] Material, biome, hydrology, construction, and path exclusion in compute.
 - [ ] Wet response near water.
 - [ ] No individual shadows.
-- [ ] Dithered distance fade before aliasing.
-- [ ] Debug counts by class and rejection reason.
-- [ ] Walking seam acceptance.
+- [ ] Dithered distance fade.
+- [ ] Debug counts and rejection reasons.
+- [ ] Walking ring-seam acceptance.
 
 Exit gate:
 
 - forest and meadow floors no longer read unnaturally clean;
-- no visible ring boundaries;
+- no visible ring boundary;
 - CPU update remains near zero after initialization.
 
-### P6 — Complete shared biome visual-state routing
+## P6 — Complete biome-state routing
 
 - [ ] Terrain seasonal tint and snowline.
-- [ ] Grass, understory and tree seasonal color.
-- [~] Mote pollen/frost mode: PR #186 open.
-- [ ] Dew/frost strength.
+- [ ] Grass seasonal green/dry response.
+- [ ] Understory and tree seasonal color.
+- [x] Mote pollen/frost mode foundation.
+- [ ] Dew and frost strengths.
 - [ ] Flower bloom.
 - [ ] Compact look-development GUI with reset/export.
-- [ ] Verify consumers read state rather than recomputing season curves.
-- [ ] Audit tone mapping, color conversion, exposure, vignette, grain, and grade before adding any post term.
+- [ ] Verify consumers do not recompute private season curves.
+- [ ] Audit tone mapping, color conversion, exposure, vignette, grain, and grade before adding post effects.
 
 Exit gate:
 
-- fixed seasonal checkpoints change participating systems coherently;
-- default values preserve non-glacial scenes.
+- fixed seasonal checkpoints change all participating systems coherently;
+- default values preserve existing non-glacial scenes.
 
-### P7 — Final acceptance and default enablement
+## P7 — Final acceptance and closeout
 
-- [ ] Update the existing infinite-islands acceptance battery rather than creating isolated toy scenes.
+- [ ] Extend the normal `infinite-islands` battery rather than relying on toy scenes.
 - [ ] River detail: close/aerial braid, underwater cobbles, shore/bar transition, rapid effects.
 - [ ] Atmosphere: shaded/sunlit mist, shaft/mote alignment, time-of-day transition.
 - [ ] Ground detail: forest, river bar, meadow, movement seam.
-- [ ] Water: clear/glacial A/B, deep lake, shallow river, rapid, glitter.
+- [ ] Water: clear/glacial A/B, deep lake, shallow river, rapid, glitter, scatter debug.
 - [ ] Feature-off/feature-on matrix.
 - [ ] Static/moving matrix.
 - [ ] High/performance/integrated policy matrix.
@@ -313,68 +259,52 @@ Exit gate:
 - [ ] Zero uncaptured WebGPU errors.
 - [ ] Zero normal-gameplay GPU readbacks.
 - [ ] Existing W4 water acceptance remains green.
-- [ ] Record exact commands, URLs, poses, reports, screenshots, and measured deltas in this document.
+- [ ] Record exact commands, URLs, poses, reports, screenshots, and deltas here.
 
-Exit gate:
+## Ordered remaining PR sequence
 
-- every definition-of-done item in the execution plan is evidenced;
-- features are either enabled by default with evidence or explicitly documented as optional/deferred.
+1. PR #196 — physical glacial water scatter and glitter — open, validation required.
+2. `feat(clod-poc): install composed environment query`.
+3. `debug(clod-poc): visualize environment query sources and validity`.
+4. `feat(clod-poc): carve safe gravel bars and braided reaches`.
+5. `test(clod-poc): accept braided rivers and underwater cobbles`.
+6. `feat(clod-poc): add far-summary water reflection tier`.
+7. `feat(clod-poc): add large-prop occlusion overlay`.
+8. `feat(clod-poc): add rapid splash droplets`.
+9. `feat(clod-poc): add calm-water rise rings`.
+10. `feat(clod-poc): add dew and frost material accents`.
+11. `feat(clod-poc): add GPU ground-debris ring`.
+12. `feat(clod-poc): complete biome visual-state routing`.
+13. `test(clod-poc): add Glacial Valley cumulative acceptance`.
+14. `docs(clod-poc): close Glacial Valley execution plan`.
 
-## Ordered PR sequence
-
-Use small, reviewable PRs from current `main`. Avoid long-lived stacked branches unless a dependency genuinely requires them.
-
-1. PR #187 — `docs(clod-poc): track Glacial Valley completion status` — open.
-2. PR #188 — `perf(clod-poc): batch environmental mask queries` — open.
-3. PR #189 — `feat(clod-poc): query sun visibility from the live atlas` — open.
-4. Resolve and merge PR #186 after validation.
-5. `feat(clod-poc): compose authoritative environment queries`.
-6. `feat(clod-poc): carve safe gravel bars and braided reaches`.
-7. `test(clod-poc): accept braided rivers and underwater cobbles`.
-8. `feat(clod-poc): add physical glacial water scattering and glitter`.
-9. `feat(clod-poc): add far-summary water reflection tier`.
-10. `feat(clod-poc): add large-prop occlusion overlay`.
-11. `feat(clod-poc): add rapid splash droplets`.
-12. `feat(clod-poc): add calm-water rise rings`.
-13. `feat(clod-poc): add dew and frost material accents`.
-14. `feat(clod-poc): add GPU ground-debris ring`.
-15. `feat(clod-poc): complete biome visual-state routing`.
-16. `test(clod-poc): add Glacial Valley cumulative acceptance`.
-17. `docs(clod-poc): close Glacial Valley execution plan`.
-
-A PR may be split further when it touches more than one authority or cannot be reviewed safely as one unit.
+Split a PR further whenever it crosses multiple authorities or cannot be safely reviewed and reverted as one unit.
 
 ## Pull-request rules
 
-- Base every independent PR on current `main`.
-- Do not merge draft PRs without the stated validation.
-- Do not mark unit-tested plumbing as visually accepted.
-- Do not weaken continuity or performance gates.
-- Do not add URL-only production configuration; YAML remains authoritative.
+- Base each independent PR on current `main`.
+- Synchronize again before opening when `main` moves.
+- Do not merge draft PRs without their stated validation.
+- Do not label unit-tested plumbing as visually accepted.
+- Do not weaken continuity, error, or performance gates.
+- YAML remains production authority; URL flags are temporary overrides.
 - Do not introduce normal-gameplay GPU readbacks.
 - Do not write water, stones, debris, or prop occlusion into CLOD page authority.
-- Do not default-enable a new transparent effect in its first rendering commit without headed evidence.
+- Do not default-enable a transparent effect in its first rendering commit without headed evidence.
 - Use squash merge for connector-generated incremental commits.
-- Update this status document after every merged slice.
+- Update this file after every merged slice.
 
-## Current blockers
+## Current evidence limitation
 
-The connected automation environment can create branches, commits, and PRs, but currently cannot:
-
-- clone the repository into the execution container;
-- run Node/Vitest/Vite locally;
-- launch the headed browser acceptance scene;
-- capture GPU timing or visual screenshots.
-
-Therefore PRs created from this environment must remain draft until the documented local checks and headed evidence are completed. This is an evidence limitation, not permission to lower gates.
+The connected environment can create branches, commits, and PRs, but it currently cannot run the local Node/Vitest/Vite toolchain or headed browser/GPU acceptance. Draft PRs must remain draft until those checks are executed and evidence is attached. This limitation is not permission to reduce the gates.
 
 ## Completion rule
 
-The Glacial Valley execution plan is fully done only when:
+The Glacial Valley plan is fully done only when:
 
-- every workstream is `implemented`, `acceptance_pending` with an explicit deferred decision, or `deferred` with measured justification;
-- all non-deferred definition-of-done items have evidence;
-- existing W4 water acceptance is still green;
-- new river, atmosphere, water and ground-detail acceptance is green;
+- every non-deferred workstream is implemented and accepted;
+- deferred work has measured justification;
+- existing W4 water acceptance remains green;
+- new river, atmosphere, water, and ground-detail acceptance is green;
 - zero WebGPU validation errors and zero normal-gameplay readbacks are recorded;
-- this status file and the parent execution plan are updated to `COMPLETE` with final commit/report references.
+- this status file and the parent execution plan are updated to `COMPLETE` with final commit and report references.
