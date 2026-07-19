@@ -1,0 +1,10 @@
+grass_contact:
+  enabled: true
+  max_patches: 32
+  inner_radius_scale: 0.90
+  outer_radius_scale: 1.65
+  min_height_scale: 0.08
+  flatten_strength: 0.72
+  splay_strength_m: 0.38
+  dirt_tint_strength: 0.74
+  dirt_color: [0.16, 0.11, 0.065]
