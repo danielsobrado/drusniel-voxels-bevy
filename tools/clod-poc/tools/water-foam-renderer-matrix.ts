@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +36,8 @@ function main(): void {
   const sourceUrl = typeof args.url === "string" ? args.url : undefined;
   const outRoot = resolveOutputPath(stringArg(args, "out", "shots/water/foam-renderer-matrix"));
   mkdirSync(outRoot, { recursive: true });
+  const reportPath = join(outRoot, "renderer-matrix-report.json");
+  rmSync(reportPath, { force: true });
 
   const runnerPath = fileURLToPath(new URL("./water-foam-visual-acceptance.ts", import.meta.url));
   const tsxCli = createRequire(import.meta.url).resolve("tsx/cli");
@@ -115,7 +117,6 @@ function main(): void {
     rendererParity,
     passed,
   };
-  const reportPath = join(outRoot, "renderer-matrix-report.json");
   writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`foam renderer matrix report: ${reportPath}`);
 
