@@ -28,6 +28,8 @@ webgpuSelection=0
 The water debug API reports the backend created by the application. Acceptance
 fails before capture if the runtime backend does not match the requested backend.
 The report records requested renderer, actual renderer, and forced query values.
+High and low WebGL evidence is isolated under `webgl/high` and `webgl/low` so
+one run cannot overwrite the other.
 
 ## Shared visual proof
 
@@ -69,15 +71,14 @@ npm --prefix tools/clod-poc run test -- \
   tools/water-foam-visual-contract.test.ts
 npm --prefix tools/clod-poc run build
 npx --prefix tools/clod-poc tsx tools/clod-poc/tools/water-foam-visual-acceptance.ts \
-  --renderer=webgl --quality=high --seed=1 --world=16 \
-  --out=shots/water/foam-acceptance/webgl
+  --renderer=webgl --quality=high --seed=1 --world=16
 ```
 
 ## Evidence required
 
 Before marking WebGL foam parity complete, attach:
 
-- `shots/water/foam-acceptance/webgl/report.json`;
+- `shots/water/foam-acceptance/webgl/high/report.json`;
 - rapid, smooth-river, and lake-shore final/foam frames;
 - zero browser shader/program errors;
 - confirmation that `renderer.actual` is `webgl`;
