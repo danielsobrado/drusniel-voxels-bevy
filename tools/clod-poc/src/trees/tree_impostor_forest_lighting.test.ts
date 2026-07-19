@@ -141,6 +141,8 @@ function forestState(
     textureHandle: {
       texture,
       auxTexture,
+      resolution: 1,
+      worldCells: 2048,
       update() {},
       dispose() {
         texture.dispose();

@@ -1,5 +1,9 @@
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
-import { createGrassGpuRingFallbackOutputBuffers, createGrassHydrologyTexture } from "./grass_ring_compute_resources.js";
+import {
+  createGrassGpuRingFallbackOutputBuffers,
+  createGrassHydrologyTexture,
+  createGrassSunVisibilityFallbackTexture,
+} from "./grass_ring_compute_resources.js";
 import { hydrologyAtlasGpuParams, hydrologyAtlasGpuTexture } from "./hydrology_atlas_gpu.js";
 import { getTerrainFieldCoreConfig, type ResolvedDigEdit } from "./terrain_field_core.js";
 import { composeGrassRingShader } from "./wgsl_modules.js";
@@ -11,12 +15,16 @@ import { DEFAULT_VEGETATION_TERRAIN_REJECTION_CONFIG } from "../vegetation/terra
 import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
 import { heightfieldTileGpuAtlasBindings } from "../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 import {
+  activeForestLightingGpuTexture,
+  type ForestLightingGpuTextureSource,
+} from "../forest_lighting/forest_lighting_texture.js";
+import {
   buildVegetationSlotPrefilter,
   VegetationSlotPrefilterCache,
 } from "../vegetation/vegetation_slot_prefilter.js";
 
 const WORKGROUP_SIZE = 64;
-const PARAM_BYTES = 16 * 18;
+const PARAM_BYTES = 16 * 19;
 const COUNTER_BYTES = 4 * Uint32Array.BYTES_PER_ELEMENT;
 const INDIRECT_ARGS_PER_TIER = 5;
 const TIER_COUNT = 4;
@@ -40,6 +48,8 @@ export interface GrassHydrologyData {
   worldCells: number;
   data: Float32Array;
 }
+
+export type GrassSunVisibilityParams = [worldCells: number, resolution: number, enabled: number, reserved: number];
 
 export function grassGpuRingGrid(ring: Pick<GrassRingSettings, "grid"> = DEFAULT_GRASS_SETTINGS.ring): number {
   const grid = Number.isFinite(ring.grid) ? ring.grid : DEFAULT_GRASS_SETTINGS.ring.grid;
@@ -100,6 +110,8 @@ export interface GrassGpuRingDispatchParams {
   /** Streaming hydrology atlas uniform (originX, originZ, cellSize, enabled);
    *  filled from hydrologyAtlasGpuParams() at dispatch time when omitted. */
   hydroAtlas?: [number, number, number, number];
+  /** Canonical forest-lighting texture metadata (worldCells, resolution, enabled, reserved). */
+  sunVisibility?: GrassSunVisibilityParams;
 }
 
 export interface GrassGpuRingDensityParams {
@@ -279,6 +291,8 @@ export function packGrassGpuRingParams(
   }
   const atlas = params.hydroAtlas ?? [0, 0, 0, 0];
   for (let i = 0; i < 4; i++) f32[68 + i] = atlas[i] ?? 0;
+  const visibility = params.sunVisibility ?? [1, 1, 0, 0];
+  for (let i = 0; i < 4; i++) f32[72 + i] = visibility[i] ?? 0;
   return scratch;
 }
 
@@ -298,6 +312,9 @@ export class GrassGpuRingCompute {
   private bindGroup: GPUBindGroup;
   private readonly hydroTexture: GPUTexture;
   private readonly hydroSampler: GPUSampler;
+  private sunVisibilityTexture: GPUTexture;
+  private sunVisibilitySource: ForestLightingGpuTextureSource | null;
+  private ownsSunVisibilityTexture: boolean;
   private readonly paramScratch = new ArrayBuffer(PARAM_BYTES);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
   private counts: GrassGpuRingCounts = { near: 0, mid: 0, far: 0, super: 0 };
@@ -351,6 +368,9 @@ export class GrassGpuRingCompute {
     }));
     this.hydroTexture = createGrassHydrologyTexture(device, hydroData);
     this.hydroSampler = device.createSampler({ label: "grass ring hydro sampler", magFilter: "nearest", minFilter: "nearest" });
+    this.sunVisibilitySource = activeForestLightingGpuTexture();
+    this.ownsSunVisibilityTexture = !this.sunVisibilitySource;
+    this.sunVisibilityTexture = this.sunVisibilitySource?.texture ?? createGrassSunVisibilityFallbackTexture(device);
     this.bindGroup = this.createBindGroup();
   }
 
@@ -376,6 +396,7 @@ export class GrassGpuRingCompute {
         { binding: 13, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
         { binding: 14, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "sint" } },
         { binding: 15, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+        { binding: 16, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
       ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -397,6 +418,7 @@ export class GrassGpuRingCompute {
   dispatch(params: GrassGpuRingDispatchParams, indexCounts: GrassGpuRingIndexCounts): boolean {
     if (this.failedReason) return false;
 
+    this.syncSunVisibilityTexture();
     const frame = this.frame++;
     const requestReadback = shouldRequestGpuReadback({ kind: "grass_gpu_counts", frame, intervalFrames: READBACK_INTERVAL_FRAMES });
     const readbackSlot = requestReadback ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null : null;
@@ -414,12 +436,11 @@ export class GrassGpuRingCompute {
     const activeSlots = this.prepareActiveSlotIndices(params.activeSlotIndices ?? prefilter?.activeSlotIndices);
     this.candidateCountBeforePrefilter = Math.max(0, Math.floor(params.candidateCountBeforePrefilter ?? prefilter?.candidateSlotsBeforePrefilter ?? grassGpuRingSlotCount(this.ring)));
     this.candidateCountAfterPrefilter = Math.max(0, Math.floor(params.candidateCountAfterPrefilter ?? prefilter?.candidateSlotsAfterPrefilter ?? activeSlots.count));
-    packGrassGpuRingParams(
-      params.hydroAtlas ? params : { ...params, hydroAtlas: hydrologyAtlasGpuParams() },
-      indexCounts,
-      this.ring,
-      this.paramScratch,
-    );
+    packGrassGpuRingParams({
+      ...params,
+      hydroAtlas: params.hydroAtlas ?? hydrologyAtlasGpuParams(),
+      sunVisibility: params.sunVisibility ?? this.sunVisibilityParams(),
+    }, indexCounts, this.ring, this.paramScratch);
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
     this.device.queue.writeBuffer(this.activeSlotBuffer, 0, activeSlots.data.buffer, activeSlots.data.byteOffset, activeSlots.data.byteLength);
 
@@ -472,12 +493,38 @@ export class GrassGpuRingCompute {
     this.digEdits.destroy();
     this.fieldParams.destroy();
     this.hydroTexture.destroy();
+    if (this.ownsSunVisibilityTexture) this.sunVisibilityTexture.destroy();
     if (this.fallbackOutputBuffers) destroyUniqueOutputBuffers(this.fallbackOutputBuffers, this.indirectArgs);
     if (!this.outputBuffers) this.indirectArgs.destroy();
     for (const slot of this.counterReadbacks) {
       if (slot.busy) slot.destroyAfterMap = true;
       else slot.buffer.destroy();
     }
+  }
+
+  private syncSunVisibilityTexture(): void {
+    const source = activeForestLightingGpuTexture();
+    if (source?.texture === this.sunVisibilityTexture) {
+      this.sunVisibilitySource = source;
+      return;
+    }
+    if (!source && this.ownsSunVisibilityTexture) {
+      this.sunVisibilitySource = null;
+      return;
+    }
+
+    if (this.ownsSunVisibilityTexture) this.sunVisibilityTexture.destroy();
+    this.sunVisibilitySource = source;
+    this.ownsSunVisibilityTexture = !source;
+    this.sunVisibilityTexture = source?.texture ?? createGrassSunVisibilityFallbackTexture(this.device);
+    this.bindGroup = this.createBindGroup();
+  }
+
+  private sunVisibilityParams(): GrassSunVisibilityParams {
+    const source = this.sunVisibilitySource;
+    return source
+      ? [source.worldCells, source.resolution, 1, 0]
+      : [1, 1, 0, 0];
   }
 
   private createBindGroup(): GPUBindGroup {
@@ -499,6 +546,7 @@ export class GrassGpuRingCompute {
         { binding: 13, resource: canonicalHeight.heightView },
         { binding: 14, resource: canonicalHeight.residencyView },
         { binding: 15, resource: { buffer: canonicalHeight.params } },
+        { binding: 16, resource: this.sunVisibilityTexture.createView() },
       ],
     });
   }

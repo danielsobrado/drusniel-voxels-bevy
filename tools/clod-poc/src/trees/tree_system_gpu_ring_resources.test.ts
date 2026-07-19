@@ -214,6 +214,8 @@ function forestState(): ForestLightingMaterialState {
     textureHandle: {
       texture,
       auxTexture,
+      resolution: 1,
+      worldCells: 64,
       update() {},
       dispose() {
         texture.dispose();
