@@ -68,6 +68,17 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
     riverColor: [0.08, 0.43, 0.39],
     shallowBlend: 0.62,
     deepBlend: 0.28,
+    scatterExtinction: 0.42,
+    scatterStrength: 0.85,
+    scatterAmbient: 0.72,
+  },
+  glitter: {
+    enabled: true,
+    tightExponent: 384,
+    tightGain: 1.15,
+    broadExponent: 96,
+    broadGain: 0.28,
+    lowSunGain: 0.35,
   },
   refraction: {
     enabled: false,
