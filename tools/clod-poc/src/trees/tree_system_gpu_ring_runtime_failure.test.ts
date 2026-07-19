@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { cloneTreeSettings, type TreeLod } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
@@ -12,6 +12,14 @@ import type { TreeGpuRingDrawResources, TreeWebGpuBackendAccess } from "./tree_s
 import type { TreeGpuRingMesh } from "./tree_system_gpu_ring_draw.js";
 
 describe("tree GPU ring runtime failure handling", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("falls back once and latches a synchronous initialization failure", () => {
     const fixture = runtimeFixture(true);
     fixture.createDrawResources.mockImplementation(() => {
@@ -24,13 +32,16 @@ describe("tree GPU ring runtime failure handling", () => {
     expect(fixture.input.state.stats.reason).toBe("tree draw init failed");
     expect(fixture.input.state.failedKey).not.toBe("");
     expect(fixture.createDrawResources).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledTimes(1);
 
     expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(false);
     expect(fixture.createDrawResources).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledTimes(1);
 
     fixture.input.settings.seed++;
     expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(false);
     expect(fixture.createDrawResources).toHaveBeenCalledTimes(2);
+    expect(console.warn).toHaveBeenCalledTimes(2);
   });
 
   it("reports an error without CPU fallback and does not retry the same key", () => {
@@ -43,6 +54,7 @@ describe("tree GPU ring runtime failure handling", () => {
     expect(fixture.input.state.status).toBe("error");
     expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(false);
     expect(fixture.createDrawResources).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledTimes(1);
   });
 
   it("allows an explicit clear to retry the same configuration", () => {
@@ -88,6 +100,38 @@ describe("tree GPU ring runtime failure handling", () => {
     expect(fixture.input.state.ringMeshes).toEqual([]);
     expect(fixture.input.state.prepassTwins).toEqual([]);
     expect(fixture.input.state.draw).toBeNull();
+  });
+
+  it("completes draw teardown when compute destruction throws", () => {
+    const fixture = runtimeFixture(true);
+    const geometry = new THREE.InstancedBufferGeometry();
+    const geometryDispose = vi.spyOn(geometry, "dispose");
+    const handle = fakeHandle();
+    const mesh = new THREE.Mesh(geometry, handle.regularMaterial) as TreeGpuRingMesh;
+    const meshDispose = vi.spyOn(mesh as THREE.Mesh & { dispose(): void }, "dispose");
+    const destroy = vi.fn(() => {
+      throw new Error("compute destroy failed");
+    });
+    fixture.input.state.compute = { destroy } as unknown as NonNullable<typeof fixture.input.state.compute>;
+    fixture.input.root.add(mesh);
+    fixture.input.state.ringMeshes = [mesh];
+    fixture.input.state.draw = {
+      meshes: [mesh],
+      materialHandles: { oak: handle },
+    } as TreeGpuRingDrawResources;
+
+    clearTreeGpuRing(fixture.input);
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(meshDispose).toHaveBeenCalledTimes(1);
+    expect(geometryDispose).toHaveBeenCalledTimes(1);
+    expect(handle.dispose).toHaveBeenCalledTimes(1);
+    expect(fixture.input.state.compute).toBeNull();
+    expect(fixture.input.state.draw).toBeNull();
+    expect(console.warn).toHaveBeenCalledWith(
+      "[trees-gpu-ring] compute disposal failed",
+      expect.any(Error),
+    );
   });
 });
 
