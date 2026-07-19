@@ -15,6 +15,9 @@ import {
   extractWaterFoamAcceptancePoses,
   type WaterFoamAcceptancePoses,
 } from "./water-foam-pose-parity.js";
+import { evaluateWaterFoamQualityParity } from "./water-foam-quality-parity-contract.js";
+import { extractWaterFoamAcceptanceMetrics } from "./water-foam-report-metrics.js";
+import type { FoamVisualAcceptanceInput } from "./water-foam-visual-contract.js";
 
 interface TierReport {
   readonly quality: string;
@@ -34,6 +37,7 @@ function main(): void {
   const require = createRequire(import.meta.url);
   const tsxCli = require.resolve("tsx/cli");
   const reports: TierReport[] = [];
+  const metricsByQuality = new Map<string, FoamVisualAcceptanceInput>();
   let canonicalReportPath: string | null = null;
   let canonicalPoses: WaterFoamAcceptancePoses | null = null;
 
@@ -65,6 +69,7 @@ function main(): void {
       acceptance?: { passed?: boolean; failures?: unknown };
       [key: string]: unknown;
     };
+    metricsByQuality.set(quality, extractWaterFoamAcceptanceMetrics(parsed));
     const poses = extractWaterFoamAcceptancePoses(parsed);
     let poseParity = true;
     if (!canonicalPoses) {
@@ -93,12 +98,18 @@ function main(): void {
     reports.push({ quality, reportPath, passed, poseParity, failures });
   }
 
-  const passed = reports.every((report) => report.passed && report.poseParity);
+  const highMetrics = metricsByQuality.get("high");
+  const lowMetrics = metricsByQuality.get("low");
+  if (!highMetrics || !lowMetrics) throw new Error("foam quality matrix requires high and low metrics");
+  const qualityParity = evaluateWaterFoamQualityParity(highMetrics, lowMetrics);
+  const passed = reports.every((report) => report.passed && report.poseParity)
+    && qualityParity.passed;
   const matrixReport = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     seed,
     world,
     canonicalPoseReport: canonicalReportPath,
+    qualityParity,
     passed,
     tiers: reports,
   };
@@ -107,12 +118,13 @@ function main(): void {
   console.log(`foam quality matrix report: ${matrixPath}`);
 
   if (!passed) {
-    const failures = reports
+    const tierFailures = reports
       .filter((report) => !report.passed)
       .flatMap((report) => report.failures.length > 0
         ? report.failures.map((failure) => `${report.quality}: ${failure}`)
         : [`${report.quality}: acceptance process failed`]);
-    throw new Error(`water foam quality matrix failed:\n- ${failures.join("\n- ")}`);
+    const parityFailures = qualityParity.failures.map((failure) => `cross-tier: ${failure}`);
+    throw new Error(`water foam quality matrix failed:\n- ${[...tierFailures, ...parityFailures].join("\n- ")}`);
   }
 }
 
