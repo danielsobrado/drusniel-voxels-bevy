@@ -2,8 +2,13 @@ import * as THREE from "three";
 import { WATER_DEBUG_MODES, type WaterDebugState, type ShoreSurfBandSettings } from "../../water/index.js";
 import type { WaterField } from "../../water/index.js";
 import type { WaterClipmap } from "../../water/index.js";
+import {
+  getWaterFoamDistanceDebugOverride,
+  setWaterFoamDistanceDebugOverrideM,
+} from "../../water/water_foam_distance.js";
 import { getWaterFoamRuntimeDiagnostics } from "../../water/water_foam_diagnostics.js";
 import type { RiverCascadeParticleOverlay } from "../../water/riverCascadeParticleOverlay.js";
+import { installWaterFoamTimeFreeze } from "./water_foam_time_freeze.js";
 import type { WaterDebugPoseHooks, WaterControllerDeps } from "./water_controller_types.js";
 
 export function installWaterDebugApi(
@@ -17,6 +22,10 @@ export function installWaterDebugApi(
 ): void {
   const enabled = deps.devMode || deps.searchParams.get("waterDebug") === "1" || deps.searchParams.get("debug") === "1";
   if (!enabled) return;
+
+  const foamTimeFreeze = installWaterFoamTimeFreeze(clipmap);
+  setWaterFoamDistanceDebugOverrideM(null);
+  foamTimeFreeze.setFrozen(false);
 
   const sampleForDebug = (x: number, z: number) => {
     const s = field.sample(x, z);
@@ -94,6 +103,11 @@ export function installWaterDebugApi(
     );
     return setSunLightGpuAtlasDebugOverride(visibility);
   };
+  const setWaterFoamDistanceOverrideM = (value?: number | null) => {
+    const distanceM = value === undefined || value === null ? null : Number(value);
+    return setWaterFoamDistanceDebugOverrideM(distanceM);
+  };
+  const setWaterFoamTimeFrozen = (frozen = true) => foamTimeFreeze.setFrozen(Boolean(frozen));
   const waterDebugInfo = () => {
     const uiState = deps.getUiState();
     return {
@@ -107,6 +121,8 @@ export function installWaterDebugApi(
       clipmapExclusionBand: field.getClipmapExclusionBand(),
       debugModes: { ...WATER_DEBUG_MODES },
       foam: getWaterFoamRuntimeDiagnostics(deps.searchParams),
+      foamDistanceDebug: getWaterFoamDistanceDebugOverride(),
+      foamTimeDebug: foamTimeFreeze.getState(),
       residueOverlay: true,
       cascadeParticles: cascadeParticles.getStats(),
       clipmap: {
@@ -134,6 +150,8 @@ export function installWaterDebugApi(
     setShoreSurfBand,
     setCameraPose,
     setWaterFoamSunVisibilityOverride,
+    setWaterFoamDistanceOverrideM,
+    setWaterFoamTimeFrozen,
     waterDebugInfo,
   });
 }
