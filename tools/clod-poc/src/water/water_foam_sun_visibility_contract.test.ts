@@ -13,16 +13,17 @@ const ATLAS_NODES_SOURCE = readFileSync(
 );
 
 describe("water foam sun visibility contract", () => {
-  it("samples the GPU atlas directly in the shared foam node path", () => {
+  it("samples the GPU atlas in the shared foam node path without CPU reads", () => {
     expect(FOAM_SOURCE).toContain("buildSunLightGpuAtlasNodes");
-    expect(FOAM_SOURCE).toContain("getSunLightGpuAtlas()");
     expect(FOAM_SOURCE).not.toContain("sampleSunLightGpuAtlas");
+    expect(ATLAS_NODES_SOURCE).toContain("texture(refs.texture, uv).r");
   });
 
-  it("publishes atlas transforms after update and invalidation", () => {
-    expect(ATLAS_SOURCE.match(/syncSunLightGpuAtlasNodes\(state\)/g)).toHaveLength(2);
-    expect(ATLAS_NODES_SOURCE).toContain("originX.value = source.originX");
-    expect(ATLAS_NODES_SOURCE).toContain("worldSize.value");
+  it("keeps the atlas core renderer-neutral", () => {
+    expect(ATLAS_SOURCE).not.toContain('from "three/tsl"');
+    expect(ATLAS_SOURCE).toContain("subscribeSunLightGpuAtlas");
+    expect(ATLAS_SOURCE.match(/notifyListeners\(\)/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(ATLAS_NODES_SOURCE).toContain("subscribeSunLightGpuAtlas(syncSharedState)");
   });
 
   it("treats missing and out-of-atlas visibility as fully lit", () => {
