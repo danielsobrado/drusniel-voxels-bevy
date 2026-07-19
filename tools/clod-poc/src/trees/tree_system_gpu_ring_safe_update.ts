@@ -14,6 +14,9 @@ export function updateTreeGpuRingTreesSafely(
   center: THREE.Vector3,
   camera?: THREE.Camera,
 ): boolean {
+  const availabilityReason = treeGpuRingAvailabilityFailureReason(input);
+  if (availabilityReason) return applyTreeGpuRingAvailabilityFallback(input, availabilityReason);
+
   const key = treeGpuRingKey(input.settings, input.worldCells);
   if (input.state.failedKey === key) {
     input.state.status = input.settings.gpu.fallbackToCpu ? "fallback-cpu" : "error";
@@ -54,6 +57,24 @@ function failTreeGpuRingExecution(
   return false;
 }
 
+function applyTreeGpuRingAvailabilityFallback(
+  input: TreeGpuRingRuntimeInput,
+  reason: string,
+): false {
+  if (treeGpuRingHasOwnedResources(input)) clearTreeGpuRing(input);
+  input.state.status = input.settings.gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+  input.state.stats = {
+    ...input.state.stats,
+    reason,
+  };
+  if (input.state.loggedError !== reason) {
+    input.state.loggedError = reason;
+    const action = input.settings.gpu.fallbackToCpu ? "falling back to CPU" : "GPU ring unavailable";
+    console.error(`[trees-gpu-ring] ${action}: ${reason}`);
+  }
+  return false;
+}
+
 function logCpuFallbackError(
   input: TreeGpuRingRuntimeInput,
   previousLoggedError: string | null,
@@ -68,9 +89,21 @@ function logCpuFallbackError(
 function resolveCpuFallbackReason(input: TreeGpuRingRuntimeInput): string {
   if (input.state.loggedError) return input.state.loggedError;
   if (input.state.stats.reason) return input.state.stats.reason;
+  return treeGpuRingAvailabilityFailureReason(input) ?? DEFAULT_FALLBACK_ERROR;
+}
+
+function treeGpuRingAvailabilityFailureReason(input: TreeGpuRingRuntimeInput): string | null {
   if (input.unsupportedReason) return input.unsupportedReason;
   if (!input.gpuDevice) return "WebGPU device is unavailable";
   if (!input.gpuBackend) return "WebGPU tree backend is unavailable";
   if (!input.supportsGpuTrees) return "GPU tree rendering is unsupported";
-  return DEFAULT_FALLBACK_ERROR;
+  return null;
+}
+
+function treeGpuRingHasOwnedResources(input: TreeGpuRingRuntimeInput): boolean {
+  return !!input.state.compute
+    || !!input.state.init
+    || !!input.state.draw
+    || input.state.ringMeshes.length > 0
+    || input.state.prepassTwins.length > 0;
 }
