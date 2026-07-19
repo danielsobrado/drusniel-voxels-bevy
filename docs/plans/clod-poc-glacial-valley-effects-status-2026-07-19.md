@@ -67,16 +67,16 @@ The largest remaining areas are:
 
 | Workstream | Status | Current state | Completion requirement |
 |---|---|---|---|
-| GV-CLOD-00 Baseline/status | `partial` | Consolidated plan exists. This companion status file now tracks delivery. Reference pin and deterministic before-state inventory still need confirmation. | Pin reference revision and record canonical before/after poses and metrics. |
-| GV-CLOD-01 EnvironmentQuery | `partial` | Typed scalar contracts, caller-owned batch buffers, field masks, hint propagation, hydrology adapter, diagnostics, and focused tests exist. Hydrology provides surface/water/river values. | Compose real terrain normals, material weights, and sun visibility; route production mask and dressing consumers through batch APIs. |
-| GV-CLOD-02 Far sun visibility | `partial` | Existing budgeted CPU/worker tile builder, atlas, far terrain, fog, and god-ray consumers are production foundations. Worker failover is hardened. | Profile current builder; add remaining consumers; add GPU builder only if measurements justify it; integrate prop overlay when available. |
+| GV-CLOD-00 Baseline/status | `open_pr` | Consolidated plan exists. PR #187 adds this live status owner. Reference pin and deterministic before-state inventory still need confirmation. | Merge #187, pin the reference revision, and record canonical before/after poses and metrics. |
+| GV-CLOD-01 EnvironmentQuery | `partial` | Typed scalar contracts, caller-owned batch buffers, field masks, hint propagation, hydrology adapter, diagnostics, and focused tests exist. PR #188 batches mask consumption. PR #189 adds live sun-atlas visibility queries. | Validate and merge #188/#189; compose real terrain normals and material weights; install the composed query in production; route dressing consumers through it. |
+| GV-CLOD-02 Far sun visibility | `partial` | Existing budgeted CPU/worker tile builder, atlas, far terrain, fog, and god-ray consumers are production foundations. Worker failover is hardened. PR #189 exposes CPU/query parity over the live atlas. | Validate and merge #189; profile the builder; add remaining consumers; add a GPU builder only if measurements justify it; integrate prop overlay when available. |
 | GV-CLOD-03 Gravel bars/cobbles | `acceptance_pending` | Deterministic visual gravel-bar field, GPU hydrology packing, GPU gravel-bar stones, and underwater river cobbles exist behind controls. | Add safe bed elevation integration and one real braided reach; prove 100% continuity, non-zero accepted cobbles, no floating instances, and cost gates. |
 | GV-CLOD-04 Glacial water | `partial` | Biome-driven absorption/turbidity/reflection damping, rock-flour colour response, reflection clipmap tiers, live GUI controls, and deterministic capture tooling exist. | Add explicit thickness-based suspended scattering, two-lobe glitter, intended mid-distance terrain reflection approximation, and measured A/B evidence. |
 | GV-CLOD-05 Prop occlusion overlay | `pending` | No shared large-prop height/occupancy overlay is on `main`. | Add dirty-region, stale-safe overlay; integrate with far sun visibility, mid-water reflection, and mist clipping. |
-| GV-CLOD-06 Environmental masks | `partial` | CPU formulas and typed outputs exist for river cobble, river mist, rapid splash, sunbeam mote, calm pool, frost, dew, and shore debris. | Use complete authoritative query inputs, switch batch evaluation away from repeated scalar queries, and add debug visualizations/probes. |
+| GV-CLOD-06 Environmental masks | `open_pr` | CPU formulas and typed outputs exist for river cobble, river mist, rapid splash, sunbeam mote, calm pool, frost, dew, and shore debris. PR #188 replaces repeated scalar queries with one batch authority call and shared scalar/batch math. | Validate and merge #188; use complete authoritative query inputs; add debug visualizations and numeric probes. |
 | GV-CLOD-07 Ambient effects | `partial` | Camera-local river mist is on `main`. Sunbeam motes are currently in PR #186. | Finish and accept motes; add GPU/procedural rapid droplets, calm-water rings, dew, and frost; keep combined budget within gate. |
 | GV-CLOD-08 Ground debris | `pending` | No shared GPU debris ring found. | Implement grouped compute/indirect debris ring for pebbles, twigs, bark, litter, and gravel with no CPU transforms or visible seams. |
-| GV-CLOD-09 Biome visual state | `partial` | Shared state, YAML parsing, season interpolation, sun-elevation morning mist, weather wetness, runtime binding, and water/mist consumers exist. | Route terrain, grass, understory, trees, motes, dew/frost, bloom, and look-development controls through the shared state. |
+| GV-CLOD-09 Biome visual state | `partial` | Shared state, YAML parsing, season interpolation, sun-elevation morning mist, weather wetness, runtime binding, and water/mist consumers exist. PR #186 adds a mote consumer. | Validate #186; route terrain, grass, understory, trees, dew/frost, bloom, and look-development controls through the shared state. |
 | GV-CLOD-10 QA/rollout | `partial` | Glacial water capture tooling and existing water W4 gates exist. Focused unit tests exist for landed slices. | Add river-detail, atmosphere, debris, time-of-day, movement, and cumulative performance acceptance; make final default-enable decisions. |
 
 ## Open pull requests
@@ -104,21 +104,82 @@ Required before merge:
 
 Do not create another sunbeam-mote implementation while PR #186 is open.
 
+### PR #187 — Live completion status
+
+Status: `open_pr`
+
+Current scope:
+
+- introduces this status document;
+- records current workstream state and blockers;
+- records the ordered remaining PR sequence;
+- makes document updates part of the completion contract.
+
+Required before merge:
+
+- verify all classifications against current `main`;
+- confirm PR references and commands;
+- squash merge as a documentation-only change.
+
+### PR #188 — Batched environmental masks
+
+Status: `open_pr`
+
+Current scope:
+
+- centralizes environmental-mask formulas for scalar and batch parity;
+- performs one `EnvironmentBatchSampler` call per finite `Float32Array` mask batch;
+- requests only water, river, normal, and visibility;
+- caches one workspace per caller-owned output;
+- preserves scalar fallback for non-batch callers;
+- adds fast-path and parity tests.
+
+Required before merge:
+
+- typecheck;
+- environment-mask and EnvironmentQuery focused tests;
+- build;
+- runtime proof of one authority batch call;
+- no allocation growth after workspace warm-up;
+- no fine hydrology-cache construction from far hints.
+
+### PR #189 — Live sun-visibility EnvironmentQuery adapter
+
+Status: `open_pr`
+
+Current scope:
+
+- adds a CPU sampler over the existing red-channel sun-visibility atlas;
+- reports source, validity, atlas revision, and texel cell size;
+- treats disabled, missing, outside, and malformed samples as lit-but-invalid;
+- adds a scalar and batch query decorator that replaces only visibility;
+- adds atlas/query tests.
+
+Required before merge:
+
+- typecheck;
+- sun-atlas and EnvironmentQuery focused tests;
+- build;
+- CPU/GPU debug parity probes;
+- follow-up production composition root before claiming runtime completion.
+
 ## Detailed remaining backlog
 
 ### P0 — Finish shared environmental authority
 
 This is the highest-priority architecture work.
 
+- [ ] Validate and merge PR #188.
+- [ ] Validate and merge PR #189.
 - [ ] Add a composed EnvironmentQuery implementation that delegates each field to its canonical owner.
 - [ ] Surface height: live terrain/tile/CLOD/far-summary hierarchy with source metadata.
 - [ ] Surface normal: authoritative terrain normal, not `(0, 1, 0)` fallback.
 - [ ] Material weights: canonical terrain material/splat weights.
-- [ ] Water and river: existing hydrology authority.
-- [ ] Visibility: existing far sun-visibility cache/atlas CPU query.
-- [ ] Preserve real cell-size hints through every adapter.
+- [x] Water and river: existing hydrology authority.
+- [~] Visibility: PR #189 exposes the existing far sun-visibility atlas; production composition remains.
+- [x] Preserve real cell-size hints through existing hydrology and batch adapters.
 - [ ] Keep scalar APIs for diagnostics and sparse probes only.
-- [ ] Convert environmental-mask batch evaluation to one batch query plus vectorized mask evaluation.
+- [~] Convert environmental-mask batch evaluation to one batch query plus vectorized mask evaluation: PR #188 open.
 - [ ] Route river dressing and CPU stone fallback through the facade.
 - [ ] Add source/validity/revision debug overlay.
 - [ ] Prove no fine hydrology tile construction from far consumers.
@@ -226,7 +287,7 @@ Exit gate:
 
 - [ ] Terrain seasonal tint and snowline.
 - [ ] Grass, understory and tree seasonal color.
-- [ ] Mote pollen/frost mode.
+- [~] Mote pollen/frost mode: PR #186 open.
 - [ ] Dew/frost strength.
 - [ ] Flower bloom.
 - [ ] Compact look-development GUI with reset/export.
@@ -263,22 +324,23 @@ Exit gate:
 
 Use small, reviewable PRs from current `main`. Avoid long-lived stacked branches unless a dependency genuinely requires them.
 
-1. `docs(clod-poc): track Glacial Valley completion status` — this file.
-2. Resolve and merge PR #186 after validation.
-3. `feat(clod-poc): compose authoritative environment queries`.
-4. `perf(clod-poc): batch environmental mask evaluation`.
-5. `feat(clod-poc): carve safe gravel bars and braided reaches`.
-6. `test(clod-poc): accept braided rivers and underwater cobbles`.
-7. `feat(clod-poc): add physical glacial water scattering and glitter`.
-8. `feat(clod-poc): add far-summary water reflection tier`.
-9. `feat(clod-poc): add large-prop occlusion overlay`.
-10. `feat(clod-poc): add rapid splash droplets`.
-11. `feat(clod-poc): add calm-water rise rings`.
-12. `feat(clod-poc): add dew and frost material accents`.
-13. `feat(clod-poc): add GPU ground-debris ring`.
-14. `feat(clod-poc): complete biome visual-state routing`.
-15. `test(clod-poc): add Glacial Valley cumulative acceptance`.
-16. `docs(clod-poc): close Glacial Valley execution plan`.
+1. PR #187 — `docs(clod-poc): track Glacial Valley completion status` — open.
+2. PR #188 — `perf(clod-poc): batch environmental mask queries` — open.
+3. PR #189 — `feat(clod-poc): query sun visibility from the live atlas` — open.
+4. Resolve and merge PR #186 after validation.
+5. `feat(clod-poc): compose authoritative environment queries`.
+6. `feat(clod-poc): carve safe gravel bars and braided reaches`.
+7. `test(clod-poc): accept braided rivers and underwater cobbles`.
+8. `feat(clod-poc): add physical glacial water scattering and glitter`.
+9. `feat(clod-poc): add far-summary water reflection tier`.
+10. `feat(clod-poc): add large-prop occlusion overlay`.
+11. `feat(clod-poc): add rapid splash droplets`.
+12. `feat(clod-poc): add calm-water rise rings`.
+13. `feat(clod-poc): add dew and frost material accents`.
+14. `feat(clod-poc): add GPU ground-debris ring`.
+15. `feat(clod-poc): complete biome visual-state routing`.
+16. `test(clod-poc): add Glacial Valley cumulative acceptance`.
+17. `docs(clod-poc): close Glacial Valley execution plan`.
 
 A PR may be split further when it touches more than one authority or cannot be reviewed safely as one unit.
 
