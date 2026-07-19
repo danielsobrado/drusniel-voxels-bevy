@@ -13,6 +13,16 @@ fn contact_candidate_is_better(distance_sq: f32, index: u32, best_distance_sq: f
   return distance_sq < best_distance_sq || (distance_sq == best_distance_sq && index < best_index);
 }
 
+fn contact_source_index(candidate_slot: u32, large_count: u32, medium_count: u32, class_cap: u32) -> u32 {
+  if (candidate_slot < large_count) {
+    return candidate_slot;
+  }
+  if (candidate_slot < large_count + medium_count) {
+    return class_cap + candidate_slot - large_count;
+  }
+  return class_cap * 2u + candidate_slot - large_count - medium_count;
+}
+
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn select_contact_patches(@builtin(local_invocation_index) local_index: u32) {
   let class_cap = params.view_counts.z;
@@ -33,20 +43,18 @@ fn select_contact_patches(@builtin(local_invocation_index) local_index: u32) {
     return;
   }
 
+  let large_count = min(atomicLoad(&counters[1u]), class_cap);
+  let medium_count = min(atomicLoad(&counters[2u]), class_cap);
+  let small_count = min(atomicLoad(&counters[3u]), class_cap);
+  let accepted_count = large_count + medium_count + small_count;
+
   for (var rank = 0u; rank < STONE_CONTACT_PATCH_CAPACITY; rank = rank + 1u) {
     var best_distance_sq = 3.402823466e+38;
     var best_index = STONE_CONTACT_INVALID_INDEX;
 
     if (rank < configured_count) {
-      let source_count = class_cap * 3u;
-      for (var flat_index = local_index; flat_index < source_count; flat_index = flat_index + WORKGROUP_SIZE) {
-        let cls = flat_index / class_cap;
-        let slot = flat_index % class_cap;
-        let produced = min(atomicLoad(&counters[cls + 1u]), class_cap);
-        if (slot >= produced) {
-          continue;
-        }
-
+      for (var candidate_slot = local_index; candidate_slot < accepted_count; candidate_slot = candidate_slot + WORKGROUP_SIZE) {
+        let flat_index = contact_source_index(candidate_slot, large_count, medium_count, class_cap);
         var already_selected = false;
         for (var selected_rank = 0u; selected_rank < rank; selected_rank = selected_rank + 1u) {
           if (contact_selected_index[selected_rank] == flat_index) {
@@ -57,8 +65,8 @@ fn select_contact_patches(@builtin(local_invocation_index) local_index: u32) {
           continue;
         }
 
-        let source = source_a[flat_index];
-        let delta = source.xz - params.ring.xy;
+        let stone_data = source_a[flat_index];
+        let delta = stone_data.xz - params.ring.xy;
         let distance_sq = dot(delta, delta);
         if (contact_candidate_is_better(distance_sq, flat_index, best_distance_sq, best_index)) {
           best_distance_sq = distance_sq;
@@ -100,11 +108,11 @@ fn select_contact_patches(@builtin(local_invocation_index) local_index: u32) {
         grass_contact_patches[rank] = vec4<f32>(0.0);
       } else {
         let cls = selected / class_cap;
-        let source = source_a[selected];
-        let radius = max(0.01, source.w * class_base_radius(cls));
+        let stone_data = source_a[selected];
+        let radius = max(0.01, stone_data.w * class_base_radius(cls));
         let inner_radius = radius * max(params.contact_patch_config.x, 0.0);
         let outer_radius = max(inner_radius + 0.001, radius * max(params.contact_patch_config.y, 0.0));
-        grass_contact_patches[rank] = vec4<f32>(source.x, source.z, inner_radius, outer_radius);
+        grass_contact_patches[rank] = vec4<f32>(stone_data.x, stone_data.z, inner_radius, outer_radius);
       }
     }
     workgroupBarrier();
