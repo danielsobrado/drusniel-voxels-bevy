@@ -92,7 +92,7 @@ export function createBiomeVisualGui(gui: GUI): void {
   model.exportYaml = () => { void exportYaml(); };
 
   valueControllers.push(folder.add(model, "enabled").name("enabled").onChange(apply));
-  valueControllers.push(folder.add(model, "seasonT", 0, 1, 0.001).name("season marker").onChange(apply));
+  valueControllers.push(folder.add(model, "seasonT").name("season marker").disable());
   valueControllers.push(folder.add(model, "green", 0, 1, 0.01).name("green").onChange(apply));
   valueControllers.push(folder.add(model, "autumn", 0, 1, 0.01).name("autumn").onChange(apply));
   valueControllers.push(folder.add(model, "bloom", 0, 1, 0.01).name("flower bloom").onChange(apply));
@@ -149,7 +149,7 @@ function createModel(state: BiomeVisualState | null): BiomeVisualGuiModel {
     green: 1,
     autumn: 0,
     bloom: 1,
-    snowlineM: 1_000_000,
+    snowlineM: 10_000,
     glacialMurkiness: 0,
     morningMist: 0,
     pollenAmount: 0,
