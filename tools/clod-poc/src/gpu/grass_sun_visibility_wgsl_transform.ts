@@ -1,5 +1,9 @@
 const PARAM_FIELD = "  sun_visibility: vec4<f32>,\n";
-const TEXTURE_BINDING = "@group(0) @binding(16) var forest_lighting_texture: texture_2d<f32>;\n";
+const TEXTURE_BINDINGS = [
+  "@group(0) @binding(16) var forest_lighting_texture: texture_2d<f32>;",
+  "@group(0) @binding(17) var forest_lighting_sampler: sampler;",
+  "",
+].join("\n");
 
 const SUN_VISIBILITY_WGSL = `
 fn grass_sun_visibility(wpos: vec2<f32>) -> f32 {
@@ -8,10 +12,13 @@ fn grass_sun_visibility(wpos: vec2<f32>) -> f32 {
   }
 
   let world_size = max(params.sun_visibility.x, 1.0);
-  let resolution = max(i32(params.sun_visibility.y), 1);
   let uv = clamp(wpos / world_size, vec2<f32>(0.0), vec2<f32>(0.999999));
-  let coord = vec2<i32>(floor(uv * f32(resolution)));
-  let shadow_proxy = textureLoad(forest_lighting_texture, coord, 0).g;
+  let shadow_proxy = textureSampleLevel(
+    forest_lighting_texture,
+    forest_lighting_sampler,
+    uv,
+    0.0,
+  ).g;
   return clamp(1.0 - shadow_proxy, 0.0, 1.0);
 }
 `;
@@ -29,10 +36,10 @@ export function withGrassSunVisibility(source: string): string {
 
   const withBinding = withParams.replace(
     "@group(0) @binding(12) var hydro_atlas_texture: texture_2d<f32>;\n",
-    `@group(0) @binding(12) var hydro_atlas_texture: texture_2d<f32>;\n${TEXTURE_BINDING}`,
+    `@group(0) @binding(12) var hydro_atlas_texture: texture_2d<f32>;\n${TEXTURE_BINDINGS}`,
   );
   if (withBinding === withParams) {
-    throw new Error("grass sun visibility WGSL transform could not add texture binding");
+    throw new Error("grass sun visibility WGSL transform could not add texture bindings");
   }
 
   const functionMarker = "fn placement_hydro_atlas_params() -> vec4<f32> {";
