@@ -1,12 +1,15 @@
 import * as THREE from "three";
-import { DEFAULT_CAUSTICS_CONFIG } from "./causticsConfig.js";
 import { registerSceneStyleApplier } from "../style/scene_style.js";
+import { DEFAULT_CAUSTICS_CONFIG } from "./causticsConfig.js";
 import {
   WATER_BODY_KIND_COUNT,
   waterBodyPresetsByKind,
   type WaterBodyVisualPresets,
 } from "./water_body_presets.js";
-import { publishWaterFoamDistanceFade } from "./water_foam_distance.js";
+import {
+  getWaterFoamDistanceDebugUniforms,
+  publishWaterFoamDistanceFade,
+} from "./water_foam_distance.js";
 import type { WaterMaterialParams } from "./water_material_types.js";
 import type { WaterRefractionConfig, WaterReflectionConfig } from "./waterConfig.js";
 
@@ -32,6 +35,8 @@ export interface WaterUniforms {
   uShoreDistFoamEnd: { value: number };
   uFoamDetailFadeStartM: { value: number };
   uFoamDetailFadeEndM: { value: number };
+  uFoamDetailDistanceOverrideEnabled: { value: number };
+  uFoamDetailDistanceOverrideM: { value: number };
   uBodyShallow: { value: THREE.Vector3[] };
   uBodyDeep: { value: THREE.Vector3[] };
   uBodyAbsorption: { value: THREE.Vector3[] };
@@ -100,6 +105,7 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
   const caustics = params.caustics ?? DEFAULT_CAUSTICS_CONFIG;
   const bodyArrays = createBodyUniformArrays();
   const foamDistance = publishWaterFoamDistanceFade(visual.foam);
+  const foamDistanceDebug = getWaterFoamDistanceDebugUniforms();
   syncWaterBodyUniformArrays(bodyArrays, visual.bodies);
 
   const uniforms: WaterUniforms = {
@@ -125,6 +131,8 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
     uShoreDistFoamEnd: { value: visual.foam.shoreDistanceEnd },
     uFoamDetailFadeStartM: { value: foamDistance.startM },
     uFoamDetailFadeEndM: { value: foamDistance.endM },
+    uFoamDetailDistanceOverrideEnabled: foamDistanceDebug.enabled,
+    uFoamDetailDistanceOverrideM: foamDistanceDebug.distanceM,
     uFoamNoiseScale: { value: visual.foam.noiseScale },
     uFoamShoreStrength: { value: visual.foam.shoreStrength },
     uFoamRiverStrength: { value: visual.foam.riverStrength },
@@ -158,9 +166,6 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
     uCausticsSpeed: { value: caustics.speed },
   };
 
-  // Scene style: the configured values stay the baseline; the applier restyles
-  // this instance live and is applied once immediately so late-created water
-  // materials come up matching the active preset.
   const styleBaseline = {
     foamShore: visual.foam.shoreStrength,
     normalFlatten: visual.fresnel.normalFlatten,
