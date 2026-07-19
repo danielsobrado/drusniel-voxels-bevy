@@ -36,6 +36,8 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
     dropEnd: 2.0,
     shoreDistanceStart: 0.0,
     shoreDistanceEnd: 2.5,
+    detailFadeStartM: 120.0,
+    detailFadeEndM: 320.0,
   },
   fresnel: {
     base: 0.045,

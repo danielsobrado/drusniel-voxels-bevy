@@ -6,8 +6,8 @@ function diagnostics(
   overrides: Partial<WaterFoamRuntimeDiagnostics> = {},
 ): WaterFoamRuntimeDiagnostics {
   return {
-    modelRevision: 3,
-    modelName: "coherent-fbm-flow-sun-v3",
+    modelRevision: 4,
+    modelName: "coherent-fbm-flow-sun-distance-v4",
     qualityTier: "high",
     maxCoverage: 0.52,
     patternStart: 0.52,
@@ -17,6 +17,13 @@ function diagnostics(
     shadeCoverageFloor: 0.55,
     rapidEligibility: "speed-times-drop-times-river",
     cpuFieldSamples: 0,
+    distanceFade: {
+      valid: true,
+      version: 2,
+      startM: 120,
+      endM: 320,
+      authority: "camera-distance-shared",
+    },
     sunAtlas: {
       valid: 1,
       version: 4,
@@ -40,11 +47,30 @@ describe("water foam runtime contract", () => {
   });
 
   it("rejects a stale model or wrong tier", () => {
-    const result = evaluateWaterFoamRuntimeContract("low", diagnostics({ modelRevision: 2, qualityTier: "high" }));
+    const result = evaluateWaterFoamRuntimeContract("low", diagnostics({ modelRevision: 3, qualityTier: "high" }));
 
     expect(result.passed).toBe(false);
     expect(result.failures.join("\n")).toMatch(/model revision/);
     expect(result.failures.join("\n")).toMatch(/quality tier/);
+  });
+
+  it("rejects an unavailable or invalid distance fade", () => {
+    const base = diagnostics();
+    const result = evaluateWaterFoamRuntimeContract("high", {
+      ...base,
+      distanceFade: {
+        ...base.distanceFade,
+        valid: false,
+        version: 0,
+        startM: 320,
+        endM: 120,
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.failures.join("\n")).toMatch(/distance fade valid/);
+    expect(result.failures.join("\n")).toMatch(/distance fade version/);
+    expect(result.failures.join("\n")).toMatch(/distance fade end/);
   });
 
   it("rejects an unavailable sun atlas or CPU sampling", () => {

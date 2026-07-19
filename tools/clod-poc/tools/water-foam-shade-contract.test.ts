@@ -31,7 +31,7 @@ describe("water foam shade response contract", () => {
   it("rejects a shader that ignores shade", () => {
     const result = evaluateWaterFoamShadeAcceptance({
       lit: metrics(),
-      shaded: metrics({ meanCoverage: 0.098 }),
+      shaded: metrics({ meanCoverage: 0.099 }),
     });
 
     expect(result.passed).toBe(false);

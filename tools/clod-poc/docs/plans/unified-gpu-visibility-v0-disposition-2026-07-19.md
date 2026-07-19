@@ -15,6 +15,13 @@ first, explicitly outside Plan 4 visibility; it also records no GPU-visibility g
 vegetation, props, or water. Source: `perf-runs/rpg-dense-cost/cost-table.md` and
 `rpg-content-density-scaling-2026-07-16.md` D4.
 
+These are disable-one-system marginals, not independent timing rows. They overlap and
+must not be added. D4 also records that the tree GPU path was disabled on several
+village boots, so the table is strong enough for a **no-go now** decision but not for a
+claim that GPU visibility can never pay. No matching 1x/2x/4x density crossover or
+classify/upload/submission split was captured; the missing evidence is part of the
+reopen trigger below.
+
 ## CPU prefilter contract audit
 
 `buildVegetationSlotPrefilter()` already creates a compact `activeSlotIndices` list
@@ -43,6 +50,18 @@ hidden-cluster compaction, unknown-cluster acceptance, cache reuse, terrain-revi
 identity, and provider-revision invalidation. The provider suite covers missing,
 stale/mismatched, bounded/unbounded, distance, water/invalid, and coverage reasons.
 
+Authoritative implementation and test anchors:
+
+- `src/vegetation/vegetation_slot_prefilter.ts` and
+  `src/vegetation/vegetation_slot_prefilter.test.ts` — compact stable-slot list,
+  conservative cluster probes, cache identity, and revision invalidation;
+- `src/vegetation/vegetation_terrain_reject_provider.ts` and its test — missing,
+  revision-mismatched, bounded/unbounded, water/invalid, and fallback decisions;
+- `src/vegetation/vegetation_visibility_provider.ts` and its test — unknown samples
+  remain visible;
+- tree/grass/understory GPU-ring creation consumes `activeSlotIndices`; gameplay
+  readbacks remain disabled unless a diagnostic query explicitly requests them.
+
 ## Per-system go/no-go
 
 | System | V0 disposition | Evidence |
@@ -55,10 +74,35 @@ stale/mismatched, bounded/unbounded, distance, water/invalid, and coverage reaso
 | Water | Out of classifier scope | 1.60 ms marginal; ownership and shoreline stability are handled by Plan 5. |
 | Stones | Explicitly excluded | Repository policy keeps stones outside the vegetation classifier. |
 
+## Phase state
+
+| Phase | State | Reason |
+|---|---|---|
+| V0 | Complete | Attribution, prefilter contract, and per-system disposition are recorded here. |
+| V1A–V1D | Not entered | V0 did not fund a first classifier adopter. The unchecked implementation tasks remain conditional reference material. |
+| V2 | Not entered | Zero real V1 adopters means the rule-of-three extraction precondition is false. |
+| V3–V5 | Not entered | Props, shadow-caster classification, and Hi-Z did not meet their measured preconditions. |
+
+## Verification record
+
+The disposition was checked against current source and the recorded D4 artifact, not
+against an assumed future implementation. The focused regression command is:
+
+```powershell
+npm --prefix tools/clod-poc test -- src/vegetation/vegetation_slot_prefilter.test.ts src/vegetation/vegetation_terrain_reject_provider.test.ts src/vegetation/vegetation_visibility_provider.test.ts
+```
+
+2026-07-19 result: PASS, 23/23 tests across the three files. The same worktree also
+passed repository typecheck, the 4,412-test full suite (3 skipped), and the Vite build;
+the shared record is in `visual-stability-closure-2026-07-16.md`.
+
+Repository-wide typecheck/test/build results belong to the final Plan 5 verification
+record because the sequence-harness work shares this worktree. A green focused test
+proves the audited CPU contract; it does not manufacture the absent crossover evidence.
+
 ## Reopen trigger
 
 Reopen V1 only when an identical deterministic density sweep records the attribution
 split requested by the plan and shows either a shipping-density win or an owner-agreed
 near-future 1x/2x/4x crossover. V2 may start only after three real GPU classifier
 adopters have passed parity and keep/revert gates.
-

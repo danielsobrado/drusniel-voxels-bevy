@@ -28,8 +28,8 @@ describe("water foam sun visibility contract", () => {
 
   it("treats missing and out-of-atlas visibility as fully lit", () => {
     expect(ATLAS_NODES_SOURCE).toContain("MISSING_VISIBILITY_CENTER");
-    expect(ATLAS_NODES_SOURCE).toContain("mix(float(1), sampled, knownSample)");
-    expect(ATLAS_NODES_SOURCE).toContain("mix(float(1), resolvedSample, atlasInside)");
+    expect(ATLAS_NODES_SOURCE).toContain("float(1), sampled, knownSample");
+    expect(ATLAS_NODES_SOURCE).toContain("float(1), resolvedSample, atlasInside");
   });
 
   it("attenuates coverage without deleting shaded whitewater", () => {

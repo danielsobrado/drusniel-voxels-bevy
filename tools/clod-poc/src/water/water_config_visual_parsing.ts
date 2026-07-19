@@ -88,6 +88,8 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
       dropEnd: readNumber(foam.drop_end ?? foam.dropEnd, defaults.foam.dropEnd),
       shoreDistanceStart: readNumber(foam.shore_distance_start ?? foam.shoreDistanceStart, defaults.foam.shoreDistanceStart),
       shoreDistanceEnd: readNumber(foam.shore_distance_end ?? foam.shoreDistanceEnd, defaults.foam.shoreDistanceEnd),
+      detailFadeStartM: readNumber(foam.detail_fade_start_m ?? foam.detailFadeStartM, defaults.foam.detailFadeStartM),
+      detailFadeEndM: readNumber(foam.detail_fade_end_m ?? foam.detailFadeEndM, defaults.foam.detailFadeEndM),
     },
     fresnel: {
       base: readNumber(fresnel.base, defaults.fresnel.base),

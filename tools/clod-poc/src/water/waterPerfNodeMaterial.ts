@@ -30,14 +30,13 @@ import { buildWaterBodyPresetNodes } from "./water_node_body_presets.js";
 import { buildWaterStaticGridNodes } from "./water_node_static_grid.js";
 import { buildWaterAtlasGridNodes } from "./water_node_atlas_grid.js";
 import { buildWaterGlitter, buildWaterSuspendedScatter } from "./water_node_optics.js";
+import { resolveWaterFoamDistanceFade } from "./water_foam_distance.js";
 import { buildWaterFoamNodes } from "./water_foam_nodes.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
 const WATER_BACKLIGHT_GAIN = 0.10;
-const FAR_FOAM_DETAIL_START_LEVEL = 0.25;
-const FAR_FOAM_DETAIL_END_LEVEL = 1.25;
 
 export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterMaterialHandle {
   const u = makeWaterUniforms(params);
@@ -60,6 +59,8 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
   const uShoreFoamEnd = uniform(u.uShoreFoamEnd.value) as TslNode;
   const uShoreDistFoamStart = uniform(params.visual.foam.shoreDistanceStart) as TslNode;
   const uShoreDistFoamEnd = uniform(params.visual.foam.shoreDistanceEnd) as TslNode;
+  const uFoamDetailFadeStartM = uniform(u.uFoamDetailFadeStartM.value) as TslNode;
+  const uFoamDetailFadeEndM = uniform(u.uFoamDetailFadeEndM.value) as TslNode;
   const uFoamNoiseScale = uniform(u.uFoamNoiseScale.value) as TslNode;
   const uFoamShoreStrength = uniform(u.uFoamShoreStrength.value) as TslNode;
   const uFoamRiverStrength = uniform(u.uFoamRiverStrength.value) as TslNode;
@@ -184,6 +185,7 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
     const advectB: TslNode = mainDir.mul(phaseB.mul(uRippleLoopDistance).mul(advectSpeed));
     const foamNodes = buildWaterFoamNodes({
       worldXZ: worldPos.xz,
+      cameraXZ: uCameraPos.xz,
       advectA,
       advectB,
       phaseBlend,
@@ -198,15 +200,14 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
       shoreFoamEnd: uShoreFoamEnd,
       shoreDistanceStart: uShoreDistFoamStart,
       shoreDistanceEnd: uShoreDistFoamEnd,
+      detailFadeStartM: uFoamDetailFadeStartM,
+      detailFadeEndM: uFoamDetailFadeEndM,
       shoreStrength: uFoamShoreStrength,
       riverStrength: uFoamRiverStrength,
       bankStrength: uRiverBankFoamStrength,
       rapidStrength: uRiverRapidFoamStrength,
     });
-    const farDetailFade: TslNode = float(1).sub(
-      smoothstep(FAR_FOAM_DETAIL_START_LEVEL, FAR_FOAM_DETAIL_END_LEVEL, aLevel),
-    );
-    const foam: TslNode = foamNodes.coverage.mul(farDetailFade);
+    const foam: TslNode = foamNodes.coverage;
 
     const skyReflection: TslNode = mix(
       vec3(0.04, 0.10, 0.22),
@@ -291,6 +292,7 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
   };
 
   const syncVisual = (v: WaterVisualConfig) => {
+    const foamDistance = resolveWaterFoamDistanceFade(v.foam);
     syncUniformObjects(v);
     body.sync(v.bodies);
     uFoam.value.copy(u.uFoamColor.value);
@@ -309,6 +311,8 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
     uShoreFoamEnd.value = v.shoreFoamEnd;
     uShoreDistFoamStart.value = v.foam.shoreDistanceStart;
     uShoreDistFoamEnd.value = v.foam.shoreDistanceEnd;
+    uFoamDetailFadeStartM.value = foamDistance.startM;
+    uFoamDetailFadeEndM.value = foamDistance.endM;
     uFoamNoiseScale.value = v.foam.noiseScale;
     uFoamShoreStrength.value = v.foam.shoreStrength;
     uFoamRiverStrength.value = v.foam.riverStrength;

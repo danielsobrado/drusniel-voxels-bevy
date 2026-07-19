@@ -1,6 +1,7 @@
 # Visual Stability Closure — moving-image QA and the owed visual evidence
 
-Created 2026-07-16. Status: PLANNED (no code landed from this doc yet). Revised same day
+Created 2026-07-16. Status: ACTIVE — S0 infrastructure landed; evidence gates remain
+open where current captures are missing, invalid, or uncalibrated. Revised same day
 after an external review. The goal is unchanged — stability is judged on moving imagery,
 and the owed visual debt gets paid with gates — but the central metric is redesigned.
 The first draft compared adjacent frames during camera motion and inferred instability
@@ -73,6 +74,70 @@ from measured residual artifacts and a feasibility audit.
   already draw the state the metrics need.
 - Known capture constraints: gate UI can mask scene pixels; real-GPU headed runs
   required; in-app browser pane not valid.
+
+## Execution update — 2026-07-19
+
+### Landed infrastructure
+
+- `src/qa/sequence/sequence_clock.ts` owns the deterministic in-application clock;
+  `sequence_clock.test.ts` locks byte-identical pose/simulation streams and yaw-wrap
+  behavior.
+- `tools/visual-sequence.ts` captures color first and optional packed 16-bit depth in a
+  second pass, records camera matrices/counters/environment, evaluates thresholds, and
+  supports frame-N paired comparison through `sequence:pair`.
+- `tools/visual-sequence/schema.ts` validates bounded configs, warmup/setup actions,
+  event frames, depth capture, counter limits, and color/reprojection thresholds.
+- `tools/visual-sequence/metrics.ts`, `reprojection.ts`, and `roi.ts` provide multi-scale
+  residuals, connected pop components, WebGPU zero-to-one depth reprojection,
+  disocclusion accounting, and projected seam/annulus primitives. The projected ROI
+  primitives are unit-tested but are **not yet wired into live sequence masks**.
+- `src/qa/unified/browser_hook.ts` exposes begin/step/end sequence control, deterministic
+  screenshot/depth capture, streaming setup/events, and environment metadata. Identical
+  static poses are not reapplied each frame because doing so restarts near-field work.
+- `src/gpu/webgpu_postprocess.ts` packs the depth diagnostic into RG channels; one
+  8-bit grayscale channel was too coarse and produced uniform depth images.
+
+Focused sequence coverage is 19 tests: three clock tests, thirteen schema/metric defect
+fixtures, and three reprojection/ROI cases. This proves the primitives and state stream,
+not the live-scene calibrations that remain open below.
+
+### Current real-GPU evidence
+
+All paths below are relative to `tools/clod-poc/` and were captured from native Windows
+against `http://127.0.0.1:5180/`.
+
+| Capture | Result | Authoritative observation |
+|---|---|---|
+| `sequence-runs/s0-static-continent-rim-2026-07-19/` | Green infrastructure gate | 8 frames; mean luminance residual 0.00009068, maximum p95 0.00028314, maximum changed ratio 0.00008811, zero pop events, no ownership gap/overlap violations. Fixed-pose reprojection valid ratio is 0.99856. |
+| `sequence-runs/s1-transition-streaming-landing-2026-07-19/` | Green structural landing; color calibration open | One 16 m controlled landing; no gap/overlap counter violation. Event residual mean 0.00121873, p95 0.00308784, changed ratio 0.01018, with 9 event components. Those color values are reported, not yet frozen as an acceptance threshold. A rejected 128 m stress jump exposed 287 live holes and 51,293 far-ownership holes; reducing the event did not relax the zero-hole rule. |
+| `sequence-runs/s2-moving-continent-route-2026-07-19/` | Diagnostic only | Ownership counters pass, but unmasked C2 has only 0.578–0.589 valid coverage and 0.0558–0.0638 mean reprojected residual. Raw pop detection reports 940 components during expected motion. Water/sky/transparency are not masked, so this is not calibrated evidence and does not close natural traversal. |
+| `shots/trees/impostor-visual-gpu-2026-07-19/` | Rejected as parity closure | Four lightweight real-GPU orbit samples report zero dark-spike pixels, but the reduced scene does not frame enough tree content. The intended `trees-perf` scene timed out before the browser QA hook on both CPU and GPU paths; no CPU/GPU paired motion claim is made. |
+| `sequence-runs/s5-water-shoreline-frozen-2026-07-19/` | Rejected capture | The configured route placed the camera partly inside/under terrain. Its metrics cannot close shoreline stability. `shots/water/sequence-calibration-2026-07-19/` found a valid shoreline target, but the headed frame still contains broad black geometry artifacts and visible UI, so it is diagnosis material only. |
+
+Plan 1's one-time manual pass remains valid evidence and is cross-linked rather than
+repeated: `shots/manual/unified-streaming-visual-qa-accepted-2026-07-18/report.json`
+records `passed: true` with 18 retained artifacts and the replace-mode far clipmap
+decision. This plan still owes automated moving-image calibration; the manual pass does
+not substitute for it.
+
+### Human color interpretation
+
+Red is not a defect by itself. A localized translucent red volume aligned with the
+active edit brush/shape may be the edit ghost and is allowed. The terrain palette may
+also legitimately cover broad orange/red slopes. A red-frame failure requires stronger
+evidence: color outside the edit bounds, persistence after the ghost is dismissed,
+unexpected depth/coverage change, ownership counters, or a reproducible geometry or
+shader fault. Conversely, black holes, full-screen flashes, or invalid depth are not
+excused because a red edit ghost happens to be present elsewhere in the frame.
+
+### Closure boundary
+
+The harness is usable and its static and controlled-landing structural gates are green.
+Plan 5 is **not closed**: S0D lacks the required archived known-good/known-bad calibration
+set and five-run spread; C1 has no content-valid real A/B; C2 needs transparent/water/sky
+masks plus a known-good/known-bad traversal pair; projected ROIs are not wired; the tree
+scene does not become ready; and the water path has no valid frozen structural capture.
+Unchecked boxes below are intentionally authoritative.
 
 ## Design
 
@@ -206,9 +271,9 @@ ratio, seed, scene params, capture config (plan 1 LM0 environment-record templat
 4. **S0D — calibration + human validation**: per gate — known-good captures, several
    known-bad captures (forced defects), human review of all, **verify metric ordering
    matches perceived severity**, then freeze threshold + environment.
-- [ ] S0A clock + determinism test → green
-- [ ] S0B schema landed
-- [ ] S0C primitives + full fixture suite → green
+- [x] S0A clock + determinism test → green (`sequence_clock.test.ts`)
+- [x] S0B schema landed (`tools/visual-sequence/schema.ts`)
+- [x] S0C primitives + full fixture suite → green (19 focused sequence tests total)
 - [ ] S0D calibration tables + human sign-off recorded here
 
 ### S1 — Static and transition metrics (modes A and B)
@@ -271,7 +336,9 @@ ratio, seed, scene params, capture config (plan 1 LM0 environment-record templat
    slot** (underwater rendering scope), not a permanent "known ugly" note.
 - [ ] frozen-wave structural gates green (masks + height continuity)
 - [ ] animated reference bounds recorded
-- [ ] half-submerged issue filed (owner + decision slot linked here)
+- [x] half-submerged issue filed (owner + decision slot: Rendering, 2026 Q3 visual
+      backlog review) —
+      `.scratch/underwater-rendering/issues/01-half-submerged-camera-underwater-scope-2026-07-19.md`
 
 ### S6 — Temporal-rendering prioritization (not a permanent closure)
 
@@ -285,9 +352,33 @@ ratio, seed, scene params, capture config (plan 1 LM0 environment-record templat
    `fund a scoped prototype` (with the artifact classes it must fix and a measurable
    acceptance bar). The question reopens whenever the residual table changes materially
    — this phase prioritizes; it does not declare TAA unnecessary forever.
-- [ ] residual table compiled
-- [ ] feasibility audit recorded
-- [ ] prioritization decision recorded with the owner
+
+**2026-07-19 residual table and feasibility audit.** The valid static residual is
+0.00009068 mean luminance with zero pops. The controlled landing is structurally green
+but retains an uncalibrated 0.00121873 event residual. The natural route and water route
+are not valid acceptance samples for the reasons in the evidence table, so their large
+residuals are measurement/pose blockers rather than a temporal-rendering business case.
+Trees also lack content-valid CPU/GPU motion evidence.
+
+The renderer already has temporal accumulation rather than a blank-slate TAA project:
+WebGPU uses `createTraaPostProcessNode()`/three.js `traa(...)`; the WebGL path owns color
+and depth history, depth rejection, optional history clamp, Halton jitter, and history
+reset on relevant setting/size changes. Shipping quality presets may enable TAA and
+jitter. What remains unproven is reliable motion for wind-deformed vegetation,
+transparent water/history ownership, terrain-edit invalidation across both renderers,
+and whether the product objective would be native-resolution TAA or temporal upscaling.
+Those are prototype costs, not assumptions.
+
+**Decision:** owner **Rendering** records **do not fund a new temporal/upscaling
+prototype now**. Keep the existing TAA paths; first finish C1/C2 masks and valid tree/
+water captures. Reopen this decision when a content-valid residual table shows a
+repeatable artifact above its calibrated bound that existing TAA cannot address, with a
+scoped acceptance bar for that artifact class. This is prioritization, not a declaration
+that temporal work is permanently unnecessary.
+
+- [x] residual table compiled
+- [x] feasibility audit recorded
+- [x] prioritization decision recorded with the owner
 
 ## Verification protocol (every phase, per CLAUDE.md)
 
@@ -305,6 +396,44 @@ npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5180 --strictPort
 - Sequence gates join the QA runner configs; capture is not benchmarking (perf runs
   stay separate).
 - Update this doc per commit-sized chunk (`md-progress-logging`).
+
+### 2026-07-19 verification record
+
+- `npm --prefix tools/clod-poc run typecheck` — PASS.
+- Focused sequence + V0 CPU-contract run — PASS, 42/42 tests across six files; 19 of
+  those tests are the sequence clock/schema/metric/ROI suite.
+- `npm --prefix tools/clod-poc test` — PASS, 4,412 tests passed and 3 skipped across
+  873 files. Four stale water-contract assertions found by the first run were repaired
+  without changing rendering behavior: explicit quality-override precedence, shared
+  foam-node source ownership, typed TSL source matching, and an exact inclusive-boundary
+  fixture.
+- `npm --prefix tools/clod-poc run build` — PASS (Vite production build; existing
+  browser-externalization and chunk-size warnings only).
+- `npm --prefix tools/clod-poc run qa -- --summary tests/qa-sample-summary.json` — the
+  harness ran and wrote `validation-runs/latest/report.{json,md,html}`. Result is
+  intentionally non-authoritative `FAIL`: `clod_poc_main_view` passes, while the sample
+  JSON lacks the required long-view counters and the other manifest checkpoints. Per
+  repository instructions this sample is a smoke input, not evidence for visual or
+  performance closure.
+
+The native Windows performance comparison uses the same `current-textured`, world 8,
+120-warmup/300-sample case and `liveClodRootGpuMesher=1` on both sides:
+
+| Artifact | Frame p50 / p95 | Render p95 | Top prop p95 | Matching counters |
+|---|---:|---:|---:|---|
+| `perf-runs/main-gpu-roots/summary.json` | 4.7 / 5.4 ms | 3.7 ms | grass 0.5 ms | 4 rendered, 173,047 terrain triangles, tree GPU `ring` 300/300, 0 tree GPU visible |
+| `perf-runs/visual-stability-after-matched-2026-07-19/summary.json` | 4.4 / 5.7 ms | 4.3 ms | grass 0.4 ms | same |
+
+This is mixed single-run evidence, not a performance win: frame p50 improved by 0.3 ms,
+while frame p95 regressed by 0.3 ms and render p95 regressed by 0.6 ms. The highest broad
+bucket remained `renderMs`; the changed run's next bucket was vegetation at 1.1 ms p95.
+No broad timing rows are added together. An earlier changed artifact without
+`liveClodRootGpuMesher=1` is deliberately excluded because its parameters did not match
+the baseline.
+
+Native real-GPU captures are linked in the execution table above. The invalid water
+pose and content-invalid tree orbit are retained as diagnosis material and are not
+counted as passing acceptance evidence.
 
 ## Risks and rollbacks
 
