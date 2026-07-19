@@ -28,12 +28,11 @@ import { waterLevelColorTsl } from "./water_node_level_color.js";
 import { buildWaterBodyPresetNodes } from "./water_node_body_presets.js";
 import { buildWaterStaticGridNodes } from "./water_node_static_grid.js";
 import { buildWaterAtlasGridNodes } from "./water_node_atlas_grid.js";
+import { buildWaterGlitter, buildWaterSuspendedScatter } from "./water_node_optics.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
 
-const WATER_SPEC_POWER = 72;
-const WATER_SPEC_GAIN = 0.26;
 const WATER_BACKLIGHT_GAIN = 0.10;
 
 export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterMaterialHandle {
@@ -64,6 +63,12 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
   const uFoamDropEnd = uniform(u.uFoamDropEnd.value) as TslNode;
   const uFresnelBase = uniform(u.uFresnelBase.value) as TslNode;
   const uFresnelNormalFlatten = uniform(u.uFresnelNormalFlatten.value) as TslNode;
+  const uGlitterEnabled = uniform(u.uGlitterEnabled.value) as TslNode;
+  const uGlitterTightExponent = uniform(u.uGlitterTightExponent.value) as TslNode;
+  const uGlitterTightGain = uniform(u.uGlitterTightGain.value) as TslNode;
+  const uGlitterBroadExponent = uniform(u.uGlitterBroadExponent.value) as TslNode;
+  const uGlitterBroadGain = uniform(u.uGlitterBroadGain.value) as TslNode;
+  const uGlitterLowSunGain = uniform(u.uGlitterLowSunGain.value) as TslNode;
   const uClipmapTint = uniform(u.uClipmapTint.value) as TslNode;
   const uInnerRect = uniform(u.uInnerRect.value) as TslNode;
   const uDebugMode = uniform(u.uDebugMode.value) as TslNode;
@@ -75,11 +80,6 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
   const uRiverShallowBankTintStrength = uniform(riverMaterial.shallowBankTintStrength) as TslNode;
   const uRiverCenterChannelDarkening = uniform(riverMaterial.centerChannelDarkening) as TslNode;
 
-  // Atlas-driven mode (Phase W2) wins over static-topology mode (Phase 5b): both use
-  // the static grid geometry, but atlas levels fetch per-vertex water data from the
-  // shared streaming hydrology atlas (zero CPU refills) while static levels read the
-  // level's toroidal texel textures; the wall discard replaces the legacy index-time
-  // quad guard in either mode.
   const atlasGrid = params.atlasGrid ? buildWaterAtlasGridNodes(params.atlasGrid) : null;
   const staticGrid = !atlasGrid && params.staticGrid ? buildWaterStaticGridNodes(params.staticGrid) : null;
   const grid = atlasGrid ?? staticGrid;
@@ -108,8 +108,6 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
     const baseDiscard: TslNode = or(outsideWorld, or(insideInner, or(depth.lessThanEqual(float(0)), aBodyMask.lessThanEqual(float(0)))));
     (grid ? or(baseDiscard, grid.wallDiscard(depth, aFlow.z)) : baseDiscard).discard();
 
-    // Per-channel Beer–Lambert depth response (Phase 7b): red is absorbed first in
-    // clear water, and the extinction spectrum comes from the fragment's body preset.
     const depthMixRgb: TslNode = float(1).sub(exp(depth.negate().mul(body.absorption)));
     const flowSpeed: TslNode = aFlow.z;
     const flowDrop: TslNode = abs(aFlow.w);
@@ -129,8 +127,8 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
     const sunDir: TslNode = normalize(uSunDir);
     const ndotv: TslNode = max(dot(viewDir, normal), 0.0);
     const fresnel: TslNode = uFresnelBase.add(float(1).sub(uFresnelBase).mul(pow(float(1).sub(ndotv), uFresnelPower)));
-    const sun: TslNode = max(dot(normal, sunDir), 0.0);
     const backlit: TslNode = max(dot(viewDir, sunDir.negate()), 0.0);
+    const suspended = buildWaterSuspendedScatter(depth, ndotv, sunDir, body);
 
     const shallowEdge: TslNode = float(1).sub(smoothstep(float(0.18), float(1.8), depth));
     const deepBlue: TslNode = mix(vec3(0.0, 0.025, 0.10), body.deep, float(0.70));
@@ -141,16 +139,13 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
       mix(deepBlue, vec3(0.0, 0.055, 0.13), clamp(uRiverCenterChannelDarkening.mul(0.35), 0.0, 1.0)),
       riverCenter,
     );
-    // Pond/marsh murk now lives in the body preset (colours/absorption/turbidity), so
-    // no extra overlay is needed here.
     const waterBase: TslNode = mix(mix(shallowTeal, deepBlue, depthMixRgb), riverTint, clamp(riverWeight.mul(0.72), 0.0, 1.0))
-      .add(shallowTeal.mul(body.turbidity).mul(shallowEdge).mul(0.22));
+      .add(shallowTeal.mul(body.turbidity).mul(shallowEdge).mul(0.22))
+      .add(suspended.color);
 
     const foamWaveA: TslNode = sin(dot(worldPos.xz.mul(uFoamNoiseScale), vec2(0.91, 1.37)).add(phase.mul(0.25)));
     const foamWaveB: TslNode = sin(dot(worldPos.xz.mul(uFoamNoiseScale.mul(0.47)), vec2(-1.21, 0.73)).sub(phase.mul(0.18)));
     const foamBreakup: TslNode = float(0.35).add(foamWaveA.mul(foamWaveB).mul(0.5).add(0.5).mul(0.65));
-    // Shore contact from real metres-to-shoreline where hydrology provides it, with the
-    // depth band as the fallback for sources without a shoreline metric.
     const bankContact: TslNode = max(
       float(1).sub(smoothstep(uShoreFoamStart, uShoreFoamEnd, depth)),
       float(1).sub(smoothstep(uShoreDistFoamStart, uShoreDistFoamEnd, aShoreDistance)),
@@ -167,17 +162,24 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
     );
 
     const skyReflection: TslNode = mix(vec3(0.04, 0.10, 0.22), vec3(0.25, 0.48, 0.78), clamp(normal.y.mul(0.75).add(0.15), 0.0, 1.0));
-    const spec: TslNode = vec3(1.0, 0.92, 0.78).mul(pow(sun, float(WATER_SPEC_POWER)).mul(WATER_SPEC_GAIN));
+    const glitterSpec: TslNode = buildWaterGlitter(normal, viewDir, sunDir, {
+      enabled: uGlitterEnabled,
+      tightExponent: uGlitterTightExponent,
+      tightGain: uGlitterTightGain,
+      broadExponent: uGlitterBroadExponent,
+      broadGain: uGlitterBroadGain,
+      lowSunGain: uGlitterLowSunGain,
+    });
     const scatter: TslNode = shallowTeal.mul(pow(backlit, float(3.0)).mul(WATER_BACKLIGHT_GAIN));
     const reflectionScale: TslNode = float(0.70).mul(body.reflectionDamping);
-    const lit: TslNode = mix(waterBase, skyReflection, clamp(fresnel.mul(reflectionScale), 0.0, 0.82)).add(spec).add(scatter);
+    const lit: TslNode = mix(waterBase, skyReflection, clamp(fresnel.mul(reflectionScale), 0.0, 0.82))
+      .add(glitterSpec)
+      .add(scatter);
     const finalColor: TslNode = mix(mix(lit, uFoam, foam), waterLevelColorTsl(aLevel), uClipmapTint.mul(0.18));
-    // Soft waterline (W3): dissolve alpha over the first ~35 cm of depth so shorelines
-    // fade out on the terrain instead of ending on a hard texel-staircase edge.
     const shoreFade: TslNode = smoothstep(float(0.02), float(0.35), depth);
     const alpha: TslNode = clamp(uAlpha.add(fresnel.mul(0.18)), 0.0, 1.0).mul(shoreFade);
 
-    const outColor: TslNode = uDebugMode.equal(0).select(
+    const standardDebug: TslNode = uDebugMode.equal(0).select(
       finalColor,
       uDebugMode.equal(1).select(
         depthMixRgb,
@@ -196,6 +198,7 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
         ),
       ),
     );
+    const outColor: TslNode = uDebugMode.equal(15).select(suspended.color, standardDebug);
     return vec4(outColor, uDebugMode.equal(0).select(alpha, float(1)));
   });
 
@@ -240,6 +243,12 @@ export function createWaterPerfNodeMaterial(params: WaterMaterialParams): WaterM
     uFoamDropEnd.value = v.foam.dropEnd;
     uFresnelBase.value = v.fresnel.base;
     uFresnelNormalFlatten.value = v.fresnel.normalFlatten;
+    uGlitterEnabled.value = v.glitter.enabled ? 1 : 0;
+    uGlitterTightExponent.value = v.glitter.tightExponent;
+    uGlitterTightGain.value = v.glitter.tightGain;
+    uGlitterBroadExponent.value = v.glitter.broadExponent;
+    uGlitterBroadGain.value = v.glitter.broadGain;
+    uGlitterLowSunGain.value = v.glitter.lowSunGain;
     if (material.depthWrite !== v.depthWrite) {
       material.depthWrite = v.depthWrite;
       material.needsUpdate = true;
