@@ -6,7 +6,7 @@ import {
   waterBodyPresetsByKind,
   type WaterBodyVisualPresets,
 } from "./water_body_presets.js";
-import { resolveWaterFoamDistanceFade } from "./water_foam_distance.js";
+import { publishWaterFoamDistanceFade } from "./water_foam_distance.js";
 import type { WaterMaterialParams } from "./water_material_types.js";
 import type { WaterRefractionConfig, WaterReflectionConfig } from "./waterConfig.js";
 
@@ -99,7 +99,7 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
   const visual = params.visual;
   const caustics = params.caustics ?? DEFAULT_CAUSTICS_CONFIG;
   const bodyArrays = createBodyUniformArrays();
-  const foamDistance = resolveWaterFoamDistanceFade(visual.foam);
+  const foamDistance = publishWaterFoamDistanceFade(visual.foam);
   syncWaterBodyUniformArrays(bodyArrays, visual.bodies);
 
   const uniforms: WaterUniforms = {
