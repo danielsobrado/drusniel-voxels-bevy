@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { cloneTreeSettings, type TreeLod } from "./tree_config.js";
 import type {
@@ -33,6 +33,10 @@ describe("tree GPU ring safe update", () => {
       input.state.stats = stats("idle");
     });
     vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("falls back and latches a thrown execution failure", () => {
