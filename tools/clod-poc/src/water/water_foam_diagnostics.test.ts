@@ -13,6 +13,7 @@ describe("water foam runtime diagnostics", () => {
     expect(result.maxCoverage).toBe(0.52);
     expect(result.shadeCoverageFloor).toBe(0.55);
     expect(result.cpuFieldSamples).toBe(0);
+    expect(result.webGpuUncapturedErrors).toBe(0);
     expect(result.distanceFade).toMatchObject({
       valid: true,
       startM: 120,
