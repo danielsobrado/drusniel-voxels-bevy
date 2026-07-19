@@ -27,10 +27,15 @@ export function buildWaterFoamDistanceFadeNode(
   overrides: WaterFoamDistanceNodeOverrides = {},
 ): TslNode {
   const refs = getOrCreateSharedState();
+  const hasStart = overrides.startM !== undefined;
+  const hasEnd = overrides.endM !== undefined;
+  if (hasStart !== hasEnd) {
+    throw new Error("water foam distance node overrides require both startM and endM");
+  }
   const cameraXZ = overrides.cameraXZ ?? cameraPosition.xz;
   const startM = overrides.startM ?? refs.startM;
   const endM = overrides.endM ?? refs.endM;
-  const valid = overrides.startM && overrides.endM ? float(1) : refs.valid;
+  const valid = hasStart && hasEnd ? float(1) : refs.valid;
   const distanceM = worldXZ.sub(cameraXZ).length();
   const resolved = float(1).sub(smoothstep(startM, endM, distanceM));
   return mix(float(1), resolved, valid);
