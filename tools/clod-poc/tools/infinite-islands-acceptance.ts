@@ -448,6 +448,10 @@ const PRE_ROUTE_CONVERGENCE_STREAM_BUDGETS = {
   maxCachedPages: 1024,
 } as const;
 const BUDGET_RESTORE_SETTLE_FRAMES = 30;
+/** Restoring a lower inflight cap does not cancel batches launched under the boosted
+ *  pre-route budget, and scene gates compare the live inflight counter against the
+ *  restored max — wait (bounded) for launched batches to drain before sampling. */
+const BUDGET_RESTORE_DRAIN_TIMEOUT_MS = 20_000;
 
 function sceneSupportsGate(scene: SceneSpec, gate: GateMode): boolean {
   return !scene.gates || scene.gates.includes(gate.name);
@@ -1007,6 +1011,24 @@ async function waitForConvergence(page: Page, sceneName: string): Promise<void> 
         `${previousBudgets.buildBudgetPagesPerFrame}/${previousBudgets.applyBudgetPagesPerFrame}/${previousBudgets.maxInflightBatches}/cache${previousBudgets.maxCachedPages}`,
       );
       await settle(page, BUDGET_RESTORE_SETTLE_FRAMES);
+      const drainDeadline = Date.now() + BUDGET_RESTORE_DRAIN_TIMEOUT_MS;
+      for (;;) {
+        const inflight = await page.evaluate(() => {
+          const counters = (window as typeof window & {
+            __drusnielClod?: { stats?: { counters?: Record<string, number> } | null };
+          }).__drusnielClod?.stats?.counters ?? {};
+          return counters["live_clod_stream_inflight_batches"] ?? 0;
+        });
+        if (inflight <= previousBudgets.maxInflightBatches) break;
+        if (Date.now() > drainDeadline) {
+          console.log(
+            `[infinite-accept] ${sceneName}: stream inflight batches (${inflight}) did not drain to ` +
+            `${previousBudgets.maxInflightBatches} within ${(BUDGET_RESTORE_DRAIN_TIMEOUT_MS / 1000).toFixed(0)}s; gates will see the backlog`,
+          );
+          break;
+        }
+        await settle(page, BUDGET_RESTORE_SETTLE_FRAMES);
+      }
     }
   }
 }
