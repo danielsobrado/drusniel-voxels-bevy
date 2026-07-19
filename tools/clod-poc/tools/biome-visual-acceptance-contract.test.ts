@@ -89,13 +89,13 @@ describe("biome visual acceptance", () => {
         understorySummerAutumn: delta(),
         bloomSpringAutumn: delta(),
       },
-      webGpuErrors: 0,
+      webGpuErrors: { winter: 0, spring: 0, summer: 0, autumn: 0 },
     });
 
     expect(result).toEqual({ passed: true, failures: [] });
   });
 
-  it("fails stale runtime state, absent vegetation, and GPU errors", () => {
+  it("fails stale runtime state, absent vegetation, missing diagnostics, and GPU errors", () => {
     const staleSummer = { ...runtimeState("summer"), green: 0.2 };
     const result = evaluateBiomeVisualAcceptance({
       runtimeStates: {
@@ -111,12 +111,13 @@ describe("biome visual acceptance", () => {
         understorySummerAutumn: delta(),
         bloomSpringAutumn: delta(),
       },
-      webGpuErrors: 2,
+      webGpuErrors: { winter: 0, spring: -1, summer: 0, autumn: 2 },
     });
 
     expect(result.passed).toBe(false);
     expect(result.failures.some((failure) => failure.includes("summer.green"))).toBe(true);
     expect(result.failures.some((failure) => failure.includes("grass winter/summer mask"))).toBe(true);
-    expect(result.failures.some((failure) => failure.includes("WebGPU errors"))).toBe(true);
+    expect(result.failures.some((failure) => failure.includes("spring: expected zero WebGPU errors"))).toBe(true);
+    expect(result.failures.some((failure) => failure.includes("autumn: expected zero WebGPU errors"))).toBe(true);
   });
 });
