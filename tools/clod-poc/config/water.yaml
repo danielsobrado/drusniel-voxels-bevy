@@ -139,6 +139,9 @@ water:
       drop_end: 1.45
       shore_distance_start: 0.0 # metres-to-shoreline foam band (hydrology shoreDistance)
       shore_distance_end: 1.2
+      # One continuous policy for HQ WebGPU, performance WebGPU, and WebGL.
+      detail_fade_start_m: 120.0
+      detail_fade_end_m: 320.0
     fresnel:
       base: 0.045
       power: 4.2
