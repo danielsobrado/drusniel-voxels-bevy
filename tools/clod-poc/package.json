@@ -132,7 +132,12 @@
     "water:shot:refraction": "npm run water:shot -- --scene lake-shoreline --debug refraction --out shots/water/lake-refraction",
     "water:shot:reflection": "npm run water:shot -- --scene lake-shoreline --debug reflection --out shots/water/lake-reflection",
     "water:shot:ssr-hit": "npm run water:shot -- --scene lake-shoreline --debug ssrHit --out shots/water/lake-ssr-hit",
-    "water:verify": "npm run water:report && npm run water:find && npm run water:probe && npm run water:shot -- --scene all --out shots/water/verify"
+    "water:foam:accept": "npm run water:foam:accept:matrix",
+    "water:foam:accept:high": "tsx tools/water-foam-visual-acceptance.ts --quality=high",
+    "water:foam:accept:low": "tsx tools/water-foam-visual-acceptance.ts --quality=low",
+    "water:foam:accept:matrix": "tsx tools/water-foam-quality-matrix.ts",
+    "water:verify": "npm run water:report && npm run water:find && npm run water:probe && npm run water:shot -- --scene all --out shots/water/verify",
+    "water:verify:full": "npm run water:verify && npm run water:foam:accept:matrix"
   },
   "dependencies": {
     "fflate": "^0.8.3",
