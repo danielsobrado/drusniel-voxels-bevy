@@ -29,17 +29,21 @@ import {
   assertWaterFoamAuxiliaryState,
   assertWaterFoamDistanceState,
   assertWaterFoamTimeState,
-  resetWaterFoamDistanceControls,
+  runWaterFoamDistanceCapture,
   setWaterFoamAuxiliaryOverlaysHidden,
   setWaterFoamDistanceOverride,
   setWaterFoamTimeFrozen,
   type WaterFoamAuxiliaryVisibilityState,
   type WaterFoamDistanceOverrideState,
-  type WaterFoamDistanceResetState,
   type WaterFoamTimeFreezeState,
 } from "./water-foam-distance-browser-controls.js";
 import { evaluateWaterFoamDistanceAcceptance } from "./water-foam-distance-acceptance-contract.js";
 import { deriveWaterFoamSyntheticDistances } from "./water-foam-distance-acceptance-profile.js";
+import {
+  clearWaterFoamDistanceEvidence,
+  resolveWaterFoamDistanceEvidence,
+  type WaterFoamDistanceCaptureFiles,
+} from "./water-foam-distance-evidence.js";
 import { measureWaterFoamDistanceResponse } from "./water-foam-distance-visual-metrics.js";
 import {
   applyWaterFoamRendererProfile,
@@ -59,14 +63,6 @@ interface RendererWaterDebugInfo extends WaterDebugInfo {
   readonly foamAuxiliaryDebug: WaterFoamAuxiliaryVisibilityState;
 }
 
-interface CaptureFiles {
-  readonly bodyMask: string;
-  readonly depth: string;
-  readonly near: string;
-  readonly mid: string;
-  readonly far: string;
-}
-
 async function main(): Promise<void> {
   const args = parseCliArgs(process.argv.slice(2));
   const world = Math.max(1, Math.floor(numberArg(args, "world", 16)));
@@ -81,6 +77,9 @@ async function main(): Promise<void> {
     join("shots/water/foam-distance-acceptance", renderer, quality),
   ));
   mkdirSync(outRoot, { recursive: true });
+  const evidence = resolveWaterFoamDistanceEvidence(outRoot);
+  clearWaterFoamDistanceEvidence(evidence);
+  const { files, reportPath } = evidence;
 
   const report = await withWaterHarness(
     { url: sourceUrl, world, width: 1280, height: 720 },
@@ -98,24 +97,10 @@ async function main(): Promise<void> {
       await setCameraPose(page, rapidPose);
       await settleFrames(page, 60);
 
-      const files: CaptureFiles = {
-        bodyMask: join(outRoot, "body-mask.png"),
-        depth: join(outRoot, "depth.png"),
-        near: join(outRoot, "foam-near.png"),
-        mid: join(outRoot, "foam-mid.png"),
-        far: join(outRoot, "foam-far.png"),
-      };
-      let auxiliary: WaterFoamAuxiliaryVisibilityState | null = null;
-      let frozen: WaterFoamTimeFreezeState | null = null;
-      let nearOverride: WaterFoamDistanceOverrideState | null = null;
-      let midOverride: WaterFoamDistanceOverrideState | null = null;
-      let farOverride: WaterFoamDistanceOverrideState | null = null;
-      let reset: WaterFoamDistanceResetState | null = null;
-
-      try {
-        auxiliary = await setWaterFoamAuxiliaryOverlaysHidden(page, true);
+      const controlSequence = await runWaterFoamDistanceCapture(page, async () => {
+        const auxiliary = await setWaterFoamAuxiliaryOverlaysHidden(page, true);
         assertWaterFoamAuxiliaryState(auxiliary, true, "capture");
-        frozen = await setWaterFoamTimeFrozen(page, true);
+        const frozen = await setWaterFoamTimeFrozen(page, true);
         assertWaterFoamTimeState(frozen, true, "freeze");
         await settleFrames(page, 2);
         await setWaterDebugMode(page, "bodyMask");
@@ -124,23 +109,23 @@ async function main(): Promise<void> {
         await page.screenshot(files.depth);
         await setWaterDebugMode(page, "foam");
 
-        nearOverride = await setWaterFoamDistanceOverride(page, distances.nearM);
-        assertWaterFoamDistanceState(nearOverride, distances.nearM, "near");
+        const near = await setWaterFoamDistanceOverride(page, distances.nearM);
+        assertWaterFoamDistanceState(near, distances.nearM, "near");
         await settleFrames(page, 2);
         await page.screenshot(files.near);
 
-        midOverride = await setWaterFoamDistanceOverride(page, distances.midM);
-        assertWaterFoamDistanceState(midOverride, distances.midM, "mid");
+        const mid = await setWaterFoamDistanceOverride(page, distances.midM);
+        assertWaterFoamDistanceState(mid, distances.midM, "mid");
         await settleFrames(page, 2);
         await page.screenshot(files.mid);
 
-        farOverride = await setWaterFoamDistanceOverride(page, distances.farM);
-        assertWaterFoamDistanceState(farOverride, distances.farM, "far");
+        const far = await setWaterFoamDistanceOverride(page, distances.farM);
+        assertWaterFoamDistanceState(far, distances.farM, "far");
         await settleFrames(page, 2);
         await page.screenshot(files.far);
-      } finally {
-        reset = await resetWaterFoamDistanceControls(page);
-      }
+
+        return { auxiliary, frozen, near, mid, far };
+      });
 
       const images = await loadImages(files);
       const waterMask = deriveWaterPixelMask(images.bodyMask, images.depth, images.near);
@@ -188,12 +173,8 @@ async function main(): Promise<void> {
         configuredFade: info.foam.distanceFade,
         syntheticDistances: distances,
         controlSequence: {
-          auxiliary,
-          frozen,
-          near: nearOverride,
-          mid: midOverride,
-          far: farOverride,
-          reset,
+          ...controlSequence.value,
+          reset: controlSequence.reset,
         },
         files,
         runtimeDiagnostics,
@@ -204,7 +185,6 @@ async function main(): Promise<void> {
     },
   );
 
-  const reportPath = join(outRoot, "report.json");
   writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`foam distance report: ${reportPath}`);
   if (!report.acceptance.passed) {
@@ -227,7 +207,7 @@ function assertInitialDebugState(info: RendererWaterDebugInfo): void {
   }
 }
 
-async function loadImages(files: CaptureFiles): Promise<{
+async function loadImages(files: WaterFoamDistanceCaptureFiles): Promise<{
   readonly bodyMask: RgbaImage;
   readonly depth: RgbaImage;
   readonly near: RgbaImage;
