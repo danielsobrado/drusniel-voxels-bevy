@@ -10,8 +10,15 @@ fn grass_sun_visibility(wpos: vec2<f32>) -> f32 {
   let world_size = max(params.sun_visibility.x, 1.0);
   let resolution = max(i32(params.sun_visibility.y), 1);
   let uv = clamp(wpos / world_size, vec2<f32>(0.0), vec2<f32>(0.999999));
-  let coord = vec2<i32>(floor(uv * f32(resolution)));
-  let shadow_proxy = textureLoad(forest_lighting_texture, coord, 0).g;
+  let texel = uv * f32(max(resolution - 1, 0));
+  let base = vec2<i32>(floor(texel));
+  let next = min(base + vec2<i32>(1), vec2<i32>(resolution - 1));
+  let blend = fract(texel);
+  let s00 = textureLoad(forest_lighting_texture, base, 0).g;
+  let s10 = textureLoad(forest_lighting_texture, vec2<i32>(next.x, base.y), 0).g;
+  let s01 = textureLoad(forest_lighting_texture, vec2<i32>(base.x, next.y), 0).g;
+  let s11 = textureLoad(forest_lighting_texture, next, 0).g;
+  let shadow_proxy = mix(mix(s00, s10, blend.x), mix(s01, s11, blend.x), blend.y);
   return clamp(1.0 - shadow_proxy, 0.0, 1.0);
 }
 `;

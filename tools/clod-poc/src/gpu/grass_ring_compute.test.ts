@@ -51,7 +51,8 @@ describe("grass ring compute capabilities", () => {
     expect(composed).toContain("sun_visibility: vec4<f32>");
     expect(composed).toContain("@group(0) @binding(16) var forest_lighting_texture");
     expect(composed).toContain("fn grass_sun_visibility");
-    expect(composed).toContain("textureLoad(forest_lighting_texture, coord, 0).g");
+    expect(composed).toContain("let s00 = textureLoad(forest_lighting_texture, base, 0).g");
+    expect(composed).toContain("let shadow_proxy = mix(");
     expect(composed).toContain("grass_sun_visibility(wpos)");
   });
 
