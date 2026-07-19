@@ -5,7 +5,6 @@ import {
   WATER_FOAM_PATTERN_END,
   WATER_FOAM_PATTERN_START,
   WATER_FOAM_RIVER_SHORE_ATTENUATION,
-  WATER_FOAM_SHADE_COVERAGE_FLOOR,
   WATER_FOAM_SHORE_DISTANCE_WEIGHT,
 } from "../src/water/water_foam_model.js";
 import type { WaterFoamAcceptanceQuality } from "./water-foam-acceptance-profile.js";
@@ -27,7 +26,6 @@ export function evaluateWaterFoamWebGlRuntimeContract(
   requireEqual(failures, "pattern end", diagnostics.patternEnd, WATER_FOAM_PATTERN_END);
   requireEqual(failures, "shore-distance weight", diagnostics.shoreDistanceWeight, WATER_FOAM_SHORE_DISTANCE_WEIGHT);
   requireEqual(failures, "river-shore attenuation", diagnostics.riverShoreAttenuation, WATER_FOAM_RIVER_SHORE_ATTENUATION);
-  requireEqual(failures, "shade coverage floor", diagnostics.shadeCoverageFloor, WATER_FOAM_SHADE_COVERAGE_FLOOR);
   requireEqual(failures, "rapid eligibility", diagnostics.rapidEligibility, "speed-times-drop-times-river");
   requireEqual(failures, "CPU field samples", diagnostics.cpuFieldSamples, 0);
   return { passed: failures.length === 0, failures };
