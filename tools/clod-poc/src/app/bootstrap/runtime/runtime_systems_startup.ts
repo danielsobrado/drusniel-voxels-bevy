@@ -65,6 +65,7 @@ import {
 } from "../../../qa/rpg_density_scene_composition.js";
 import { createAgentEnvelopeRuntime, type AgentEnvelopeRuntime } from "../../../agents/agent_envelope_runtime.js";
 import { isRpgDensityScene } from "../../../scenes/rpg_density_scenes.js";
+import { usesStreamingRuntimeWorld } from "../../../world/runtime_world_policy.js";
 
 export type { VegetationStatControllerRefs } from "../../../runtime/vegetation/vegetation_types.js";
 
@@ -461,9 +462,11 @@ export async function runRuntimeSystemsStartup(
             defaultConstructionConfig.placement.maxRayDistanceM,
             editAuthority.allowFarPreview ? editAuthority.buildPreviewRadiusM : editAuthority.buildCommitRadiusM,
           );
-      // RPG density compositions sit on the coast-to-coast route outside the small
-      // startup world box; keep placement unbounded so seeded pieces are not rejected.
-      const constructionUnboundedWorld = unboundedWorld || densityComposition !== null;
+      // Streaming scenes use canonical coordinates beyond the small startup box.
+      // Loaded-cell readiness remains the authority boundary for commits.
+      const constructionUnboundedWorld = unboundedWorld
+        || densityComposition !== null
+        || usesStreamingRuntimeWorld(searchParams.get("scene"));
       const constructionConfig = {
         ...defaultConstructionConfig,
         placement: {

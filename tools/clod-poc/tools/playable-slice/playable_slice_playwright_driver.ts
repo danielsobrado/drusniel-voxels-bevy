@@ -14,7 +14,8 @@ const READY_TIMEOUT_MS = 180_000;
 const POINTER_LOCK_TIMEOUT_MS = 10_000;
 const POLL_MS = 100;
 const AIM_PITCH = -0.9;
-const AIM_POINTER_DELTA_PX = 600;
+const EARTH_SHORE_AIM_PITCHES = [-0.15, -0.3, -0.5, -0.7, -0.9, -1.1, -1.3, -1.5] as const;
+const EARTH_SHORE_YAW_OFFSETS = [0, -0.15, 0.15, -0.3, 0.3] as const;
 
 interface PlayableSliceFrameProbe {
   maxFrameMs: number;
@@ -51,6 +52,23 @@ export function installFrameProbeInPage(): void {
   };
   target.__drusnielPlayableSliceFrameProbe = state;
   requestAnimationFrame(state.tick);
+}
+
+export function setDownwardAimInPage(target: { yaw: number; pitch: number }): { yaw: number; pitch: number } {
+  const hooks = window.__drusnielClod;
+  const pose = hooks?.getPose?.();
+  if (!hooks?.setPose || !pose) throw new Error("playable slice pose hooks are unavailable");
+  hooks.setPose({ ...pose, yaw: target.yaw, pitch: target.pitch });
+  const aimed = hooks.getPose?.();
+  return { yaw: aimed?.yaw ?? target.yaw, pitch: aimed?.pitch ?? target.pitch };
+}
+
+function angleDistance(a: number, b: number): number {
+  return Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+}
+
+function yawToward(from: readonly [number, number, number], target: readonly [number, number]): number {
+  return Math.atan2(-(target[0] - from[0]), -(target[1] - from[2]));
 }
 
 function drainFrameProbeInPage(): DrainedFrameProbe {
@@ -122,18 +140,17 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
     if (!box) throw new Error("renderer canvas has no visible bounds");
     const centerX = box.x + box.width * 0.5;
     const centerY = box.y + box.height * 0.5;
+    const beforeAim = await this.page.evaluate(() => window.__drusnielClod?.getPose?.() ?? null);
+    if (!beforeAim) throw new Error("playable slice pose getter is unavailable");
     await this.page.mouse.click(centerX, centerY, { button: "left" });
     this.record("pointer", "capture look pointer");
     await this.waitForPointerLock(true);
 
-    await this.page.mouse.move(centerX, centerY);
-    await this.page.mouse.move(centerX, centerY + AIM_POINTER_DELTA_PX, { steps: 12 });
-    this.record("pointer", "aim steeply down at terrain");
-    await this.page.waitForFunction(
-      (pitch) => (window.__drusnielClod?.getPose?.().pitch ?? 0) <= pitch,
-      AIM_PITCH,
-      { timeout: POINTER_LOCK_TIMEOUT_MS, polling: 50 },
-    );
+    const aimed = await this.page.evaluate(setDownwardAimInPage, { yaw: beforeAim.yaw, pitch: AIM_PITCH });
+    if (Math.abs(aimed.yaw - beforeAim.yaw) > 1e-6 || aimed.pitch > AIM_PITCH) {
+      throw new Error(`deterministic downward aim failed: before=${JSON.stringify(beforeAim)} after=${JSON.stringify(aimed)}`);
+    }
+    this.record("pointer", "aim steeply down at terrain without changing yaw");
 
     await this.page.keyboard.down("Tab");
     this.record("keyboard", "hold Tab for UI access");
@@ -216,6 +233,44 @@ export class PlaywrightPlayableSliceDriver implements PublicPlayableSliceDriver 
       await this.page.mouse.click(aim.x, aim.y, { button });
     }
     this.record("pointer", `click:${button}`);
+  }
+
+  async faceShore(target: readonly [number, number]): Promise<void> {
+    const pose = await this.page.evaluate(() => window.__drusnielClod?.getPose?.() ?? null);
+    if (!pose) throw new Error("playable slice pose getter is unavailable");
+    const targetPose = { yaw: yawToward(pose.p, target), pitch: 0 };
+    const aimed = await this.page.evaluate(setDownwardAimInPage, targetPose);
+    if (angleDistance(aimed.yaw, targetPose.yaw) > 1e-6 || Math.abs(aimed.pitch) > 1e-6) {
+      throw new Error(`deterministic turn failed: before=${JSON.stringify(pose)} after=${JSON.stringify(aimed)}`);
+    }
+    this.record("pointer", "face canonical dry bank");
+  }
+
+  async aimAtEditableTerrain(): Promise<void> {
+    const pose = await this.page.evaluate(() => window.__drusnielClod?.getPose?.() ?? null);
+    if (!pose) throw new Error("playable slice pose getter is unavailable");
+    for (const yawOffset of EARTH_SHORE_YAW_OFFSETS) {
+      for (const pitch of EARTH_SHORE_AIM_PITCHES) {
+        const targetPose = { yaw: pose.yaw + yawOffset, pitch };
+        const aimed = await this.page.evaluate(setDownwardAimInPage, targetPose);
+        if (angleDistance(aimed.yaw, targetPose.yaw) > 1e-6 || Math.abs(aimed.pitch - pitch) > 1e-6) {
+          throw new Error(`deterministic shore aim failed: before=${JSON.stringify(pose)} after=${JSON.stringify(aimed)}`);
+        }
+        const hit = await this.page.evaluate(async () => {
+          const hooks = window.__drusnielClod;
+          if (!hooks?.settle || !hooks.probeEarthSpellTarget) {
+            throw new Error("playable slice earth target probe is unavailable");
+          }
+          await hooks.settle(2);
+          return hooks.probeEarthSpellTarget();
+        });
+        if (hit) {
+          this.record("pointer", `aim at editable terrain hit ${hit.map((value) => value.toFixed(2)).join(",")}`);
+          return;
+        }
+      }
+    }
+    throw new Error(`no editable terrain target within range from ${JSON.stringify(pose.p)}`);
   }
 
   async waitForPointerLock(locked: boolean): Promise<void> {

@@ -71,10 +71,11 @@ export async function executePreparedEarthSpellCast(
   prepared: PreparedEarthSpellCast,
   deps: ExecuteEarthSpellCastDeps,
 ): Promise<TerrainSpellEditResult | null> {
-  await deps.ready;
   if (deps.isDisposed?.()) return null;
   const serviceResult = await deps.terrainEditService.commitSpellTerrainEdit(prepared.request, () => {
-    if (!deps.isDisposed?.()) deps.playVfx(prepared.target);
+    void deps.ready.then(() => {
+      if (!deps.isDisposed?.()) deps.playVfx(prepared.target);
+    });
   });
   let result = serviceResult;
   if (serviceResult.committed && serviceResult.changed && serviceResult.converged && deps.waitForDerivedConvergence) {

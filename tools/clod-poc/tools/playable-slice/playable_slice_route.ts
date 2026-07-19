@@ -12,6 +12,10 @@ const STEP_TIMEOUT_MS = 30_000;
 const DIG_TIMEOUT_MS = 60_000;
 const SPELL_TIMEOUT_MS = 60_000;
 const CHECKPOINT_TIMEOUT_MS = 60_000;
+const CONSTRUCTION_CLEARANCE_M = 8;
+const WATER_APPROACH_M = 24;
+const SHORE_EXIT_TIMEOUT_MS = 120_000;
+const SHORE_CLIMB_PULSE_MS = 3_000;
 
 export interface PublicPlayableSliceDriver {
   readonly actions: readonly PlayableSliceActionRecord[];
@@ -26,6 +30,8 @@ export interface PublicPlayableSliceDriver {
   press(key: string, modifiers?: readonly string[]): Promise<void>;
   pointerMoveToCenter(): Promise<void>;
   pointerClick(button: "left" | "right"): Promise<void>;
+  faceShore(target: readonly [number, number]): Promise<void>;
+  aimAtEditableTerrain(): Promise<void>;
   waitForPointerLock(locked: boolean): Promise<void>;
   reload(): Promise<void>;
   waitUntil(
@@ -44,6 +50,7 @@ export interface PlayableSliceRunOptions {
   readonly runIndex: number;
   readonly freshProfile: boolean;
   readonly expectedWaterBodyId: string;
+  readonly expectedWaterEntry: readonly [number, number];
   readonly startedAt?: Date;
 }
 
@@ -122,6 +129,27 @@ async function restorePlayerAfterConstruction(driver: PublicPlayableSliceDriver)
   if (cleanupError) throw cleanupError;
 }
 
+async function climbToDrySpellFooting(
+  driver: PublicPlayableSliceDriver,
+): Promise<PlayableSliceSnapshot> {
+  const startedAtMs = driver.nowMs();
+  let lastError: unknown = null;
+  while (driver.nowMs() - startedAtMs < SHORE_EXIT_TIMEOUT_MS) {
+    await driver.press("Space");
+    const remainingMs = SHORE_EXIT_TIMEOUT_MS - (driver.nowMs() - startedAtMs);
+    try {
+      return await driver.waitUntil(
+        "dry earth spell footing",
+        (snapshot) => snapshot.swim.mode === "dry" && snapshot.grounded,
+        Math.min(SHORE_CLIMB_PULSE_MS, Math.max(1, remainingMs)),
+      );
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error("dry earth spell footing timed out");
+}
+
 async function runRoute(
   driver: PublicPlayableSliceDriver,
   options: PlayableSliceRunOptions,
@@ -141,6 +169,7 @@ async function runRoute(
   await evidence(driver, steps, "boundary_crossed", boundary);
   await barrier(driver, options.mode, "boundary readiness");
 
+  await driver.aimAtEditableTerrain();
   await driver.pointerClick("left");
   const dug = await driver.waitUntil(
     "terrain edit commit",
@@ -149,6 +178,14 @@ async function runRoute(
     DIG_TIMEOUT_MS,
   );
   await evidence(driver, steps, "terrain_dug", dug);
+  await barrier(driver, options.mode, "terrain edit collider convergence");
+
+  await withHeldKeys(driver, ["s"], () => driver.waitUntil(
+    "construction site clearance",
+    (snapshot) => distanceXZ(snapshot.pose, dug.pose) >= CONSTRUCTION_CLEARANCE_M,
+    STEP_TIMEOUT_MS,
+  ));
+  await driver.aimAtEditableTerrain();
 
   let constructionFailure: unknown = null;
   try {
@@ -197,13 +234,30 @@ async function runRoute(
     }
   }
 
-  const water = await withHeldKeys(driver, ["Shift", "w"], () => driver.waitUntil(
+  await withHeldKeys(driver, ["Shift", "w"], () => driver.waitUntil(
+    "authoritative water approach",
+    (snapshot) => Math.hypot(
+      snapshot.pose[0] - options.expectedWaterEntry[0],
+      snapshot.pose[2] - options.expectedWaterEntry[1],
+    ) <= WATER_APPROACH_M,
+    STEP_TIMEOUT_MS,
+  ));
+  await barrier(driver, options.mode, "water approach readiness");
+
+  const water = await withHeldKeys(driver, ["w"], () => driver.waitUntil(
     "authoritative water entry",
-    (snapshot) => snapshot.swim.mode === "surface" || snapshot.swim.mode === "submerged",
+    (snapshot) => (snapshot.swim.mode === "surface" || snapshot.swim.mode === "submerged")
+      && snapshot.swim.bodyId === options.expectedWaterBodyId,
     STEP_TIMEOUT_MS,
   ));
   await evidence(driver, steps, "water_entered", water);
   await barrier(driver, options.mode, "water authority convergence");
+
+  // Underwater terrain is not exposed as editable collider authority. Return to dry
+  // footing through public swim/climb input before issuing the public earth cast.
+  await driver.faceShore(options.expectedWaterEntry);
+  await withHeldKeys(driver, ["w"], () => climbToDrySpellFooting(driver));
+  await driver.aimAtEditableTerrain();
 
   await driver.press("4");
   const spell = await driver.waitUntil(

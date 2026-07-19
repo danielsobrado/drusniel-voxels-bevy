@@ -5,6 +5,13 @@ import {
 } from "./earth_spell_gameplay_config.js";
 
 describe("earth spell gameplay config", () => {
+  it("reaches the canonical 7.5 metre riverbed from a surface-swimming camera", () => {
+    const config = parseEarthSpellGameplayConfig();
+    expect(config.maxRangeM).toBe(10);
+    expect(config.maxRangeM).toBeGreaterThan(7.5 + 1.1);
+    expect(DEFAULT_EARTH_SPELL_GAMEPLAY_CONFIG.maxRangeM).toBe(10);
+  });
+
   it("reads terrain mutation settings from YAML", () => {
     const config = parseEarthSpellGameplayConfig(`
 spells:

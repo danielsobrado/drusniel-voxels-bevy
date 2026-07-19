@@ -4,7 +4,11 @@ import {
   HYDROLOGY_BODY_LAKE,
   HYDROLOGY_BODY_RIVER,
 } from "./hydrologyGrid.js";
-import { findContinentRiverCrossingRoute, findContinentRiverCrossingRouteFromSample } from "./continent_river_route.js";
+import {
+  findContinentRiverCrossingRoute,
+  findContinentRiverCrossingRouteFromSample,
+  findValidatedContinentRiverCrossingRoute,
+} from "./continent_river_route.js";
 
 function horizontalRiverSample(_x: number, z: number) {
   return {
@@ -19,6 +23,24 @@ function horizontalRiverSample(_x: number, z: number) {
 }
 
 describe("findContinentRiverCrossingRoute", () => {
+  it("publishes runtime-resolution water identity after a coarse search", () => {
+    const runtimeSample = (x: number, z: number) => ({
+      ...horizontalRiverSample(x, z),
+      bodyId: 23,
+    });
+    const route = findValidatedContinentRiverCrossingRoute(horizontalRiverSample, runtimeSample, {
+      centerX: 128,
+      centerZ: 0,
+      searchRadiusM: 64,
+      searchSpacingM: 16,
+      crossingHalfSpanM: 48,
+      shoreProbeSpacingM: 2,
+    });
+
+    expect(route?.riverBodyId).toBe(23);
+    expect(route?.waterEntry[1]).toBeCloseTo(-4, 1);
+  });
+
   it("returns a dry-to-dry route perpendicular to flow with a refined shoreline", () => {
     const route = findContinentRiverCrossingRoute(horizontalRiverSample, {
       centerX: 128,
@@ -37,6 +59,30 @@ describe("findContinentRiverCrossingRoute", () => {
     expect(route?.waterEntry[1]).toBeCloseTo(-4, 1);
     expect(route?.end).toEqual([64, 48]);
     expect(route?.centerDepthM).toBe(2);
+  });
+
+  it("rejects a crossing whose center-to-shore grade exceeds the navigation limit", () => {
+    const steep = findContinentRiverCrossingRoute(horizontalRiverSample, {
+      centerX: 128,
+      centerZ: 0,
+      searchRadiusM: 64,
+      searchSpacingM: 16,
+      crossingHalfSpanM: 48,
+      shoreProbeSpacingM: 2,
+      maxShoreGrade: 0.4,
+    });
+    const navigable = findContinentRiverCrossingRoute(horizontalRiverSample, {
+      centerX: 128,
+      centerZ: 0,
+      searchRadiusM: 64,
+      searchSpacingM: 16,
+      crossingHalfSpanM: 48,
+      shoreProbeSpacingM: 2,
+      maxShoreGrade: 0.6,
+    });
+
+    expect(steep).toBeNull();
+    expect(navigable).not.toBeNull();
   });
 
   it("rejects a route intercepted by a different water body", () => {

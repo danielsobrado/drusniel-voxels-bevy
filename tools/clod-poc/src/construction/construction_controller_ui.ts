@@ -1,6 +1,7 @@
 import { BUILD_POINTER_OPTIONS, MENU_ID } from "./construction_controller_support.js";
 import { renderConstructionMenuHtml } from "./construction_menu_render.js";
 import { CONSTRUCTION_MATERIAL_OPTIONS } from "./materials.js";
+import { consumesGameplayShortcut } from "../player/gameplay_shortcut_target.js";
 import type {
   ConstructionMaterial,
   ConstructionPieceDef,
@@ -296,18 +297,5 @@ export function consumesConstructionShortcut(
   inputType: string,
   contentEditable: boolean,
 ): boolean {
-  if (contentEditable) return true;
-  if (tagName === "textarea" || tagName === "select") return true;
-  if (tagName !== "input") return false;
-  return ![
-    "button",
-    "checkbox",
-    "color",
-    "file",
-    "image",
-    "radio",
-    "range",
-    "reset",
-    "submit",
-  ].includes(inputType.toLowerCase());
+  return consumesGameplayShortcut(tagName, inputType, contentEditable);
 }

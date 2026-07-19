@@ -196,6 +196,7 @@ export class TerrainColliderSet {
   private readonly diagnostics: GameplayDiagnostics;
   private readonly autoProcessRebuilds: boolean;
   private readonly pendingJobs = new Map<string, ColliderRebuildJob>();
+  private readonly pendingInitialBuilds = new Map<string, ColliderEntry>();
   private remoteBuilder: TerrainColliderRemoteBuilder | null;
   private activeJob: ColliderRebuildJob | null = null;
   private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
@@ -268,6 +269,13 @@ export class TerrainColliderSet {
     }
     for (const job of this.pendingJobs.values()) this.translateJob(job, dx, dz);
     if (this.activeJob) this.translateJob(this.activeJob, dx, dz);
+    for (const entry of this.pendingInitialBuilds.values()) {
+      entry.footprint.minX += dx;
+      entry.footprint.maxX += dx;
+      entry.footprint.minZ += dz;
+      entry.footprint.maxZ += dz;
+      if (entry.source) translateSource(entry.source, dx, dz);
+    }
     this.rebuildSpatialIndex();
   }
 
@@ -399,6 +407,43 @@ export class TerrainColliderSet {
     }
   }
 
+  private scheduleInitialUpsert(page: TerrainColliderPage): void {
+    const replacement = entryFromPage(page);
+    this.pendingInitialBuilds.set(page.id, replacement);
+    this.diagnostics.add("collider_jobs_queued");
+    this.publishQueueGauges();
+    void this.buildAndInstallInitialUpsert(replacement);
+  }
+
+  private async buildAndInstallInitialUpsert(entry: ColliderEntry): Promise<void> {
+    while (!this.disposed && this.pendingInitialBuilds.get(entry.id) === entry) {
+      const buildEpoch = this.translationEpoch;
+      const result = await this.requestRemoteBuild(entry);
+      if (this.disposed || this.pendingInitialBuilds.get(entry.id) !== entry) break;
+      if (buildEpoch !== this.translationEpoch) continue;
+      if (result) {
+        try {
+          this.applyRemoteBuild(entry, result);
+        } catch {
+          this.diagnostics.add("collider_worker_failures");
+          this.buildEntryAsPipelineFallback(entry);
+        }
+      } else {
+        this.buildEntryAsPipelineFallback(entry);
+      }
+      if (this.disposed || this.pendingInitialBuilds.get(entry.id) !== entry) break;
+      this.pendingInitialBuilds.delete(entry.id);
+      this.entries.set(entry.id, entry);
+      this.unindexEntry(entry.id);
+      this.indexEntry(entry);
+      this.diagnostics.add("collider_jobs_completed");
+      this.publishQueueGauges();
+      return;
+    }
+    this.disposeEntry(entry);
+    this.publishQueueGauges();
+  }
+
   private disposeEntry(entry: ColliderEntry): void {
     entry.geometry?.dispose();
     entry.geometry = null;
@@ -485,6 +530,27 @@ export class TerrainColliderSet {
   }
 
   upsertPage(page: TerrainColliderPage): void {
+    const pendingInitial = this.pendingInitialBuilds.get(page.id);
+    if (pendingInitial) this.pendingInitialBuilds.delete(page.id);
+    if (this.autoProcessRebuilds) {
+      const previous = this.entries.get(page.id);
+      if (previous) {
+        this.cancelPendingJob(page.id);
+        const replacement = entryFromPage(page);
+        this.pendingJobs.set(page.id, {
+          pageId: page.id,
+          replacement,
+          expectedEntry: previous,
+          enqueuedAtMs: performance.now(),
+        });
+        this.diagnostics.add("collider_jobs_queued");
+        this.publishQueueGauges();
+        this.armRebuildTimer();
+      } else {
+        this.scheduleInitialUpsert(page);
+      }
+      return;
+    }
     this.cancelPendingJob(page.id);
     const previous = this.entries.get(page.id);
     const replacement = entryFromPage(page);
@@ -496,8 +562,13 @@ export class TerrainColliderSet {
   }
 
   removePage(id: string): boolean {
+    const pendingInitial = this.pendingInitialBuilds.get(id);
+    if (pendingInitial) {
+      this.pendingInitialBuilds.delete(id);
+      this.publishQueueGauges();
+    }
     const entry = this.entries.get(id);
-    if (!entry) return false;
+    if (!entry) return pendingInitial !== undefined;
     this.entries.delete(id);
     this.unindexEntry(id);
     this.disposeEntry(entry);
@@ -554,7 +625,7 @@ export class TerrainColliderSet {
   }
 
   pendingRebuildCount(): number {
-    return this.pendingJobs.size + (this.activeJob ? 1 : 0);
+    return this.pendingJobs.size + this.pendingInitialBuilds.size + (this.activeJob ? 1 : 0);
   }
 
   /** Deterministic synchronous drain for tests/tools. Runtime auto-drain uses the worker. */
@@ -676,7 +747,10 @@ export class TerrainColliderSet {
   }
 
   private publishQueueGauges(): void {
-    this.diagnostics.set("collider_jobs_inflight", this.pendingJobs.size + (this.activeJob ? 1 : 0));
+    this.diagnostics.set(
+      "collider_jobs_inflight",
+      this.pendingJobs.size + this.pendingInitialBuilds.size + (this.activeJob ? 1 : 0),
+    );
   }
 
   private armRebuildTimer(): void {
@@ -781,6 +855,7 @@ export class TerrainColliderSet {
     this.remoteBuilder = null;
     for (const job of this.pendingJobs.values()) this.discardJob(job);
     this.pendingJobs.clear();
+    this.pendingInitialBuilds.clear();
     if (this.activeJob) this.discardJob(this.activeJob);
     this.activeJob = null;
     for (const entry of this.entries.values()) this.disposeEntry(entry);

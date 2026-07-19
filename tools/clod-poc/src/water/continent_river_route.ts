@@ -33,6 +33,7 @@ export interface ContinentRiverRouteSearchOptions {
   searchSpacingM?: number;
   crossingHalfSpanM?: number;
   shoreProbeSpacingM?: number;
+  maxShoreGrade?: number;
 }
 
 export interface ContinentRiverCrossingRoute {
@@ -120,6 +121,7 @@ function findWaterEntry(
 export function findContinentRiverCrossingRouteFromSample(
   sample: (x: number, z: number) => ContinentRiverRouteSample,
   options: ContinentRiverRouteSearchOptions = {},
+  validateSample: (x: number, z: number) => ContinentRiverRouteSample = sample,
 ): ContinentRiverCrossingRoute | null {
   const centerX = finiteOption(options.centerX, DEFAULT_CENTER_M);
   const centerZ = finiteOption(options.centerZ, DEFAULT_CENTER_M);
@@ -148,6 +150,9 @@ export function findContinentRiverCrossingRouteFromSample(
     0.25,
     MAX_SHORE_PROBE_SPACING_M,
   );
+  const maxShoreGrade = options.maxShoreGrade === undefined
+    ? Number.POSITIVE_INFINITY
+    : clamp(finiteOption(options.maxShoreGrade, Number.POSITIVE_INFINITY), 0, 10);
   const minX = centerX - searchRadiusM;
   const minZ = centerZ - searchRadiusM;
   const cells = Math.floor(searchRadiusM * 2 / searchSpacingM);
@@ -156,7 +161,9 @@ export function findContinentRiverCrossingRouteFromSample(
     const z = minZ + iz * searchSpacingM;
     for (let ix = 0; ix <= cells; ix++) {
       const x = minX + ix * searchSpacingM;
-      const river = sample(x, z);
+      const coarseRiver = sample(x, z);
+      if (!isCanonicalRiverSample(coarseRiver)) continue;
+      const river = validateSample === sample ? coarseRiver : validateSample(x, z);
       if (!isCanonicalRiverSample(river)) continue;
       const flowLength = Math.hypot(river.flowX, river.flowZ);
       if (!Number.isFinite(flowLength) || !(flowLength > 1e-6)) continue;
@@ -170,10 +177,12 @@ export function findContinentRiverCrossingRouteFromSample(
         x + perpendicularX * crossingHalfSpanM,
         z + perpendicularZ * crossingHalfSpanM,
       ];
-      if (sample(start[0], start[1]).bodyKind !== HYDROLOGY_BODY_DRY) continue;
-      if (sample(end[0], end[1]).bodyKind !== HYDROLOGY_BODY_DRY) continue;
-      const waterEntry = findWaterEntry(sample, start, [x, z], river.bodyId, shoreProbeSpacingM);
+      if (validateSample(start[0], start[1]).bodyKind !== HYDROLOGY_BODY_DRY) continue;
+      if (validateSample(end[0], end[1]).bodyKind !== HYDROLOGY_BODY_DRY) continue;
+      const waterEntry = findWaterEntry(validateSample, start, [x, z], river.bodyId, shoreProbeSpacingM);
       if (!waterEntry) continue;
+      const shoreRunM = Math.hypot(x - waterEntry[0], z - waterEntry[1]);
+      if (!(shoreRunM > 0) || river.depth / shoreRunM > maxShoreGrade) continue;
       return {
         start,
         waterEntry,
@@ -188,6 +197,14 @@ export function findContinentRiverCrossingRouteFromSample(
     }
   }
   return null;
+}
+
+export function findValidatedContinentRiverCrossingRoute(
+  coarseSample: (x: number, z: number) => ContinentRiverRouteSample,
+  runtimeSample: (x: number, z: number) => ContinentRiverRouteSample,
+  options: ContinentRiverRouteSearchOptions = {},
+): ContinentRiverCrossingRoute | null {
+  return findContinentRiverCrossingRouteFromSample(coarseSample, options, runtimeSample);
 }
 
 export function findContinentRiverCrossingRoute(

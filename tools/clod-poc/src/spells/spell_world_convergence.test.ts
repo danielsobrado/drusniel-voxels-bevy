@@ -47,7 +47,7 @@ describe("earth spell world convergence", () => {
     expect(Object.isFrozen(prepared!.request.command)).toBe(true);
   });
 
-  it("waits for warmup, commits authority, then waits for runtime queues", async () => {
+  it("commits authority immediately and defers only VFX until warmup", async () => {
     let resolveReady: () => void = () => undefined;
     const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
     const prepared = prepareEarthSpellCast(
@@ -80,13 +80,16 @@ describe("earth spell world convergence", () => {
       waitForDerivedConvergence,
     });
     await Promise.resolve();
-    expect(commitSpellTerrainEdit).not.toHaveBeenCalled();
+    expect(commitSpellTerrainEdit).toHaveBeenCalledOnce();
 
-    resolveReady();
     const result = await execution;
     expect(result).toEqual(convergedResult);
-    expect(order).toEqual(["authority", "vfx", "derived", "runtime-queues"]);
+    expect(order).toEqual(["authority", "derived", "runtime-queues"]);
     expect(waitForDerivedConvergence).toHaveBeenCalledOnce();
+
+    resolveReady();
+    await Promise.resolve();
+    expect(order).toEqual(["authority", "derived", "runtime-queues", "vfx"]);
   });
 
   it("returns a failed convergence result when runtime queues time out", async () => {

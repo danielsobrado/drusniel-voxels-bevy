@@ -1,3 +1,5 @@
+import { consumesGameplayShortcut } from "../player/gameplay_shortcut_target.js";
+
 const DEFAULT_MAX_FLUSH_PASSES = 8;
 const SHORTCUT_CAPTURE = true;
 
@@ -26,7 +28,11 @@ export interface SaveCheckpointController {
 function isEditableTarget(target: EventTarget | null): boolean {
   if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
-  return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+  return consumesGameplayShortcut(
+    tag,
+    target instanceof HTMLInputElement ? target.type : "",
+    target.isContentEditable,
+  );
 }
 
 function normalizedPassCount(value: number | undefined): number {

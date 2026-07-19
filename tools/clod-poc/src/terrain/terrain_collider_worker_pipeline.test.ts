@@ -120,6 +120,32 @@ describe("terrain collider worker pipeline", () => {
     colliders.dispose();
   });
 
+  it("builds a streamed initial page before exposing it to frame-path raycasts", async () => {
+    const builder = new DeferredBuilder();
+    const colliders = new TerrainColliderSet(
+      [],
+      null,
+      { diagnostics, remoteBuilder: builder, autoProcessRebuilds: true },
+    );
+
+    colliders.upsertPage({ id: "streamed", geometry: plane(20, 3), footprint: FOOTPRINT });
+    expect(builder.calls).toHaveLength(1);
+    expect(colliders.colliderStatusAt(0, 0).covered).toBe(false);
+    expect(colliders.pendingRebuildCount()).toBe(1);
+    expect(groundHeight(colliders)).toBeNull();
+    expect(diagnostics.get("collider_sync_frame_builds")).toBe(0);
+
+    builder.resolveNext();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(colliders.colliderStatusAt(0, 0)).toEqual({ covered: true, revision: 0, replacementPending: false });
+    expect(colliders.pendingRebuildCount()).toBe(0);
+    expect(groundHeight(colliders)).toBeCloseTo(3, 5);
+    expect(diagnostics.get("collider_sync_frame_builds")).toBe(0);
+    colliders.dispose();
+  });
+
   it("discards an in-flight stale result and installs the newer revision", async () => {
     const builder = new DeferredBuilder();
     const colliders = new TerrainColliderSet(
