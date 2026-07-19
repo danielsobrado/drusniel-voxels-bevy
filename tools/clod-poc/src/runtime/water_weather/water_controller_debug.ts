@@ -8,6 +8,7 @@ import {
 } from "../../water/water_foam_distance.js";
 import { getWaterFoamRuntimeDiagnostics } from "../../water/water_foam_diagnostics.js";
 import type { RiverCascadeParticleOverlay } from "../../water/riverCascadeParticleOverlay.js";
+import { installWaterFoamAuxiliaryVisibility } from "./water_foam_auxiliary_visibility.js";
 import { installWaterFoamTimeFreeze } from "./water_foam_time_freeze.js";
 import type { WaterDebugPoseHooks, WaterControllerDeps } from "./water_controller_types.js";
 
@@ -24,8 +25,10 @@ export function installWaterDebugApi(
   if (!enabled) return;
 
   const foamTimeFreeze = installWaterFoamTimeFreeze(clipmap);
+  const auxiliaryVisibility = installWaterFoamAuxiliaryVisibility(deps.scene);
   setWaterFoamDistanceDebugOverrideM(null);
   foamTimeFreeze.setFrozen(false);
+  auxiliaryVisibility.setHidden(false);
 
   const sampleForDebug = (x: number, z: number) => {
     const s = field.sample(x, z);
@@ -108,6 +111,9 @@ export function installWaterDebugApi(
     return setWaterFoamDistanceDebugOverrideM(distanceM);
   };
   const setWaterFoamTimeFrozen = (frozen = true) => foamTimeFreeze.setFrozen(Boolean(frozen));
+  const setWaterFoamAuxiliaryOverlaysHidden = (hidden = true) => (
+    auxiliaryVisibility.setHidden(Boolean(hidden))
+  );
   const waterDebugInfo = () => {
     const uiState = deps.getUiState();
     return {
@@ -123,6 +129,7 @@ export function installWaterDebugApi(
       foam: getWaterFoamRuntimeDiagnostics(deps.searchParams),
       foamDistanceDebug: getWaterFoamDistanceDebugOverride(),
       foamTimeDebug: foamTimeFreeze.getState(),
+      foamAuxiliaryDebug: auxiliaryVisibility.getState(),
       residueOverlay: true,
       cascadeParticles: cascadeParticles.getStats(),
       clipmap: {
@@ -152,6 +159,7 @@ export function installWaterDebugApi(
     setWaterFoamSunVisibilityOverride,
     setWaterFoamDistanceOverrideM,
     setWaterFoamTimeFrozen,
+    setWaterFoamAuxiliaryOverlaysHidden,
     waterDebugInfo,
   });
 }
