@@ -1,15 +1,12 @@
 // Per-body-kind water visual presets (Phase 7b).
 //
 // Every water material colours a fragment from the preset of its HYDROLOGY_BODY_* kind:
-// shallow/deep colour, RGB Beer–Lambert absorption (per metre, replacing the scalar
-// depth-scale), turbidity, and a reflection damping factor (murky standing water
-// reflects less sky). Presets live in config (`water.visual.bodies`); the derived
-// defaults keep lakes/rivers/ocean exactly on the pre-7b look (neutral absorption
-// 1/depthScale) and encode the pond/marsh murk that used to be in-shader constants in
-// waterPerfNodeMaterial.
+// shallow/deep colour, RGB Beer–Lambert absorption, turbidity, reflection damping, and
+// optional suspended-particle scattering. Presets live in config (`water.visual.bodies`);
+// derived defaults keep clear water unchanged and encode pond/marsh murk consistently.
 //
-// Uniform layout: arrays indexed directly by body kind (0 dry … 5 marsh; the dry slot
-// mirrors lake so interpolated kind values never read garbage).
+// Uniform arrays are indexed directly by body kind (0 dry … 5 marsh; the dry slot mirrors
+// lake so interpolated kind values never read garbage).
 import {
   HYDROLOGY_BODY_DRY,
   HYDROLOGY_BODY_LAKE,
@@ -29,6 +26,14 @@ export interface WaterBodyVisualPreset {
   turbidity: number;
   /** 1 = full sky reflection, lower = damped (sediment-laden standing water). */
   reflectionDamping: number;
+  /** Suspended-particle scattering colour. Strength zero disables the term. */
+  scatterColor: [number, number, number];
+  /** Optical extinction controlling path-length saturation. */
+  scatterExtinction: number;
+  /** Scattering gain. */
+  scatterStrength: number;
+  /** Sky-ambient multiplier. */
+  scatterAmbient: number;
 }
 
 export interface WaterBodyVisualPresets {
@@ -56,8 +61,9 @@ function mixColor(
 
 /**
  * Defaults derived from the base visual scalars so an unconfigured `bodies:` section
- * changes nothing: lake/river/ocean use neutral absorption `1/depthScale` (identical to
- * the old scalar response); pond/marsh reproduce the former in-shader murk constants.
+ * changes nothing: lake/river/ocean use neutral absorption `1/depthScale`; pond/marsh
+ * reproduce the former in-shader murk constants. Suspended scatter is disabled by zero
+ * strength for every default body.
  */
 export function deriveDefaultWaterBodyPresets(base: WaterBodyPresetBase): WaterBodyVisualPresets {
   const k = 1 / Math.max(0.05, base.depthScale);
@@ -67,6 +73,10 @@ export function deriveDefaultWaterBodyPresets(base: WaterBodyPresetBase): WaterB
     absorption: [k, k, k],
     turbidity: base.turbidity,
     reflectionDamping: 1,
+    scatterColor: [0, 0, 0],
+    scatterExtinction: 0,
+    scatterStrength: 0,
+    scatterAmbient: 0,
   };
   const pond: WaterBodyVisualPreset = {
     shallowColor: mixColor(base.shallowColor, [0.06, 0.16, 0.10], 0.38),
@@ -74,6 +84,10 @@ export function deriveDefaultWaterBodyPresets(base: WaterBodyPresetBase): WaterB
     absorption: [k * 2.2, k * 1.5, k * 1.9],
     turbidity: base.turbidity + 0.25,
     reflectionDamping: 0.55,
+    scatterColor: [0, 0, 0],
+    scatterExtinction: 0,
+    scatterStrength: 0,
+    scatterAmbient: 0,
   };
   const marsh: WaterBodyVisualPreset = {
     shallowColor: mixColor(base.shallowColor, [0.10, 0.14, 0.06], 0.50),
@@ -81,18 +95,27 @@ export function deriveDefaultWaterBodyPresets(base: WaterBodyPresetBase): WaterB
     absorption: [k * 2.6, k * 1.8, k * 2.3],
     turbidity: base.turbidity + 0.35,
     reflectionDamping: 0.45,
+    scatterColor: [0, 0, 0],
+    scatterExtinction: 0,
+    scatterStrength: 0,
+    scatterAmbient: 0,
   };
   return {
-    ocean: { ...clear, shallowColor: [...clear.shallowColor], deepColor: [...clear.deepColor], absorption: [...clear.absorption] },
+    ocean: clonePreset(clear),
     lake: clear,
-    river: {
-      ...clear,
-      shallowColor: [...clear.shallowColor],
-      deepColor: [...clear.deepColor],
-      absorption: [...clear.absorption],
-    },
+    river: clonePreset(clear),
     pond,
     marsh,
+  };
+}
+
+function clonePreset(preset: WaterBodyVisualPreset): WaterBodyVisualPreset {
+  return {
+    ...preset,
+    shallowColor: [...preset.shallowColor],
+    deepColor: [...preset.deepColor],
+    absorption: [...preset.absorption],
+    scatterColor: [...preset.scatterColor],
   };
 }
 
