@@ -39,6 +39,11 @@ describe("WebGL foam acceptance wiring", () => {
     expect(WEBGL_CONTRACT_SOURCE).toContain("rapid eligibility");
   });
 
+  it("keeps renderer and quality evidence in separate directories", () => {
+    expect(RUNNER_SOURCE).toContain("join(rendererProfile.outputSuffix, profile.outputFolder)");
+    expect(RUNNER_SOURCE).toContain('join("shots/water/foam-acceptance", defaultFolder)');
+  });
+
   it("records requested and actual renderers in the report", () => {
     expect(RUNNER_SOURCE).toContain("requested: renderer");
     expect(RUNNER_SOURCE).toContain("actual: info.rendererBackend");
