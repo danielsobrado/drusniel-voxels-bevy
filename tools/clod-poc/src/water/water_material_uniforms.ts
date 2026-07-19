@@ -58,7 +58,6 @@ function levelColorGlsl(): string {
   ].join("\n");
 }
 
-
 export const WATER_FRAG = /* glsl */ `
   precision highp float;
   uniform float uTime;
@@ -101,10 +100,18 @@ export const WATER_FRAG = /* glsl */ `
   uniform float uCausticsGain;
   uniform float uCausticsScale;
   uniform float uCausticsSpeed;
+  uniform float uGlitterEnabled;
+  uniform float uGlitterTightExponent;
+  uniform float uGlitterTightGain;
+  uniform float uGlitterBroadExponent;
+  uniform float uGlitterBroadGain;
+  uniform float uGlitterLowSunGain;
   uniform vec3 uBodyShallow[6];
   uniform vec3 uBodyDeep[6];
   uniform vec3 uBodyAbsorption[6];
   uniform vec2 uBodyExtra[6];
+  uniform vec3 uBodyScatterColor[6];
+  uniform vec3 uBodyScatterParams[6];
   varying vec3 vWorldPos;
   varying float vTerrainY;
   varying float vBodyMask;
@@ -172,12 +179,11 @@ export const WATER_FRAG = /* glsl */ `
         worldPos.z > uInnerRect.y && worldPos.z < uInnerRect.w) {
       discard;
     }
-    if (vBodyMask <= 0.0) {
-      discard;
-    }
+    if (vBodyMask <= 0.0) discard;
+
     float depth = worldPos.y - vTerrainY;
     if (depth <= 0.0) discard;
-    // Per-body-kind preset blend (Phase 7b); fract window matches the TSL helper.
+
     float bodyK = clamp(vBodyKind, 0.0, 5.0);
     int bodyK0 = int(floor(bodyK));
     int bodyK1 = int(min(floor(bodyK) + 1.0, 5.0));
@@ -186,7 +192,8 @@ export const WATER_FRAG = /* glsl */ `
     vec3 bodyDeep = mix(uBodyDeep[bodyK0], uBodyDeep[bodyK1], bodyKt);
     vec3 bodyAbsorption = mix(uBodyAbsorption[bodyK0], uBodyAbsorption[bodyK1], bodyKt);
     vec2 bodyExtra = mix(uBodyExtra[bodyK0], uBodyExtra[bodyK1], bodyKt);
-    // Per-channel Beer-Lambert depth response; matches the WebGPU node materials.
+    vec3 bodyScatterColor = mix(uBodyScatterColor[bodyK0], uBodyScatterColor[bodyK1], bodyKt);
+    vec3 bodyScatterParams = mix(uBodyScatterParams[bodyK0], uBodyScatterParams[bodyK1], bodyKt);
     vec3 depthMixRgb = 1.0 - exp(-depth * bodyAbsorption);
     float depthNorm = (depthMixRgb.r + depthMixRgb.g + depthMixRgb.b) / 3.0;
 
@@ -226,11 +233,17 @@ export const WATER_FRAG = /* glsl */ `
     float ndotv = max(dot(viewDir, fresnelNormal), 0.0);
     float fres = uFresnelBase + (1.0 - uFresnelBase) * pow(1.0 - ndotv, uFresnelPower);
 
+    float opticalThickness = depth / max(ndotv, 0.25);
+    float scatterAmount = (1.0 - exp(-opticalThickness * max(bodyScatterParams.x, 0.0)))
+      * max(bodyScatterParams.y, 0.0);
+    float skyAmbient = mix(0.35, 1.0, smoothstep(-0.05, 0.35, sunDir.y)) * max(bodyScatterParams.z, 0.0);
+    vec3 suspendedScatter = bodyScatterColor * scatterAmount * skyAmbient;
+
     vec3 deepBlue = mix(vec3(0.0, 0.025, 0.10), bodyDeep, 0.65);
     vec3 shallowTeal = mix(bodyShallow, vec3(0.0, 0.45, 0.62), 0.35);
     vec3 waterColor = mix(shallowTeal, deepBlue, depthMixRgb);
     waterColor = mix(waterColor, shallowTeal, bodyExtra.x * (1.0 - depthNorm) * 0.50);
-    waterColor += caustic * vec3(0.10, 0.18, 0.16);
+    waterColor += caustic * vec3(0.10, 0.18, 0.16) + suspendedScatter;
 
     vec3 reflectDir = normalize(reflect(-viewDir, normal));
     vec3 envReflection = skyReflection(reflectDir, sunDir) * 0.88;
@@ -244,7 +257,6 @@ export const WATER_FRAG = /* glsl */ `
     float foamDetail = (mix(foamA2, foamB2, blend) - 0.5) / max(varNorm, 0.01) + 0.5;
     float breakup = smoothstep(0.35, 0.82, foamBlend * 0.62 + foamDetail * 0.38);
     float wetFade = smoothstep(0.005, 0.05, depth) * vBodyMask;
-    // Shore contact: real metres-to-shoreline where available, depth band as fallback.
     float bankContact = max(
       1.0 - smoothstep(uShoreFoamStart, uShoreFoamEnd, depth),
       1.0 - smoothstep(uShoreDistFoamStart, uShoreDistFoamEnd, vShoreDistance)
@@ -259,7 +271,12 @@ export const WATER_FRAG = /* glsl */ `
     float crestScatter = smoothstep(0.45, 0.95, foamBlend) * 0.24;
     vec3 sss = mix(vec3(0.01, 0.04, 0.14), shallowTeal, 0.55) * (backlit + crestScatter) * (1.0 - depthNorm * 0.45);
     float specDot = max(dot(reflect(-sunDir, normal), viewDir), 0.0);
-    vec3 sunSpec = vec3(1.0, 0.92, 0.76) * (pow(specDot, 384.0) * 1.15 + pow(specDot, 96.0) * 0.28);
+    float lowSun = 1.0 + (1.0 - smoothstep(0.05, 0.35, sunDir.y)) * max(uGlitterLowSunGain, 0.0);
+    float glitter = uGlitterEnabled * lowSun * (
+      pow(specDot, max(uGlitterTightExponent, 1.0)) * max(uGlitterTightGain, 0.0)
+      + pow(specDot, max(uGlitterBroadExponent, 1.0)) * max(uGlitterBroadGain, 0.0)
+    );
+    vec3 sunSpec = vec3(1.0, 0.92, 0.76) * glitter;
     vec3 litWater = mix(waterColor + sss + sunSpec, envReflection, clamp(fres * 0.72 * bodyExtra.y, 0.0, 0.82));
 
     vec3 finalColor = mix(litWater, uFoamColor, foam);
@@ -276,6 +293,7 @@ export const WATER_FRAG = /* glsl */ `
     else if (uDebugMode == 12) outCol = waterColor;
     else if (uDebugMode == 13) outCol = envReflection;
     else if (uDebugMode == 14) outCol = vec3(specDot);
+    else if (uDebugMode == 15) outCol = suspendedScatter;
     else outCol = finalColor;
     float outAlpha = uDebugMode == 0 ? alpha : 1.0;
 
@@ -307,6 +325,8 @@ export interface WaterUniforms {
   uBodyDeep: { value: THREE.Vector3[] };
   uBodyAbsorption: { value: THREE.Vector3[] };
   uBodyExtra: { value: THREE.Vector2[] };
+  uBodyScatterColor: { value: THREE.Vector3[] };
+  uBodyScatterParams: { value: THREE.Vector3[] };
   uFoamNoiseScale: { value: number };
   uFoamShoreStrength: { value: number };
   uFoamRiverStrength: { value: number };
@@ -318,6 +338,12 @@ export interface WaterUniforms {
   uFresnelNormalFlatten: { value: number };
   uDepthScale: { value: number };
   uTurbidity: { value: number };
+  uGlitterEnabled: { value: number };
+  uGlitterTightExponent: { value: number };
+  uGlitterTightGain: { value: number };
+  uGlitterBroadExponent: { value: number };
+  uGlitterBroadGain: { value: number };
+  uGlitterLowSunGain: { value: number };
   uClipmapTint: { value: number };
   uInnerRect: { value: THREE.Vector4 };
   uDebugMode: { value: number };
@@ -332,9 +358,11 @@ export interface WaterUniforms {
   uCausticsSpeed: { value: number };
 }
 
-/** Per-kind preset uniform arrays, indexed by HYDROLOGY_BODY_* (dry slot mirrors lake). */
 export function syncWaterBodyUniformArrays(
-  uniforms: Pick<WaterUniforms, "uBodyShallow" | "uBodyDeep" | "uBodyAbsorption" | "uBodyExtra">,
+  uniforms: Pick<
+    WaterUniforms,
+    "uBodyShallow" | "uBodyDeep" | "uBodyAbsorption" | "uBodyExtra" | "uBodyScatterColor" | "uBodyScatterParams"
+  >,
   bodies: WaterBodyVisualPresets,
 ): void {
   waterBodyPresetsByKind(bodies).forEach((preset, kind) => {
@@ -342,6 +370,12 @@ export function syncWaterBodyUniformArrays(
     uniforms.uBodyDeep.value[kind].set(preset.deepColor[0], preset.deepColor[1], preset.deepColor[2]);
     uniforms.uBodyAbsorption.value[kind].set(preset.absorption[0], preset.absorption[1], preset.absorption[2]);
     uniforms.uBodyExtra.value[kind].set(preset.turbidity, preset.reflectionDamping);
+    uniforms.uBodyScatterColor.value[kind].set(preset.scatterColor[0], preset.scatterColor[1], preset.scatterColor[2]);
+    uniforms.uBodyScatterParams.value[kind].set(
+      preset.scatterExtinction,
+      preset.scatterStrength,
+      preset.scatterAmbient,
+    );
   });
 }
 
@@ -352,6 +386,8 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
     uBodyDeep: { value: Array.from({ length: WATER_BODY_KIND_COUNT }, () => new THREE.Vector3()) },
     uBodyAbsorption: { value: Array.from({ length: WATER_BODY_KIND_COUNT }, () => new THREE.Vector3()) },
     uBodyExtra: { value: Array.from({ length: WATER_BODY_KIND_COUNT }, () => new THREE.Vector2()) },
+    uBodyScatterColor: { value: Array.from({ length: WATER_BODY_KIND_COUNT }, () => new THREE.Vector3()) },
+    uBodyScatterParams: { value: Array.from({ length: WATER_BODY_KIND_COUNT }, () => new THREE.Vector3()) },
   };
   syncWaterBodyUniformArrays(bodyArrays, v.bodies);
   return {
@@ -386,6 +422,12 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
     uFresnelNormalFlatten: { value: v.fresnel.normalFlatten },
     uDepthScale: { value: v.color.depthScale },
     uTurbidity: { value: v.color.turbidity },
+    uGlitterEnabled: { value: v.glitter.enabled ? 1 : 0 },
+    uGlitterTightExponent: { value: v.glitter.tightExponent },
+    uGlitterTightGain: { value: v.glitter.tightGain },
+    uGlitterBroadExponent: { value: v.glitter.broadExponent },
+    uGlitterBroadGain: { value: v.glitter.broadGain },
+    uGlitterLowSunGain: { value: v.glitter.lowSunGain },
     uClipmapTint: { value: 0 },
     uInnerRect: { value: new THREE.Vector4(0, 0, 0, 0) },
     uDebugMode: { value: params.debugMode },
