@@ -25,11 +25,10 @@ export function updateTreeGpuRingTreesSafely(
     }
   }
 
-  const previousLoggedError = input.state.loggedError;
   try {
     const updated = updateTreeGpuRingTrees(input, center, camera);
     if (!updated) {
-      logCpuFallbackError(input, previousLoggedError);
+      logCpuFallbackError(input);
       return false;
     }
     if (input.state.stats.status === "failed") {
@@ -71,10 +70,12 @@ function applyTreeGpuRingAvailabilityFallback(
 ): false {
   if (treeGpuRingHasOwnedResources(input)) clearTreeGpuRing(input);
   input.state.status = input.settings.gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
-  input.state.stats = {
-    ...input.state.stats,
-    reason,
-  };
+  if (input.state.stats.reason !== reason) {
+    input.state.stats = {
+      ...input.state.stats,
+      reason,
+    };
+  }
   if (input.state.loggedError !== reason) {
     input.state.loggedError = reason;
     const action = input.settings.gpu.fallbackToCpu ? "falling back to CPU" : "GPU ring unavailable";
@@ -83,13 +84,10 @@ function applyTreeGpuRingAvailabilityFallback(
   return false;
 }
 
-function logCpuFallbackError(
-  input: TreeGpuRingRuntimeInput,
-  previousLoggedError: string | null,
-): void {
+function logCpuFallbackError(input: TreeGpuRingRuntimeInput): void {
   if (input.state.status !== "fallback-cpu") return;
   const reason = resolveCpuFallbackReason(input);
-  if (reason === previousLoggedError) return;
+  if (reason === input.state.loggedError) return;
   input.state.loggedError = reason;
   console.error(`[trees-gpu-ring] falling back to CPU: ${reason}`);
 }
