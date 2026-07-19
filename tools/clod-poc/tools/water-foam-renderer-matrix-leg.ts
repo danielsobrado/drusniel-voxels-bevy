@@ -123,7 +123,11 @@ function isCanonicalLeg(options: WaterFoamRendererMatrixLegOptions): boolean {
 
 function parseReport(reportPath: string, failures: string[]): ParsedReport | null {
   try {
-    return JSON.parse(readFileSync(reportPath, "utf8")) as ParsedReport;
+    const value = JSON.parse(readFileSync(reportPath, "utf8")) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("foam acceptance report root must be an object");
+    }
+    return value as ParsedReport;
   } catch (error) {
     failures.push(`could not parse acceptance report: ${message(error)}`);
     return null;
