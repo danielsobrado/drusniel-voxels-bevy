@@ -8,6 +8,7 @@ function cloneWaterBodyPreset(preset: WaterBodyVisualPreset): WaterBodyVisualPre
     shallowColor: [...preset.shallowColor],
     deepColor: [...preset.deepColor],
     absorption: [...preset.absorption],
+    scatterColor: [...preset.scatterColor],
   };
 }
 
@@ -62,6 +63,7 @@ export function cloneWaterConfig(config: WaterConfig): WaterConfig {
         lakeColor: [...config.visual.rockFlour.lakeColor],
         riverColor: [...config.visual.rockFlour.riverColor],
       },
+      glitter: { ...config.visual.glitter },
       refraction: { ...config.visual.refraction },
       reflection: {
         ...config.visual.reflection,

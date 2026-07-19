@@ -11,18 +11,22 @@ const BASE = {
 };
 
 describe("water body presets", () => {
-  it("derives neutral lake/river/ocean defaults that reproduce the scalar depth response", () => {
+  it("derives neutral clear defaults that reproduce scalar depth response and add no scatter", () => {
     const presets = deriveDefaultWaterBodyPresets(BASE);
-    // absorption 1/depthScale on every channel == the old scalar exp(-depth/depthScale).
     for (const kind of [presets.lake, presets.river, presets.ocean]) {
       expect(kind.absorption).toEqual([0.25, 0.25, 0.25]);
       expect(kind.shallowColor).toEqual(BASE.shallowColor);
       expect(kind.reflectionDamping).toBe(1);
+      expect(kind.scatterColor).toEqual([0, 0, 0]);
+      expect(kind.scatterExtinction).toBe(0);
+      expect(kind.scatterStrength).toBe(0);
+      expect(kind.scatterAmbient).toBe(0);
     }
-    // Ponds/marshes carry the former in-shader murk: stronger absorption, damped sky.
     expect(presets.pond.absorption[0]).toBeGreaterThan(presets.lake.absorption[0]);
     expect(presets.pond.reflectionDamping).toBeLessThan(1);
     expect(presets.marsh.turbidity).toBeGreaterThan(presets.pond.turbidity);
+    expect(presets.pond.scatterStrength).toBe(0);
+    expect(presets.marsh.scatterStrength).toBe(0);
   });
 
   it("indexes presets by HYDROLOGY_BODY_* kind with the dry slot mirroring lake", () => {
@@ -50,13 +54,21 @@ describe("water body presets", () => {
         "      river:",
         "        absorption: [0.9, 0.5, 0.4]",
         "        reflection_damping: 0.8",
+        "        scatter_color: [0.1, 0.4, 0.35]",
+        "        scatter_extinction: 0.5",
+        "        scatter_strength: 0.7",
+        "        scatter_ambient: 0.6",
       ].join("\n"),
       () => {},
     );
     expect(config.visual.bodies.river.absorption).toEqual([0.9, 0.5, 0.4]);
     expect(config.visual.bodies.river.reflectionDamping).toBe(0.8);
-    // Unconfigured lake derives from the parsed depth_scale (1/2.0), not the default 5.0.
+    expect(config.visual.bodies.river.scatterColor).toEqual([0.1, 0.4, 0.35]);
+    expect(config.visual.bodies.river.scatterExtinction).toBe(0.5);
+    expect(config.visual.bodies.river.scatterStrength).toBe(0.7);
+    expect(config.visual.bodies.river.scatterAmbient).toBe(0.6);
     expect(config.visual.bodies.lake.absorption).toEqual([0.5, 0.5, 0.5]);
+    expect(config.visual.bodies.lake.scatterStrength).toBe(0);
     expect(config.visual.foam.shoreDistanceEnd).toBe(4.5);
     expect(config.visual.foam.shoreDistanceStart).toBe(0.0);
   });

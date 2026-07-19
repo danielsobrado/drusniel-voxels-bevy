@@ -18,6 +18,7 @@ export const WATER_DEBUG_MODES = {
   refraction: 12,
   reflection: 13,
   ssrHit: 14,
+  suspendedScatter: 15,
 } as const;
 
 export type WaterDebugMode = keyof typeof WATER_DEBUG_MODES;
@@ -56,7 +57,7 @@ export interface WaterGlacialMurkinessConfig {
 }
 
 export interface WaterRockFlourConfig {
-  /** Kill switch for the colour component of glacial suspended sediment. */
+  /** Kill switch for glacial suspended sediment. */
   enabled: boolean;
   /** Fraction of the shared glacial-murkiness state applied to lakes. */
   lakeStrength: number;
@@ -70,6 +71,22 @@ export interface WaterRockFlourConfig {
   shallowBlend: number;
   /** Maximum blend into the deep body colour. */
   deepBlend: number;
+  /** Optical extinction controlling how quickly suspended scatter saturates with path length. */
+  scatterExtinction: number;
+  /** Full-strength scattering gain. */
+  scatterStrength: number;
+  /** Sky-ambient contribution applied to the scattering colour. */
+  scatterAmbient: number;
+}
+
+export interface WaterGlitterConfig {
+  enabled: boolean;
+  tightExponent: number;
+  tightGain: number;
+  broadExponent: number;
+  broadGain: number;
+  /** Extra gain near the horizon, evaluated from sun elevation. */
+  lowSunGain: number;
 }
 
 export interface WaterVisualConfig {
@@ -97,8 +114,10 @@ export interface WaterVisualConfig {
   bodies: WaterBodyVisualPresets;
   /** Optional biome-state multiplier over existing lake/river optical presets. */
   glacialMurkiness: WaterGlacialMurkinessConfig;
-  /** Optional rock-flour colour response using the existing turbidity scatter path. */
+  /** Optional rock-flour colour and optical-scattering response. */
   rockFlour: WaterRockFlourConfig;
+  /** Config-driven two-lobe water glitter shared by all material tiers. */
+  glitter: WaterGlitterConfig;
   refraction: WaterRefractionConfig;
   reflection: WaterReflectionConfig;
   depthWrite: boolean;

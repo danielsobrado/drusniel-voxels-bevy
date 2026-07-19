@@ -21,11 +21,12 @@ export const WATER_DEBUG_LABELS: Record<WaterDebugMode, string> = {
   hydrologyFill: "hydrology fill", accumulation: "accumulation",
   carvedBed: "carved bed", waterY: "water Y", classification: "classification",
   refraction: "refraction", reflection: "reflection", ssrHit: "SSR hit",
+  suspendedScatter: "suspended scatter",
 };
 
 const MATERIAL_DEBUG_MODES = [
   "final", "depth", "foam", "fresnel", "bodyMask", "clipmapLevel",
-  "flow", "refraction", "reflection", "ssrHit",
+  "flow", "refraction", "reflection", "ssrHit", "suspendedScatter",
 ] as const satisfies readonly WaterDebugMode[];
 
 export const WATER_MODE_OPTIONS = Object.fromEntries(

@@ -1,7 +1,6 @@
-# terrain-derived hydrology for the CLOD-POC viewer.
-# Water is a visual layer only: no SSR, no caustics, no physics.
-# Water is a separate render layer and is NEVER fed into the CLOD page source
-# mesh, meshoptimizer, page borders, LOD selection, colliders, or validation.
+# Terrain-derived hydrology for the CLOD-POC viewer.
+# Water is a separate visual overlay with refraction, optional SSR/caustics, and no
+# ownership in terrain pages, meshoptimizer, page borders, colliders, or validation.
 water:
   enabled: true
   source: hydrology # hydrology | fake_bodies
@@ -84,7 +83,7 @@ water:
     # streamed space. The startup grid is only a raster view for GPU consumers, not a
     # second simulation authority. boundary_blend_m remains for legacy mode/tests.
     infinite:
-      source: traced              # traced | graph; graph is selected by continentHydrology
+      source: traced          # traced | graph; graph is selected by continentHydrology
       tile_size_m: 256        # world metres per tile edge
       tile_res: 64            # cells per tile edge ((res+1)^2 vertex samples)
       max_resident_tiles: 96  # LRU budget; 0 = direct analytic sampling
@@ -165,7 +164,7 @@ water:
         turbidity: 0.48
         reflection_damping: 0.45
     # Disabled until explicit visual/performance acceptance. Reuses the existing
-    # per-body absorption/turbidity uniforms; it does not add another shader path.
+    # per-body absorption/turbidity uniforms; it does not add another material fork.
     glacial_murkiness:
       enabled: false
       lake_strength: 1.0
@@ -173,8 +172,8 @@ water:
       absorption_multiplier: [1.55, 1.30, 1.15]
       turbidity_add: 0.28
       reflection_damping_min: 0.68
-    # Suspended rock flour reuses the existing body-colour and turbidity scatter path.
-    # No shader permutation, texture, render pass, or hydrology authority is added.
+    # Suspended rock flour changes body colour and adds path-thickness scattering.
+    # Strength zero leaves clear-water presets unchanged.
     rock_flour:
       enabled: false
       lake_strength: 1.0
@@ -183,6 +182,17 @@ water:
       river_color: [0.08, 0.43, 0.39]
       shallow_blend: 0.62
       deep_blend: 0.28
+      scatter_extinction: 0.42
+      scatter_strength: 0.85
+      scatter_ambient: 0.72
+    # Two-lobe direct sun glitter. Defaults preserve the previous HQ constants.
+    glitter:
+      enabled: true
+      tight_exponent: 384
+      tight_gain: 1.15
+      broad_exponent: 96
+      broad_gain: 0.28
+      low_sun_gain: 0.35
     refraction:
       enabled: true
       strength: 0.055

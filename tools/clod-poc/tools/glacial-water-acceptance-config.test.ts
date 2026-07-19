@@ -54,10 +54,12 @@ describe("glacial water acceptance config", () => {
     expect(cameraPoseMatches({ x: 1, z: 2 }, { x: 1, z: 2, yaw: 0 })).toBe(false);
   });
 
-  it("uses stable filenames for camel-case debug modes", () => {
+  it("uses stable filenames for camel-case and scatter debug modes", () => {
     expect(captureFileName("clipmapLevel")).toBe("clipmap-level.png");
     expect(captureFileName("ssrHit")).toBe("ssr-hit.png");
+    expect(captureFileName("suspendedScatter")).toBe("suspended-scatter.png");
     expect(captureFileName("reflection")).toBe("reflection.png");
     expect(GLACIAL_WATER_ACCEPTANCE_DEBUG_MODES).toContain("ssrHit");
+    expect(GLACIAL_WATER_ACCEPTANCE_DEBUG_MODES).toContain("suspendedScatter");
   });
 });

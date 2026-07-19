@@ -62,6 +62,7 @@ export const GLACIAL_WATER_ACCEPTANCE_DEBUG_MODES: readonly WaterShotDebugMode[]
   "refraction",
   "reflection",
   "ssrHit",
+  "suspendedScatter",
 ]);
 
 export function glacialWaterProfileUrl(baseUrl: string, profile: GlacialWaterCaptureProfileConfig): string {
@@ -73,6 +74,7 @@ export function glacialWaterProfileUrl(baseUrl: string, profile: GlacialWaterCap
 export function captureFileName(mode: WaterShotDebugMode): string {
   if (mode === "clipmapLevel") return "clipmap-level.png";
   if (mode === "ssrHit") return "ssr-hit.png";
+  if (mode === "suspendedScatter") return "suspended-scatter.png";
   return `${mode}.png`;
 }
 

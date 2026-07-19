@@ -43,6 +43,12 @@ export function applyWaterVisual(uniforms: WaterUniforms, v: WaterVisualConfig):
   uniforms.uFresnelNormalFlatten.value = v.fresnel.normalFlatten;
   uniforms.uDepthScale.value = v.color.depthScale;
   uniforms.uTurbidity.value = v.color.turbidity;
+  uniforms.uGlitterEnabled.value = v.glitter.enabled ? 1 : 0;
+  uniforms.uGlitterTightExponent.value = v.glitter.tightExponent;
+  uniforms.uGlitterTightGain.value = v.glitter.tightGain;
+  uniforms.uGlitterBroadExponent.value = v.glitter.broadExponent;
+  uniforms.uGlitterBroadGain.value = v.glitter.broadGain;
+  uniforms.uGlitterLowSunGain.value = v.glitter.lowSunGain;
   Object.assign(uniforms.uRefraction, v.refraction);
   Object.assign(uniforms.uReflection, v.reflection);
 }
