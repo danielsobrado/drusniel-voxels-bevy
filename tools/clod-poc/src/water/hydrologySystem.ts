@@ -16,6 +16,15 @@ import type { HydrologyGraph } from "../world/hydrology_graph/hydrology_graph.js
 import type { GraphTerrainCarveConfig } from "./graph_hydrology.js";
 import { packHydrologyFieldsTexels, packHydrologyWaterSurfaceTexels } from "./hydrologyGpuPacking.js";
 import {
+  applyGravelBarBedToGrid,
+  cloneGravelBarBedCounters,
+  createGravelBarBedAuthority,
+} from "./gravel_bar_bed_authority.js";
+import {
+  createGravelBarBedCounters,
+  type GravelBarBedCounters,
+} from "./gravel_bar_bed.js";
+import {
   HYDROLOGY_BODY_DRY,
   HYDROLOGY_BODY_LAKE,
   HYDROLOGY_BODY_MARSH,
@@ -49,6 +58,7 @@ export interface HydrologyStats {
   bodyKindCounts: HydrologyBodyKindCounts;
   waterYFarMin: number;
   waterYFarMax: number;
+  gravelBed: GravelBarBedCounters;
 }
 
 export interface HydrologyTileRemoteAuthority {
@@ -72,6 +82,7 @@ export class HydrologySystem {
   private readonly acceptsRemoteTiles: boolean;
   private readonly remoteTileAuthority: HydrologyTileRemoteAuthority | null;
   private readonly carvedTerrainHeight: ((x: number, z: number) => number) | null;
+  private readonly gravelBedCounters: GravelBarBedCounters;
   private waterTexture: THREE.DataTexture | null = null;
   private fieldsTexture: THREE.DataTexture | null = null;
 
@@ -88,6 +99,7 @@ export class HydrologySystem {
     worldSampler: HydrologyWorldSampler,
     remoteTileAuthority: HydrologyTileRemoteAuthority | null,
     carvedTerrainHeight: ((x: number, z: number) => number) | null,
+    gravelBedCounters: GravelBarBedCounters,
   ) {
     this.grid = grid;
     this.stats = stats;
@@ -102,6 +114,7 @@ export class HydrologySystem {
     this.acceptsRemoteTiles = remoteTileAuthority !== null;
     this.remoteTileAuthority = remoteTileAuthority;
     this.carvedTerrainHeight = carvedTerrainHeight;
+    this.gravelBedCounters = gravelBedCounters;
   }
 
   /**
@@ -180,7 +193,14 @@ export class HydrologySystem {
     const t0 = nowMs();
     const infiniteWorldSamples = options.infiniteWorldSamples ?? infiniteIslandsScene();
     const unifiedStartup = infiniteWorldSamples && config.infinite.unifiedStartup;
-    const worldSampler = options.worldSampler ?? sampleInfiniteHydrology;
+    const gravelBedCounters = createGravelBarBedCounters();
+    const gravelBedAuthority = createGravelBarBedAuthority(
+      config.gravelBars,
+      config.gravelBed,
+      sampler,
+      gravelBedCounters,
+    );
+    const worldSampler = gravelBedAuthority.wrap(options.worldSampler ?? sampleInfiniteHydrology);
     const tileCache = infiniteWorldSamples && config.infinite.maxResidentTiles > 0
       ? new HydrologyTileCache(sampler, {
           tileSizeM: config.infinite.tileSizeM,
@@ -192,8 +212,13 @@ export class HydrologySystem {
 
     const grid = unifiedStartup
       ? buildUnifiedStartupGrid(config, worldCells, sampler, options.worldSampler ? null : tileCache, worldSampler)
-      : buildLegacyHydrologyGrid(config, worldCells, sampler);
-    const stats = collectStats(grid, unifiedStartup ? 0 : config.accumulation.particles, nowMs() - t0);
+      : buildLegacyHydrologyGrid(config, worldCells, sampler, gravelBedCounters);
+    const stats = collectStats(
+      grid,
+      unifiedStartup ? 0 : config.accumulation.particles,
+      nowMs() - t0,
+      gravelBedCounters,
+    );
     logHydrologySummary(stats);
     maybeDumpHydrologyFields(grid, config);
 
@@ -211,6 +236,7 @@ export class HydrologySystem {
       options.remoteTileAuthority
         ?? (options.worldSampler === undefined ? { graph: null, carve: null } : null),
       options.carvedTerrainHeight ?? null,
+      gravelBedCounters,
     );
   }
 
@@ -220,6 +246,10 @@ export class HydrologySystem {
 
   unifiedStartupActive(): boolean {
     return this.unifiedStartup;
+  }
+
+  gravelBedStats(): GravelBarBedCounters {
+    return cloneGravelBarBedCounters(this.gravelBedCounters);
   }
 
   /**
@@ -318,6 +348,7 @@ function buildLegacyHydrologyGrid(
   config: HydrologyConfig,
   worldCells: number,
   sampler: TerrainHeightSampler,
+  gravelBedCounters: GravelBarBedCounters,
 ): HydrologyGrid {
   const grid = createHydrologyGrid(config.simRes, worldCells, sampler, config.waterSurface.farReduceFactor);
   fillDepressions(grid, config.fill);
@@ -331,6 +362,7 @@ function buildLegacyHydrologyGrid(
   // Body identity + shore distance are derived from the final wet mask.
   computeBodyIds(grid);
   computeShoreDistance(grid);
+  applyGravelBarBedToGrid(grid, config.gravelBars, config.gravelBed, gravelBedCounters);
   buildFarWaterSurface(grid, config.waterSurface);
   buildMoistureField(grid, config.moisture);
   return grid;
@@ -444,7 +476,12 @@ function applyRiverFlowSpeedMultiplier(grid: HydrologyGrid, multiplier: number):
   }
 }
 
-function collectStats(grid: HydrologyGrid, particles: number, buildMs: number): HydrologyStats {
+function collectStats(
+  grid: HydrologyGrid,
+  particles: number,
+  buildMs: number,
+  gravelBedCounters: GravelBarBedCounters,
+): HydrologyStats {
   let wetCells = 0;
   let lakeCells = 0;
   let riverCells = 0;
@@ -483,6 +520,7 @@ function collectStats(grid: HydrologyGrid, particles: number, buildMs: number): 
     bodyKindCounts,
     waterYFarMin: waterYFarRange.min,
     waterYFarMax: waterYFarRange.max,
+    gravelBed: cloneGravelBarBedCounters(gravelBedCounters),
   };
 }
 
@@ -510,7 +548,8 @@ function logHydrologySummary(stats: HydrologyStats): void {
   console.info(
     `[hydrology] res=${stats.simRes} far=${stats.farRes} wet=${stats.wetCells} lake=${stats.lakeCells} ` +
       `river=${stats.riverCells} maxJump=${stats.maxWaterYJump.toFixed(3)} ` +
-      `maxFlow=${stats.maxFlowSpeed.toFixed(3)} moisture=${stats.moistureMin.toFixed(3)}..${stats.moistureMax.toFixed(3)}`,
+      `maxFlow=${stats.maxFlowSpeed.toFixed(3)} moisture=${stats.moistureMin.toFixed(3)}..${stats.moistureMax.toFixed(3)} ` +
+      `gravelBed=${stats.gravelBed.accepted}/${stats.gravelBed.candidates}`,
   );
 }
 
