@@ -26,6 +26,7 @@ import {
 } from "./tree_system_math.js";
 import { packTreeSystemGpuFrustumPlanes } from "./tree_system_gpu_policy.js";
 import { setTreeGpuRingMeshesVisible, type TreeGpuRingMesh } from "./tree_system_gpu_ring_draw.js";
+import { disposeTreeGpuRingOwnedResources } from "./tree_gpu_ring_resource_lifecycle.js";
 import type {
   TreeGpuRingDrawResources,
   TreeStats,
@@ -43,6 +44,7 @@ export interface TreeGpuRingRuntimeState {
   compute: TreeGpuRingCompute | null;
   init: Promise<void> | null;
   key: string;
+  failedKey: string;
   generation: number;
   draw: TreeGpuRingDrawResources | null;
   ringMeshes: TreeGpuRingMesh[];
@@ -81,6 +83,7 @@ export function createTreeGpuRingRuntimeState(gpuDevice: GPUDevice | null): Tree
     compute: null,
     init: null,
     key: "",
+    failedKey: "",
     generation: 0,
     draw: null,
     ringMeshes: [],
@@ -110,28 +113,33 @@ export interface TreeMaterialHandleLike {
 export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: THREE.Vector3, camera?: THREE.Camera): boolean {
   const gpu = input.settings.gpu;
   if (!input.supportsGpuTrees || !input.gpuDevice || !input.gpuBackend) {
-    input.state.status = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
     clearTreeGpuRing(input);
+    input.state.status = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
     return false;
   }
   if (input.unsupportedReason) {
-    input.state.status = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
-    input.state.loggedError ??= input.unsupportedReason;
-    console.warn(`[trees-gpu-ring] falling back to CPU: ${input.unsupportedReason}`);
     clearTreeGpuRing(input);
+    input.state.status = gpu.fallbackToCpu ? "fallback-cpu" : "unsupported";
+    if (input.state.loggedError !== input.unsupportedReason) {
+      input.state.loggedError = input.unsupportedReason;
+      console.warn(`[trees-gpu-ring] falling back to CPU: ${input.unsupportedReason}`);
+    }
     return false;
   }
 
-  ensureTreeGpuRingCompute(input);
+  const key = treeGpuRingKey(input.settings, input.worldCells);
+  if (input.state.failedKey === key) {
+    input.state.status = gpu.fallbackToCpu ? "fallback-cpu" : "error";
+    return false;
+  }
+
+  ensureTreeGpuRingCompute(input, key);
+  if (input.state.failedKey === key) return false;
+
   const stats = input.state.compute?.stats(true) ?? input.state.stats;
   input.state.stats = stats;
-  if (stats.status === "failed" && gpu.fallbackToCpu) {
-    if (stats.reason && input.state.loggedError !== stats.reason) {
-      input.state.loggedError = stats.reason;
-      console.warn(`[trees-gpu-ring] falling back to CPU: ${stats.reason}`);
-    }
-    clearTreeGpuRing(input);
-    input.state.status = "fallback-cpu";
+  if (stats.status === "failed") {
+    failTreeGpuRing(input, key, stats.reason ?? "tree GPU ring failed");
     return false;
   }
   if (input.state.compute && input.state.draw) {
@@ -186,7 +194,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
   input.lodCounts.mid = input.state.stats.counts.mid;
   input.lodCounts.far = input.state.stats.counts.far;
   input.lodCounts.impostor = input.state.stats.counts.impostor;
-  input.state.status = input.state.stats.status === "failed" ? "error" : "ring";
+  input.state.status = "ring";
   input.state.visibleCount = visibleTreeLodCount(input.state.stats.counts);
   input.state.overflowed = input.state.stats.overflowed;
   input.state.dispatchMs = input.state.stats.submitMs;
@@ -199,8 +207,12 @@ export function clearTreeGpuRing(input: TreeGpuRingRuntimeInput): void {
   input.state.compute = null;
   input.state.init = null;
   input.state.key = "";
+  input.state.failedKey = "";
   clearTreeGpuRingDraw(input.state, input.root);
   input.state.stats = createTreeGpuRingStats(input.gpuDevice ? "idle" : "disabled");
+  input.state.visibleCount = 0;
+  input.state.overflowed = false;
+  input.state.dispatchMs = null;
   input.state.lastValidationSignature = "";
 }
 
@@ -209,48 +221,64 @@ export function setTreeGpuRingDrawsVisible(state: TreeGpuRingRuntimeState, visib
   setTreeGpuRingMeshesVisible(state.prepassTwins, visible);
 }
 
-function ensureTreeGpuRingCompute(input: TreeGpuRingRuntimeInput): void {
+function ensureTreeGpuRingCompute(input: TreeGpuRingRuntimeInput, key: string): void {
   if (!input.gpuDevice || !input.gpuBackend) return;
-  const key = treeGpuRingKey(input.settings, input.worldCells);
+  if (input.state.failedKey === key) return;
   if (input.state.compute && input.state.key === key) return;
   if (input.state.init && input.state.key === key) return;
 
   clearTreeGpuRing(input);
   input.state.key = key;
-  input.state.draw = input.createDrawResources(treeGpuRingGroupCapacity(input.settings));
-  input.state.ringMeshes = input.state.draw.meshes;
-  setTreeGpuRingDrawsVisible(input.state, false);
-  for (const mesh of input.state.ringMeshes) input.root.add(mesh);
-  const slotCount = treeGpuRingSlotCount(input.settings);
+  try {
+    input.state.draw = input.createDrawResources(treeGpuRingGroupCapacity(input.settings));
+    input.state.ringMeshes = input.state.draw.meshes;
+    setTreeGpuRingDrawsVisible(input.state, false);
+    for (const mesh of input.state.ringMeshes) input.root.add(mesh);
+    const slotCount = treeGpuRingSlotCount(input.settings);
+    input.state.stats = {
+      ...createTreeGpuRingStats("initializing"),
+      candidateCount: slotCount,
+      candidateCountBeforePrefilter: slotCount,
+      candidateCountAfterPrefilter: slotCount,
+    };
+    const initKey = key;
+    const initGeneration = input.state.generation;
+    const edits = resolveDigEdits(getDigEditsSnapshot());
+    input.state.init = TreeGpuRingCompute.create(input.gpuDevice, edits, input.state.draw.outputBuffers, input.settings)
+      .then((compute) => {
+        if (input.state.key !== initKey || input.state.generation !== initGeneration) {
+          compute.destroy();
+          return;
+        }
+        input.state.compute = compute;
+        input.state.failedKey = "";
+        input.state.loggedError = null;
+        input.state.stats = compute.stats(input.settings.enabled);
+      })
+      .catch((error) => {
+        if (input.state.key !== initKey || input.state.generation !== initGeneration) return;
+        failTreeGpuRing(input, initKey, error);
+      })
+      .finally(() => {
+        if (input.state.key === initKey && input.state.generation === initGeneration) input.state.init = null;
+      });
+  } catch (error) {
+    failTreeGpuRing(input, key, error);
+  }
+}
+
+function failTreeGpuRing(input: TreeGpuRingRuntimeInput, key: string, error: unknown): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  clearTreeGpuRing(input);
+  input.state.failedKey = key;
+  input.state.loggedError = reason;
   input.state.stats = {
-    ...createTreeGpuRingStats("initializing"),
-    candidateCount: slotCount,
-    candidateCountBeforePrefilter: slotCount,
-    candidateCountAfterPrefilter: slotCount,
+    ...createTreeGpuRingStats("failed"),
+    reason,
   };
-  const initKey = key;
-  const initGeneration = input.state.generation;
-  const edits = resolveDigEdits(getDigEditsSnapshot());
-  input.state.init = TreeGpuRingCompute.create(input.gpuDevice, edits, input.state.draw.outputBuffers, input.settings)
-    .then((compute) => {
-      if (input.state.key !== initKey || input.state.generation !== initGeneration) {
-        compute.destroy();
-        return;
-      }
-      input.state.compute = compute;
-      input.state.stats = compute.stats(input.settings.enabled);
-    })
-    .catch((error) => {
-      if (input.state.key !== initKey || input.state.generation !== initGeneration) return;
-      input.state.stats = {
-        ...input.state.stats,
-        status: "failed",
-        reason: error instanceof Error ? error.message : String(error),
-      };
-    })
-    .finally(() => {
-      if (input.state.key === initKey && input.state.generation === initGeneration) input.state.init = null;
-    });
+  input.state.status = input.settings.gpu.fallbackToCpu ? "fallback-cpu" : "error";
+  const action = input.settings.gpu.fallbackToCpu ? "falling back to CPU" : "GPU ring disabled";
+  console.warn(`[trees-gpu-ring] ${action}: ${reason}`);
 }
 
 function validateTreeGpuRingAgainstCpu(
@@ -402,23 +430,14 @@ function sumCounts(counts: readonly number[]): number {
 }
 
 function clearTreeGpuRingDraw(state: TreeGpuRingRuntimeState, root: THREE.Object3D): void {
-  for (const twin of state.prepassTwins) {
-    root.remove(twin);
-    if (Array.isArray(twin.material)) {
-      for (const material of twin.material) material.dispose();
-    } else {
-      twin.material.dispose();
-    }
-  }
+  disposeTreeGpuRingOwnedResources({
+    root,
+    meshes: state.ringMeshes,
+    prepassTwins: state.prepassTwins,
+    materialHandles: state.draw?.materialHandles ?? {},
+  });
   state.prepassTwins = [];
-  for (const mesh of state.ringMeshes) {
-    root.remove(mesh);
-    mesh.geometry.dispose();
-  }
   state.ringMeshes = [];
-  for (const handle of Object.values(state.draw?.materialHandles ?? {})) {
-    handle.dispose();
-  }
   state.draw = null;
 }
 
