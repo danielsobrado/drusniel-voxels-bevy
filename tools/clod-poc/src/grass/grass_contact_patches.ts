@@ -3,11 +3,14 @@ import * as THREE from "three";
 import { StorageBufferAttribute } from "three/webgpu";
 import {
   cameraPosition,
+  clamp,
   float,
+  floor,
   max,
   mix,
   smoothstep,
   storage,
+  uint,
   uniform,
   vec2,
 } from "three/tsl";
@@ -20,6 +23,8 @@ export interface GrassContactSettings {
   readonly maxPatches: number;
   readonly innerRadiusScale: number;
   readonly outerRadiusScale: number;
+  readonly fieldGrid: number;
+  readonly fieldCellM: number;
   readonly minHeightScale: number;
   readonly flattenStrength: number;
   readonly splayStrengthM: number;
@@ -62,6 +67,8 @@ const DEFAULT_SETTINGS: GrassContactSettings = {
   maxPatches: GRASS_CONTACT_PATCH_CAPACITY,
   innerRadiusScale: 0.9,
   outerRadiusScale: 1.65,
+  fieldGrid: 192,
+  fieldCellM: 1,
   minHeightScale: 0.08,
   flattenStrength: 0.72,
   splayStrengthM: 0.38,
@@ -70,12 +77,17 @@ const DEFAULT_SETTINGS: GrassContactSettings = {
 };
 
 const settings = parseGrassContactSettings(configText);
-const patchAttribute = new StorageBufferAttribute(GRASS_CONTACT_PATCH_CAPACITY, 4);
+export const GRASS_CONTACT_FIELD_OFFSET = GRASS_CONTACT_PATCH_CAPACITY;
+export const GRASS_CONTACT_FIELD_CAPACITY = settings.fieldGrid * settings.fieldGrid;
+export const GRASS_CONTACT_STORAGE_CAPACITY = GRASS_CONTACT_FIELD_OFFSET + GRASS_CONTACT_FIELD_CAPACITY;
+
+const fieldAttribute = new StorageBufferAttribute(GRASS_CONTACT_STORAGE_CAPACITY, 4);
 const initializedBackends = new WeakSet<object>();
 
-patchAttribute.name = "grass-stone-contact-patches";
+fieldAttribute.name = "grass-stone-contact-field";
 
 const uEnabled = uniform(settings.enabled ? 1 : 0);
+const uFieldCenter = uniform(new THREE.Vector2());
 const uMinHeightScale = uniform(settings.minHeightScale);
 const uFlattenStrength = uniform(settings.flattenStrength);
 const uSplayStrengthM = uniform(settings.splayStrengthM);
@@ -99,6 +111,8 @@ export function parseGrassContactSettings(text: string): GrassContactSettings {
     ),
     innerRadiusScale,
     outerRadiusScale,
+    fieldGrid: Math.min(512, Math.max(16, Math.floor(readPositive(raw.field_grid, DEFAULT_SETTINGS.fieldGrid)))),
+    fieldCellM: Math.max(0.1, readPositive(raw.field_cell_m, DEFAULT_SETTINGS.fieldCellM)),
     minHeightScale: readFraction(raw.min_height_scale, DEFAULT_SETTINGS.minHeightScale),
     flattenStrength: readFraction(raw.flatten_strength, DEFAULT_SETTINGS.flattenStrength),
     splayStrengthM: readNonNegative(raw.splay_strength_m, DEFAULT_SETTINGS.splayStrengthM),
@@ -110,54 +124,57 @@ export function parseGrassContactSettings(text: string): GrassContactSettings {
 export function readGrassContactSettings(): GrassContactSettings {
   return {
     ...settings,
-    dirtColor: [...settings.dirtColor],
+    dirtColor: [...settings.dirtColor] as [number, number, number],
   };
 }
 
+export function setGrassContactFieldCenter(x: number, z: number): void {
+  uFieldCenter.value.set(Number.isFinite(x) ? x : 0, Number.isFinite(z) ? z : 0);
+}
+
 export function grassContactPatchAttribute(): StorageBufferAttribute {
-  return patchAttribute;
+  return fieldAttribute;
 }
 
 export function ensureGrassContactPatchGpuResources(
   backend: GrassContactPatchGpuBackend,
 ): GrassContactPatchGpuResources {
   if (!initializedBackends.has(backend)) {
-    backend.createStorageAttribute(patchAttribute);
+    backend.createStorageAttribute(fieldAttribute);
     initializedBackends.add(backend);
   }
-  const buffer = backend.get(patchAttribute).buffer;
-  if (!buffer) throw new Error("Missing GPU buffer for grass-stone contact patches");
-  return { attribute: patchAttribute, buffer, capacity: GRASS_CONTACT_PATCH_CAPACITY };
+  const buffer = backend.get(fieldAttribute).buffer;
+  if (!buffer) throw new Error("Missing GPU buffer for grass-stone contact field");
+  return { attribute: fieldAttribute, buffer, capacity: GRASS_CONTACT_STORAGE_CAPACITY };
 }
 
 export function grassContactPatchInfluence(worldXZ: TslNode): GrassContactInfluenceNodes {
-  const patches: TslNode = storage(patchAttribute, "vec4", GRASS_CONTACT_PATCH_CAPACITY).toReadOnly();
-  let suppress: TslNode = float(0);
-  let trample: TslNode = float(0);
-  let dirt: TslNode = float(0);
-  let splaySum: TslNode = vec2(0);
-
-  for (let index = 0; index < GRASS_CONTACT_PATCH_CAPACITY; index++) {
-    const patch: TslNode = patches.element(index);
-    const active: TslNode = smoothstep(0.0001, 0.001, patch.w).mul(uEnabled);
-    const delta: TslNode = worldXZ.sub(patch.xy);
-    const distance: TslNode = delta.length();
-    const inner: TslNode = max(patch.z, 0.001);
-    const outer: TslNode = max(patch.w, inner.add(0.001));
-    const core: TslNode = float(1).sub(smoothstep(0.0, inner, distance)).mul(active);
-    const contact: TslNode = float(1).sub(smoothstep(inner, outer, distance)).mul(active);
-    const influence: TslNode = max(core, contact);
-    const direction: TslNode = delta.div(max(distance, 0.001));
-
-    suppress = max(suppress, core);
-    trample = max(trample, influence);
-    dirt = max(dirt, influence);
-    splaySum = splaySum.add(direction.mul(influence.mul(float(1).sub(core.mul(0.65)))));
-  }
-
-  const splayLength: TslNode = splaySum.length();
-  const splay: TslNode = splaySum.div(max(splayLength, 0.001));
-  return { suppress, trample, flatten: max(suppress, trample), dirt, splay };
+  const field: TslNode = storage(fieldAttribute, "vec4", GRASS_CONTACT_STORAGE_CAPACITY).toReadOnly();
+  const halfExtentM = settings.fieldGrid * settings.fieldCellM * 0.5;
+  const localCell: TslNode = worldXZ.sub(uFieldCenter).add(halfExtentM).div(settings.fieldCellM);
+  const cellX: TslNode = floor(localCell.x);
+  const cellZ: TslNode = floor(localCell.y);
+  const inside: TslNode = cellX.greaterThanEqual(0)
+    .and(cellZ.greaterThanEqual(0))
+    .and(cellX.lessThan(settings.fieldGrid))
+    .and(cellZ.lessThan(settings.fieldGrid));
+  const clampedX: TslNode = clamp(cellX, 0, settings.fieldGrid - 1);
+  const clampedZ: TslNode = clamp(cellZ, 0, settings.fieldGrid - 1);
+  const fieldIndex: TslNode = uint(
+    clampedZ.mul(settings.fieldGrid).add(clampedX).add(GRASS_CONTACT_FIELD_OFFSET),
+  );
+  const sample: TslNode = field.element(fieldIndex);
+  const active: TslNode = inside.select(float(1), float(0)).mul(uEnabled);
+  const suppress: TslNode = sample.x.mul(active);
+  const trample: TslNode = sample.y.mul(active);
+  const splay: TslNode = sample.zw.mul(active);
+  return {
+    suppress,
+    trample,
+    flatten: max(suppress, trample),
+    dirt: max(suppress, trample),
+    splay,
+  };
 }
 
 export function grassContactInteractionNodes(): GrassContactInteractionNodes {
@@ -173,9 +190,9 @@ export function grassContactInteractionNodes(): GrassContactInteractionNodes {
 export function applyGrassContactTerrainTint(color: TslNode, worldXZ: TslNode): TslNode {
   const contact = grassContactPatchInfluence(worldXZ);
   const cameraDistance: TslNode = worldXZ.sub(cameraPosition.xz).length();
-  const nearFade: TslNode = float(1).sub(smoothstep(72.0, 112.0, cameraDistance));
+  const nearFade: TslNode = float(1).sub(smoothstep(72, 94, cameraDistance));
   const influence: TslNode = contact.dirt.mul(uDirtTintStrength).mul(nearFade);
-  return mix(color, uDirtColor, influence);
+  return mix(color, color.mul(uDirtColor.mul(1.6)), influence);
 }
 
 export function resolveGrassContactRadii(stoneRadiusM: number): { innerRadiusM: number; outerRadiusM: number } {
@@ -197,6 +214,10 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
 
 function readNonNegative(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function readPositive(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function readFraction(value: unknown, fallback: number): number {
