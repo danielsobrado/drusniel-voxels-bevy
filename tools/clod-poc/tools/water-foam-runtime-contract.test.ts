@@ -57,7 +57,7 @@ describe("water foam runtime contract", () => {
       ...base,
       cpuFieldSamples: 1,
       sunAtlas: { ...base.sunAtlas, valid: 0, version: 0, width: 1, height: 1 },
-    } as WaterFoamRuntimeDiagnostics);
+    });
 
     expect(result.passed).toBe(false);
     expect(result.failures.join("\n")).toMatch(/CPU field samples/);
