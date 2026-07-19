@@ -1,6 +1,7 @@
 import shaderSource from "./shaders/prop_ring.compute.wgsl?raw";
 import type { CustomPropsSettings } from "../props/prop_types.js";
 import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
+import { reportGpuCpuFallback } from "./gpu_cpu_fallback_log.js";
 
 const INDIRECT_ARGS_PER_GROUP = 5;
 const PARAM_BYTES = 16 * 9;
@@ -103,41 +104,55 @@ export class PropGpuRingCompute {
   }
 
   static async create(device: GPUDevice, source: PropGpuRingSourceData, outputBuffers: PropGpuRingOutputBuffers, settings: CustomPropsSettings): Promise<PropGpuRingCompute> {
-    const code = shaderSource.replaceAll("WORKGROUP_SIZE", String(settings.gpu.workgroupSize));
-    const module = device.createShaderModule({ label: "prop ring compute shader", code });
-    const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
-    const layout = device.createBindGroupLayout({
-      label: "prop ring compute layout",
-      entries: [
-        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-        storage(1), storage(2), storage(3), storage(4), storage(5, "read-only-storage"), storage(6, "read-only-storage"), storage(7, "read-only-storage"), storage(8, "read-only-storage"), storage(9, "read-only-storage"),
-      ],
-    });
-    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
-    const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `prop ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
-    const [clearCounters, cullProps, buildIndirectArgs] = await Promise.all([makePipeline("clear_counters"), makePipeline("cull_props"), makePipeline("build_indirect_args")]);
-    return new PropGpuRingCompute(device, layout, { clear_counters: clearCounters, cull_props: cullProps, build_indirect_args: buildIndirectArgs }, source, outputBuffers, settings);
+    try {
+      const code = shaderSource.replaceAll("WORKGROUP_SIZE", String(settings.gpu.workgroupSize));
+      const module = device.createShaderModule({ label: "prop ring compute shader", code });
+      const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
+      const layout = device.createBindGroupLayout({
+        label: "prop ring compute layout",
+        entries: [
+          { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+          storage(1), storage(2), storage(3), storage(4), storage(5, "read-only-storage"), storage(6, "read-only-storage"), storage(7, "read-only-storage"), storage(8, "read-only-storage"), storage(9, "read-only-storage"),
+        ],
+      });
+      const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
+      const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `prop ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
+      const [clearCounters, cullProps, buildIndirectArgs] = await Promise.all([makePipeline("clear_counters"), makePipeline("cull_props"), makePipeline("build_indirect_args")]);
+      return new PropGpuRingCompute(device, layout, { clear_counters: clearCounters, cull_props: cullProps, build_indirect_args: buildIndirectArgs }, source, outputBuffers, settings);
+    } catch (error) {
+      if (settings.gpu.fallbackToCpu) reportGpuCpuFallback("props-gpu-ring", error);
+      throw error;
+    }
   }
 
   dispatch(params: PropGpuRingDispatchParams): boolean {
     if (this.failedReason) return false;
-    this.packParams(params);
-    this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
-    const frame = this.frame++;
-    const requestReadback = shouldRequestGpuReadback({ kind: "prop_gpu_counts", frame, intervalFrames: READBACK_INTERVAL_FRAMES, requested: this.settings.gpu.debugShowGpuCounts });
-    const readbackSlot = requestReadback ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null : null;
-    const encoder = this.device.createCommandEncoder({ label: "prop ring compute encoder" });
-    this.dispatchPipeline(encoder, this.pipelines.clear_counters, Math.ceil((this.groupCount * INDIRECT_ARGS_PER_GROUP) / this.settings.gpu.workgroupSize));
-    this.dispatchPipeline(encoder, this.pipelines.cull_props, Math.ceil(this.sourceCount / this.settings.gpu.workgroupSize));
-    this.dispatchPipeline(encoder, this.pipelines.build_indirect_args, Math.ceil(this.groupCount / this.settings.gpu.workgroupSize));
-    if (readbackSlot) encoder.copyBufferToBuffer(this.counterBuffer, 0, readbackSlot.buffer, 0, this.groupCount * Uint32Array.BYTES_PER_ELEMENT);
-    const submittedGeneration = this.generation;
-    const submitStart = performance.now();
-    if (readbackSlot) { readbackSlot.busy = true; readbackSlot.destroyAfterMap = false; this.runningReadbacks++; }
-    this.device.queue.submit([encoder.finish()]);
-    this.submitMs = performance.now() - submitStart;
-    if (readbackSlot) this.readback(readbackSlot, submittedGeneration, params.maxInstancesPerGroup);
-    return true;
+    try {
+      this.packParams(params);
+      this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
+      const frame = this.frame++;
+      const requestReadback = shouldRequestGpuReadback({ kind: "prop_gpu_counts", frame, intervalFrames: READBACK_INTERVAL_FRAMES, requested: this.settings.gpu.debugShowGpuCounts });
+      const readbackSlot = requestReadback ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null : null;
+      const encoder = this.device.createCommandEncoder({ label: "prop ring compute encoder" });
+      this.dispatchPipeline(encoder, this.pipelines.clear_counters, Math.ceil((this.groupCount * INDIRECT_ARGS_PER_GROUP) / this.settings.gpu.workgroupSize));
+      this.dispatchPipeline(encoder, this.pipelines.cull_props, Math.ceil(this.sourceCount / this.settings.gpu.workgroupSize));
+      this.dispatchPipeline(encoder, this.pipelines.build_indirect_args, Math.ceil(this.groupCount / this.settings.gpu.workgroupSize));
+      if (readbackSlot) encoder.copyBufferToBuffer(this.counterBuffer, 0, readbackSlot.buffer, 0, this.groupCount * Uint32Array.BYTES_PER_ELEMENT);
+      const submittedGeneration = this.generation;
+      const submitStart = performance.now();
+      this.device.queue.submit([encoder.finish()]);
+      this.submitMs = performance.now() - submitStart;
+      if (readbackSlot) {
+        readbackSlot.busy = true;
+        readbackSlot.destroyAfterMap = false;
+        this.runningReadbacks++;
+        this.readback(readbackSlot, submittedGeneration, params.maxInstancesPerGroup);
+      }
+      return true;
+    } catch (error) {
+      this.fail(error);
+      return false;
+    }
   }
 
   stats(enabled: boolean): PropGpuRingStats {
@@ -228,8 +243,13 @@ export class PropGpuRingCompute {
       slot.busy = false;
       this.runningReadbacks = Math.max(0, this.runningReadbacks - 1);
       if (slot.destroyAfterMap) { slot.destroyAfterMap = false; slot.buffer.destroy(); return; }
-      this.failedReason = error instanceof Error ? error.message : String(error);
+      this.fail(error);
     });
+  }
+
+  private fail(error: unknown): void {
+    this.failedReason = error instanceof Error ? error.message : String(error);
+    if (this.settings.gpu.fallbackToCpu) reportGpuCpuFallback("props-gpu-ring", error);
   }
 }
 

@@ -1,4 +1,5 @@
 import { requestWebGpuDevice } from "../../gpu/webgpu_device.js";
+import { reportGpuCpuFallback } from "../../gpu/gpu_cpu_fallback_log.js";
 import { getCurrentRendererGpuDevice } from "../../rendering/webgpu_device_bridge.js";
 import {
   createGpuClodRootMesher as createSingleGpuClodRootMesher,
@@ -126,7 +127,14 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
   }
 
   recordWorkerFallbackPages(count: number): void {
-    this.workerFallbackPages += normalizedCount(count);
+    const pages = normalizedCount(count);
+    this.workerFallbackPages += pages;
+    if (pages > 0) {
+      reportGpuCpuFallback(
+        "clod-stream-gpu",
+        `GPU streamed-root route handed ${pages} page(s) to the CPU worker`,
+      );
+    }
     this.publishCounters();
   }
 
@@ -221,7 +229,12 @@ export async function createGpuClodRootMesher(
   if (!device && poolCount > 1) {
     const requested = await requestWebGpuDevice();
     if (!requested.ok) {
-      console.warn("[clod-stream-gpu] shared WebGPU device unavailable; using CPU worker fallback", requested.message ?? requested.reason);
+      if (opts.config.fallback) {
+        reportGpuCpuFallback(
+          "clod-stream-gpu",
+          requested.message ?? requested.reason ?? "shared WebGPU device unavailable",
+        );
+      }
       publishGpuClodRootMesherCounters(disabledGpuStats());
       return null;
     }
@@ -258,6 +271,9 @@ export async function createGpuClodRootMesher(
 
   const standardMeshers = await createStandardPool(opts, childConfig, device, poolCount);
   if (!standardMeshers) {
+    if (opts.config.fallback) {
+      reportGpuCpuFallback("clod-stream-gpu", "GPU streamed-root mesher initialization failed");
+    }
     publishGpuClodRootMesherCounters(disabledGpuStats());
     return null;
   }
