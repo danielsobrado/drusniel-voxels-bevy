@@ -1,9 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_INFINITE_STREAMING_ROOT_GPU_MAX_INFLIGHT_BATCHES,
   DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG,
   parseStreamingRootGpuMesherConfig,
+  resetStreamingRootGpuMesherRuntimeControls,
+  resolveStreamingRootGpuMesherConfig,
+  setStreamingRootGpuMesherRuntimeControls,
 } from "./streamed_root_gpu_config.js";
+
+afterEach(() => {
+  resetStreamingRootGpuMesherRuntimeControls();
+});
 
 describe("streamed root GPU mesher config", () => {
   it("defaults disabled with conservative batching and fallback enabled", () => {
@@ -85,5 +92,30 @@ describe("streamed root GPU mesher config", () => {
       maxTotalSlotBytes: undefined,
       maxReadbackBufferBytes: undefined,
     });
+  });
+
+  it("lets lil-gui runtime controls override URL defaults without changing allocation settings", () => {
+    const params = new URLSearchParams({
+      scene: "infinite-islands",
+      liveClodRootGpuBatchSize: "8",
+      liveClodRootGpuMaxInflightBatches: "3",
+    });
+    setStreamingRootGpuMesherRuntimeControls({ enabled: false, fallback: false });
+
+    expect(resolveStreamingRootGpuMesherConfig(params)).toEqual(expect.objectContaining({
+      enabled: false,
+      fallback: false,
+      batchSize: 8,
+      maxInflightBatches: 3,
+    }));
+  });
+
+  it("reset restores URL-derived live controls", () => {
+    setStreamingRootGpuMesherRuntimeControls({ enabled: true, fallback: false });
+    resetStreamingRootGpuMesherRuntimeControls();
+
+    expect(resolveStreamingRootGpuMesherConfig(new URLSearchParams())).toEqual(
+      DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG,
+    );
   });
 });

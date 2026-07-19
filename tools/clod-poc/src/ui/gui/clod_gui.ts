@@ -12,6 +12,7 @@ import type {
   RenderResolutionRenderer,
   RenderResolutionRuntime,
 } from "../../rendering/render_resolution_runtime.js";
+import { createStreamingRootGpuGui } from "./streaming_root_gpu_gui.js";
 
 export interface ClodGuiDeps {
   world: number;
@@ -150,6 +151,7 @@ export function createClodGui(
     deps.updateSelection();
     deps.updateInfo();
   });
+  createStreamingRootGpuGui(gui, deps.isWebGpu);
   gui.add(state, "profileEnabled").name("profiling");
   createRenderResolutionGui(gui, deps);
   gui.add(state, "thresholdPx", 0.1, 6, 0.05).name("error threshold px").onChange(deps.updateSelection);

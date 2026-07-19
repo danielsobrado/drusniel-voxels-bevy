@@ -8,6 +8,11 @@ export interface StreamingRootGpuMesherConfig {
   maxReadbackBufferBytes?: number;
 }
 
+export interface StreamingRootGpuMesherRuntimeControls {
+  enabled: boolean;
+  fallback: boolean;
+}
+
 export const DEFAULT_STREAMING_ROOT_GPU_BATCH_SIZE = 4;
 export const DEFAULT_STREAMING_ROOT_GPU_MAX_INFLIGHT_BATCHES = 1;
 export const DEFAULT_INFINITE_STREAMING_ROOT_GPU_MAX_INFLIGHT_BATCHES = 2;
@@ -18,6 +23,8 @@ export const DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG: StreamingRootGpuMesherCon
   maxInflightBatches: DEFAULT_STREAMING_ROOT_GPU_MAX_INFLIGHT_BATCHES,
   fallback: true,
 };
+
+let runtimeControls: StreamingRootGpuMesherRuntimeControls | null = null;
 
 function positiveIntegerParam(params: URLSearchParams, key: string): number | undefined {
   const parsed = Number(params.get(key));
@@ -62,7 +69,41 @@ export function parseStreamingRootGpuMesherConfig(
   };
 }
 
+export function resolveStreamingRootGpuMesherConfig(
+  params: URLSearchParams,
+  defaults: StreamingRootGpuMesherConfig = DEFAULT_STREAMING_ROOT_GPU_MESHER_CONFIG,
+): StreamingRootGpuMesherConfig {
+  const parsed = parseStreamingRootGpuMesherConfig(params, defaults);
+  if (!runtimeControls) return parsed;
+  return {
+    ...parsed,
+    enabled: runtimeControls.enabled,
+    fallback: runtimeControls.fallback,
+  };
+}
+
+export function readStreamingRootGpuMesherRuntimeControls(): StreamingRootGpuMesherRuntimeControls {
+  const config = streamingRootGpuMesherConfigFromWindow();
+  return { enabled: config.enabled, fallback: config.fallback };
+}
+
+export function setStreamingRootGpuMesherRuntimeControls(
+  next: Partial<StreamingRootGpuMesherRuntimeControls>,
+): StreamingRootGpuMesherRuntimeControls {
+  const current = readStreamingRootGpuMesherRuntimeControls();
+  runtimeControls = {
+    enabled: next.enabled ?? current.enabled,
+    fallback: next.fallback ?? current.fallback,
+  };
+  return { ...runtimeControls };
+}
+
+export function resetStreamingRootGpuMesherRuntimeControls(): StreamingRootGpuMesherRuntimeControls {
+  runtimeControls = null;
+  return readStreamingRootGpuMesherRuntimeControls();
+}
+
 export function streamingRootGpuMesherConfigFromWindow(): StreamingRootGpuMesherConfig {
   const maybeWindow = (globalThis as typeof globalThis & { window?: { location?: { search?: string } } }).window;
-  return parseStreamingRootGpuMesherConfig(new URLSearchParams(maybeWindow?.location?.search ?? ""));
+  return resolveStreamingRootGpuMesherConfig(new URLSearchParams(maybeWindow?.location?.search ?? ""));
 }

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetGpuCpuFallbackLogForTests } from "../../gpu/gpu_cpu_fallback_log.js";
 import {
   PooledGpuClodRootMesher,
   disabledGpuStats,
@@ -23,6 +24,15 @@ function childMesher(
     dispose: onDispose,
   };
 }
+
+beforeEach(() => {
+  resetGpuCpuFallbackLogForTests();
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("GPU CLOD root pool failure policy", () => {
   it("disables the runtime after a hard child build failure", async () => {
@@ -88,5 +98,20 @@ describe("GPU CLOD root pool failure policy", () => {
     slowGate.resolve();
     await slow;
     expect(disposals).toBe(2);
+  });
+
+  it("logs the CPU worker handoff once across different batch sizes", () => {
+    const pool = new PooledGpuClodRootMesher([
+      childMesher(async () => ({ nodes: [], buildMs: 1, transferBytes: 0 }), () => undefined),
+    ]);
+
+    pool.recordWorkerFallbackPages(4);
+    pool.recordWorkerFallbackPages(8);
+
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith(
+      "[clod-stream-gpu] GPU path failed; falling back to CPU: GPU streamed-root route handed 4 page(s) to the CPU worker",
+    );
+    pool.dispose();
   });
 });
