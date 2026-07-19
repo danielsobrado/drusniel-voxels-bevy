@@ -133,6 +133,7 @@ export class PooledGpuClodRootMesher implements GpuClodRootMesher {
       reportGpuCpuFallback(
         "clod-stream-gpu",
         `GPU streamed-root route handed ${pages} page(s) to the CPU worker`,
+        "worker-handoff",
       );
     }
     this.publishCounters();
