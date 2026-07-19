@@ -163,31 +163,26 @@ describe("tree GPU ring runtime failure handling", () => {
   });
 });
 
-function runtimeFixture(fallbackToCpu: boolean): {
-  input: TreeGpuRingRuntimeInput;
-  createDrawResources: ReturnType<typeof vi.fn<(maxInstancesPerGroup: number) => TreeGpuRingDrawResources>>;
-} {
+function runtimeFixture(fallbackToCpu: boolean) {
   const settings = cloneTreeSettings();
   settings.gpu.fallbackToCpu = fallbackToCpu;
   const createDrawResources = vi.fn<(maxInstancesPerGroup: number) => TreeGpuRingDrawResources>();
   const lodCounts = { near: 0, mid: 0, far: 0, impostor: 0 } satisfies Record<TreeLod, number>;
-  return {
+  const input: TreeGpuRingRuntimeInput = {
+    state: createTreeGpuRingRuntimeState({} as GPUDevice),
+    root: new THREE.Group(),
+    settings,
+    worldCells: 64,
+    sampler: undefined,
+    gpuDevice: {} as GPUDevice,
+    gpuBackend: {} as TreeWebGpuBackendAccess,
+    supportsGpuTrees: true,
+    unsupportedReason: null,
+    lodCounts,
     createDrawResources,
-    input: {
-      state: createTreeGpuRingRuntimeState({} as GPUDevice),
-      root: new THREE.Group(),
-      settings,
-      worldCells: 64,
-      sampler: undefined,
-      gpuDevice: {} as GPUDevice,
-      gpuBackend: {} as TreeWebGpuBackendAccess,
-      supportsGpuTrees: true,
-      unsupportedReason: null,
-      lodCounts,
-      createDrawResources,
-      geometryForGpuRing: () => new THREE.BoxGeometry(1, 1, 1),
-    },
+    geometryForGpuRing: () => new THREE.BoxGeometry(1, 1, 1),
   };
+  return { createDrawResources, input };
 }
 
 function fakeHandle(): TreeMaterialHandle & { dispose: ReturnType<typeof vi.fn> } {
