@@ -100,17 +100,18 @@ describe("GPU CLOD root pool failure policy", () => {
     expect(disposals).toBe(2);
   });
 
-  it("logs CPU worker handoff once per fallback page count", () => {
+  it("logs the CPU worker handoff once across different batch sizes", () => {
     const pool = new PooledGpuClodRootMesher([
       childMesher(async () => ({ nodes: [], buildMs: 1, transferBytes: 0 }), () => undefined),
     ]);
 
     pool.recordWorkerFallbackPages(4);
-    pool.recordWorkerFallbackPages(4);
+    pool.recordWorkerFallbackPages(8);
 
     expect(console.error).toHaveBeenCalledTimes(1);
     expect(console.error).toHaveBeenCalledWith(
       "[clod-stream-gpu] GPU path failed; falling back to CPU: GPU streamed-root route handed 4 page(s) to the CPU worker",
     );
+    pool.dispose();
   });
 });
