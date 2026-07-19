@@ -23,6 +23,23 @@ Master plan (all phase statuses inline): `water-rivers-gpu-fable5-parity-plan-20
   atlas active only L0–L3 exist (far clipmap owns 384 m+); also fixed the atlas-path
   clipmap config dropping the tier-resolved SSR visual.
 
+### Foam parity delivered on main (2026-07-19)
+
+- PR #198/#200: coherent FBM foam, multiplicative speed × drop rapid eligibility,
+  shared breakup, reduced river-shore activation, 0.52 coverage cap, and non-flat
+  lighting in the HQ WebGPU material.
+- PR #215: the performance WebGPU material now consumes the same shared foam authority;
+  the old sine ribbons, additive rapid trigger, and flat-white mix are removed.
+- PR #217: the WebGL fallback uses the same coverage thresholds, rapid contract,
+  river-shore attenuation, cap, and environment-modulated foam colour.
+- PR #220: deterministic high/low quality matrix with canonical shared cameras and direct
+  structural, lighting, and temporal divergence gates.
+- PR #222: both WebGPU tiers consume the existing GPU sun-visibility atlas; shaded foam
+  coverage attenuates to a 0.55 floor with no CPU sampling or GPU readback.
+- PR #226: acceptance now records and gates the active model revision, resolved tier,
+  constants, zero CPU foam samples, and live sun-atlas state instead of inferring them
+  from screenshots.
+
 ## Evidence
 
 - Live gates: `npx tsx tools/verify-traced-carve.ts --url "http://127.0.0.1:PORT/?scene=infinite-islands&seed=1&world=8" --out qa-runs/...`
@@ -32,6 +49,8 @@ Master plan (all phase statuses inline): `water-rivers-gpu-fable5-parity-plan-20
   `perf-runs/water-hq-ab/` (HQ +0.3 ms render p95). A `perf-runs/water-nofar-after/`
   run (W2.3, checks the waterMs max ≤ 2 ms gate) may exist if the background run at
   session end completed — check `summary.json` `moving.phases.waterMs.max`.
+- Foam acceptance outputs are written below `shots/water/foam-acceptance/`; the matrix
+  writes separate high/low reports plus `matrix-report.json`.
 
 ## Remaining (in priority order)
 
@@ -51,10 +70,29 @@ Master plan (all phase statuses inline): `water-rivers-gpu-fable5-parity-plan-20
    `acceptance-runs/infinite-islands/water-w4-live-final/` (`waterMs` p95 0.3 / max
    0.7 ms, continuity 100%, 4/4 levels, zero errors). Wet-margin mask contents remain
    unit-tested but are not yet exported as a live acceptance counter.
-3. W1.3 leftover: `dressing_river_cobbles_accepted` still ~0 (density roll, W3 tuning).
-4. Visual polish candidates: aerial dither speckle at shorelines (tune the near-water
+3. Run the merged foam quality matrix natively and attach the high/low report plus
+   screenshots. The connector environment cannot provide Chrome/WebGPU evidence.
+4. Add a deterministic shaded-versus-open-sun rapid proof at the same hydrology/camera
+   conditions. The current contract proves atlas wiring and constants but not the final
+   visual coverage/luminance ratio.
+5. Add a headed WebGL lane. The fallback shader has source/unit parity after PR #217,
+   but the current quality matrix intentionally forces WebGPU.
+6. Replace the performance-only clipmap-level foam fade with one shared camera-distance
+   policy across HQ, performance, and WebGL to prevent quality-switch and ring-boundary
+   popping.
+7. W1.3 leftover: `dressing_river_cobbles_accepted` still ~0 (density roll, W3 tuning).
+8. Visual polish candidates: aerial dither speckle at shorelines (tune the near-water
    ramp), traced channels are single polylines (no confluence networks like fable5's
    flow accumulation — larger follow-up).
+
+## Stable commands
+
+```bash
+npm --prefix tools/clod-poc run water:foam:accept:high
+npm --prefix tools/clod-poc run water:foam:accept:low
+npm --prefix tools/clod-poc run water:foam:accept:matrix
+npm --prefix tools/clod-poc run water:verify:full
+```
 
 ## Gotchas
 
