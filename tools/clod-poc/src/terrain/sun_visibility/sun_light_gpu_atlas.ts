@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { syncWaterSunVisibilityAtlas } from "../../water/water_sun_visibility_nodes.js";
+import { syncSunLightGpuAtlasNodes } from "./sun_light_gpu_atlas_nodes.js";
 import { LIGHT_SAMPLE, type LightTile } from "./light_builder.js";
 import type { SunLightOptions } from "./sun_light_options.js";
 import type { SunVisibilityTileKey } from "./sun_visibility_tile.js";
@@ -134,7 +134,7 @@ export function updateSunLightGpuAtlas(
   state.valid = options.active && tileCount > 0 ? 1 : 0;
   state.version += 1;
   resizeTexture(width, height, data);
-  syncWaterSunVisibilityAtlas(state);
+  syncSunLightGpuAtlasNodes(state);
 }
 
 export function invalidateSunLightGpuAtlas(): void {
@@ -142,7 +142,7 @@ export function invalidateSunLightGpuAtlas(): void {
   state.valid = 0;
   state.version += 1;
   resizeTexture(DEFAULT_ATLAS_SIZE, DEFAULT_ATLAS_SIZE, new Uint8Array([VISIBILITY_LIT]));
-  syncWaterSunVisibilityAtlas(state);
+  syncSunLightGpuAtlasNodes(state);
 }
 
 function atlasImage(): { readonly data: ArrayLike<number>; readonly width: number; readonly height: number } {
