@@ -43,6 +43,8 @@ export const WATER_FRAG = /* glsl */ `
   uniform float uShoreFoamEnd;
   uniform float uShoreDistFoamStart;
   uniform float uShoreDistFoamEnd;
+  uniform float uFoamDetailFadeStartM;
+  uniform float uFoamDetailFadeEndM;
   uniform float uFoamNoiseScale;
   uniform float uFoamShoreStrength;
   uniform float uFoamRiverStrength;
@@ -233,7 +235,13 @@ export const WATER_FRAG = /* glsl */ `
     float riverFast = smoothstep(uFoamSpeedStart, uFoamSpeedEnd, vFlow.z);
     float riverDrop = smoothstep(uFoamDropStart, uFoamDropEnd, abs(vFlow.w));
     float rapidSource = riverFast * riverDrop * riverWeight * uFoamRiverStrength;
-    float foam = clamp((shoreSource + rapidSource) * breakup * wetFade, 0.0, ${WATER_FOAM_MAX_COVERAGE});
+    float cameraDistanceM = distance(worldPos.xz, uCameraPos.xz);
+    float foamDetailFade = 1.0 - smoothstep(uFoamDetailFadeStartM, uFoamDetailFadeEndM, cameraDistanceM);
+    float foam = clamp(
+      (shoreSource + rapidSource) * breakup * wetFade * foamDetailFade,
+      0.0,
+      ${WATER_FOAM_MAX_COVERAGE}
+    );
 
     float backlit = pow(max(dot(viewDir, -sunDir), 0.0), 4.0) * 0.30;
     float crestScatter = smoothstep(0.45, 0.95, foamBlend) * 0.24;
