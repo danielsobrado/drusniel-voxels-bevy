@@ -69,8 +69,10 @@ fn select_contact_patches(@builtin(local_invocation_index) local_index: u32) {
 
   let large_count = min(atomicLoad(&counters[1u]), class_cap);
   let medium_count = min(atomicLoad(&counters[2u]), class_cap);
-  let small_count = min(atomicLoad(&counters[3u]), class_cap);
-  let accepted_count = large_count + medium_count + small_count;
+  // Small-class stones (cobbles) have sub-cell contact rings at the field
+  // resolution — they rasterize as isolated dark speckle cells, so only large
+  // and medium stones claim contact patches.
+  let accepted_count = large_count + medium_count;
 
   for (var rank = 0u; rank < STONE_CONTACT_PATCH_CAPACITY; rank = rank + 1u) {
     var best_distance_sq = 3.402823466e+38;

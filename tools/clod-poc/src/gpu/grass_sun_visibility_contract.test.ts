@@ -11,7 +11,7 @@ describe("grass per-blade sun visibility", () => {
   });
 
   it("attenuates direct sun without changing hemisphere or transmission light", () => {
-    expect(materialSource).toContain("const aSunVisibility: TslNode = ring ? clamp(aOffset4.w, 0.0, 1.0) : float(1)");
+    expect(materialSource).toContain("mix(float(1), clamp(aOffset4.w, 0.0, 1.0), uSunVisibilityStrength)");
     expect(materialSource).toContain("uSun.mul(sun.mul(0.58).add(wrap.mul(0.22))).mul(aSunVisibility)");
     expect(materialSource).toContain("uSun.mul(pow(sun, 1.25)).mul(0.82).mul(aSunVisibility)");
     expect(materialSource).not.toContain("hemi.mul(aSunVisibility)");

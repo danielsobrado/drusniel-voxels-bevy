@@ -75,7 +75,8 @@ const DEFAULT_SETTINGS: GrassContactSettings = {
   dirtColor: [0.16, 0.11, 0.065],
 };
 
-const settings = parseGrassContactSettings(configText);
+const settings: { -readonly [K in keyof GrassContactSettings]: GrassContactSettings[K] } =
+  parseGrassContactSettings(configText);
 export const GRASS_CONTACT_METADATA_INDEX = 0;
 export const GRASS_CONTACT_PATCH_OFFSET = 1;
 export const GRASS_CONTACT_FIELD_OFFSET = GRASS_CONTACT_PATCH_OFFSET + GRASS_CONTACT_PATCH_CAPACITY;
@@ -126,6 +127,49 @@ export function readGrassContactSettings(): GrassContactSettings {
     ...settings,
     dirtColor: [...settings.dirtColor] as [number, number, number],
   };
+}
+
+/**
+ * Live-tunable subset (GUI): updates the shared material/terrain uniforms
+ * immediately; radius scales apply on the next stone rescatter. Field grid and
+ * cell size are baked into buffer capacity + WGSL and cannot change here.
+ */
+export type GrassContactLiveSettings = Partial<Pick<GrassContactSettings,
+  "enabled" | "minHeightScale" | "flattenStrength" | "splayStrengthM"
+  | "dirtTintStrength" | "dirtColor" | "innerRadiusScale" | "outerRadiusScale"
+>>;
+
+export function updateGrassContactSettings(update: GrassContactLiveSettings): void {
+  if (update.enabled !== undefined) {
+    settings.enabled = update.enabled;
+    uEnabled.value = update.enabled ? 1 : 0;
+  }
+  if (update.minHeightScale !== undefined) {
+    settings.minHeightScale = Math.max(0, Math.min(1, update.minHeightScale));
+    uMinHeightScale.value = settings.minHeightScale;
+  }
+  if (update.flattenStrength !== undefined) {
+    settings.flattenStrength = Math.max(0, Math.min(1, update.flattenStrength));
+    uFlattenStrength.value = settings.flattenStrength;
+  }
+  if (update.splayStrengthM !== undefined) {
+    settings.splayStrengthM = Math.max(0, update.splayStrengthM);
+    uSplayStrengthM.value = settings.splayStrengthM;
+  }
+  if (update.dirtTintStrength !== undefined) {
+    settings.dirtTintStrength = Math.max(0, Math.min(1, update.dirtTintStrength));
+    uDirtTintStrength.value = settings.dirtTintStrength;
+  }
+  if (update.dirtColor !== undefined) {
+    settings.dirtColor = [...update.dirtColor] as [number, number, number];
+    uDirtColor.value.set(...settings.dirtColor);
+  }
+  if (update.innerRadiusScale !== undefined) {
+    settings.innerRadiusScale = Math.max(0, update.innerRadiusScale);
+  }
+  if (update.outerRadiusScale !== undefined) {
+    settings.outerRadiusScale = Math.max(settings.innerRadiusScale + 0.01, update.outerRadiusScale);
+  }
 }
 
 export function grassContactPatchAttribute(): StorageBufferAttribute {

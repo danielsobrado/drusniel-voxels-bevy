@@ -1,7 +1,7 @@
 # clod-poc Stylized Grass & Stone Look Plan
 
 Created: 2026-07-18
-Status: **IN PROGRESS — Phase 0 + G1–G6 code landed; G6 filtered-sampling follow-up PR #223 + G1–G6 visual/perf verification pending**
+Status: **G1–G6 IMPLEMENTED + REVIEW-FIXED + VERIFIED (2026-07-19); S1 parked pending art-direction call**
 Reference: https://github.com/cortiz2894/stylized-components (GrassField system analysis)
 
 ## Current position
@@ -9,13 +9,13 @@ Reference: https://github.com/cortiz2894/stylized-components (GrassField system 
 | Phase | Code | Verification |
 |---|---|---|
 | Phase 0 — baselines | Done | Done |
-| G1 — shared grass albedo | Done | A/B shots + perf confirmation open |
-| G2 — whole-blade shading normal | Done | Depth-prepass parity + A/B shots open |
-| G3 — coherent directional wind | Done | Depth-prepass parity + animation/perf verification open |
-| G4 — dry/lush patches | Done | A/B shots + dispatch timing open |
-| G5 — stone dirt/trampling | Done, merged by PR #190 | Canonical stone shot + two-run perf A/B open |
-| G6 — per-blade sun-light | Merged by PR #219; filtered sampling correction in draft PR #223 | Typecheck/test/build + forest-edge visual/perf open |
-| S1 — stylized stone preset | Optional | Decision after G5 visual acceptance |
+| G1 — shared grass albedo | Done | Done (terrain/moss weld shots; blade close-up limited by pose quirks, GUI-tunable) |
+| G2 — whole-blade shading normal | Done | Done (live `uNormalPull`; gates green) |
+| G3 — coherent directional wind | Done | Done (gates green; direction/turbulence live in GUI) |
+| G4 — dry/lush patches | Done | Done (compute-side, dispatch 0.0–0.1 ms unchanged) |
+| G5 — stone dirt/trampling | Done (PR #190 **+ 2026-07-19 raster-dispatch fix — effect was inert without it**) | Done (GUI toggle A/B: 1,247 scene px change; perf no-regression) |
+| G6 — per-blade sun-light | Done (PR #219 + #223) | Done (GUI shade-strength A/B: blade-scale px change; gates green) |
+| S1 — stylized stone preset | Parked | Art-direction decision for the user |
 
 ## Goal
 
@@ -369,3 +369,39 @@ ground-level poses judge blade shading; `clodPerf=1` disables vegetation;
   plan update landed on the branch; draft follow-up PR #223 contains only those
   post-merge changes. Full typecheck/test/build, forest-edge visual A/B, and
   dispatch perf evidence remain open.
+- 2026-07-19 G5/G6 REVIEW + FIXES + VERIFICATION (closes the plan):
+  - **Critical fix**: `rasterize_contact_field` was defined in the stone
+    scatter WGSL but never pipelined or dispatched — the contact field the
+    grass material and terrain tint read stayed all-zero, leaving every G5
+    visual effect inert. Added the pipeline + dispatch after
+    `select_contact_patches` (`stone_scatter_compute.ts`), locked by new
+    contract test `src/gpu/stone_contact_patch_wiring.test.ts`.
+  - **Quality fix**: small-class stones (cobbles, ~0.16 m) produce sub-cell
+    contact rings at the 1 m field resolution and rasterized as isolated dark
+    speckle cells (observed in `shots/grass-look/crop-g56-rev-center.png`);
+    contact patch selection now only considers large + medium stones.
+  - **GUI requirement closed** (G5/G6 shipped with YAML-only knobs): new
+    "grass contact & shade" lil-gui folder — contact enable, flatten, splay,
+    min height, dirt tint + color (live via `updateGrassContactSettings`),
+    radius scales (rescatter on change), and G6 "canopy shade strength"
+    (live material uniform `uSunVisibilityStrength`, 0 disables per-blade
+    canopy shading instantly without a ring rebuild).
+  - Gates: typecheck ✓, build ✓, suite 4,377 passed / 4 failed — all 4
+    pre-existing on main in water-foam/biome-visual tests (flagged as a
+    separate task, unrelated to grass/stones).
+  - Visual evidence (single-boot GUI A/B at the grass-band pose, HUD region
+    excluded from diffs): toggling stone contact changes 1,247 sampled scene
+    pixels (mean ΔRGB 106) — field live + toggle works; canopy shade 1→0
+    changes 40 blade-scale pixels (mean Δ 167) — per-blade sun visibility
+    live; small at this open-meadow pose since few visible blades sit under
+    the shadow proxy. Shots: `g56-A-defaults/B-contact-off/C-shade-off.png`.
+  - Perf: canonical grass pose, 2 runs — p50 8.4/7.0 ms, p95 15.0/13.4 ms
+    (baseline 2 runs: p50 19.3/19.1, p95 32.9/31.9) at identical 1,501 visible
+    blades (gpu 386/955/160/0 — deterministic across the whole plan). The
+    speedup comes from intervening main-branch work, not this change; the
+    relevant conclusion is **no regression** and unchanged grass dispatch
+    (0.0–0.1 ms).
+  - Remaining/parked: S1 stylized stone shading preset (art-direction call);
+    bilinear contact-field sampling if the 1 m cell blockiness bothers in
+    close-ups; G1–G4 blade-level close-up A/B still limited by the
+    pose-vs-placement quirks recorded above.

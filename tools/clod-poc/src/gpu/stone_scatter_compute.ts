@@ -1,7 +1,7 @@
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
 import type { StoneSettings, StoneTerrainClassWeights } from "../stones/stone_config.js";
-import type { GrassContactSettings } from "../grass/grass_contact_patches.js";
+import { readGrassContactSettings, type GrassContactSettings } from "../grass/grass_contact_patches.js";
 import { composeStoneScatterShader } from "./wgsl_modules.js";
 import type { GrassHydrologyData } from "./grass_ring_compute.js";
 import {
@@ -113,6 +113,7 @@ type PipelineName =
   | "clear_counters"
   | "scatter_stones"
   | "select_contact_patches"
+  | "rasterize_contact_field"
   | "clear_view_counters"
   | "cull_stones"
   | "build_indirect_args";
@@ -261,10 +262,11 @@ export class StoneGpuScatterCompute {
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
     const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `stone scatter ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
-    const [clearCounters, scatterStones, selectContactPatches, clearViewCounters, cullStones, buildIndirectArgs] = await Promise.all([
+    const [clearCounters, scatterStones, selectContactPatches, rasterizeContactField, clearViewCounters, cullStones, buildIndirectArgs] = await Promise.all([
       makePipeline("clear_counters"),
       makePipeline("scatter_stones"),
       makePipeline("select_contact_patches"),
+      makePipeline("rasterize_contact_field"),
       makePipeline("clear_view_counters"),
       makePipeline("cull_stones"),
       makePipeline("build_indirect_args"),
@@ -276,6 +278,7 @@ export class StoneGpuScatterCompute {
         clear_counters: clearCounters,
         scatter_stones: scatterStones,
         select_contact_patches: selectContactPatches,
+        rasterize_contact_field: rasterizeContactField,
         clear_view_counters: clearViewCounters,
         cull_stones: cullStones,
         build_indirect_args: buildIndirectArgs,
@@ -509,12 +512,16 @@ export class StoneGpuScatterCompute {
   }
 
   private dispatchWorldPipelines(encoder: GPUCommandEncoder, scatterWorkgroups: number): void {
+    const contactField = readGrassContactSettings();
+    const contactFieldWorkgroups = Math.ceil((contactField.fieldGrid * contactField.fieldGrid) / WORKGROUP_SIZE);
     const pass = encoder.beginComputePass(this.timestamps.passDescriptor("world"));
     pass.setBindGroup(0, this.bindGroup);
     pass.setPipeline(this.pipelines.scatter_stones);
     pass.dispatchWorkgroups(Math.max(1, scatterWorkgroups));
     pass.setPipeline(this.pipelines.select_contact_patches);
     pass.dispatchWorkgroups(1);
+    pass.setPipeline(this.pipelines.rasterize_contact_field);
+    pass.dispatchWorkgroups(Math.max(1, contactFieldWorkgroups));
     pass.end();
   }
 

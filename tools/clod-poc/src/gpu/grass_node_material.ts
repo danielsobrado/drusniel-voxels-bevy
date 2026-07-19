@@ -78,6 +78,18 @@ const DEFAULT_APPEARANCE = {
   normalPull: 1.0,
 };
 
+// Shared across grass material instances: 0 disables per-blade canopy shading
+// live (the ring compute keeps writing visibility; only its application scales).
+const uSunVisibilityStrength = uniform(1);
+
+export function setGrassSunVisibilityStrength(value: number): void {
+  uSunVisibilityStrength.value = Math.max(0, Math.min(1, value));
+}
+
+export function grassSunVisibilityStrength(): number {
+  return uSunVisibilityStrength.value as number;
+}
+
 function normalizedWindDirection(direction: readonly number[] | undefined): THREE.Vector2 {
   const v = new THREE.Vector2(direction?.[0] ?? 0.8, direction?.[1] ?? 0.6);
   return v.lengthSq() > 1e-6 ? v.normalize() : v.set(1, 0);
@@ -135,7 +147,9 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     aTerrainNormal4 = attribute("aTerrainNormal", "vec4");
   }
   const aOffset: TslNode = aOffset4.xyz;
-  const aSunVisibility: TslNode = ring ? clamp(aOffset4.w, 0.0, 1.0) : float(1);
+  const aSunVisibility: TslNode = ring
+    ? mix(float(1), clamp(aOffset4.w, 0.0, 1.0), uSunVisibilityStrength)
+    : float(1);
   let groundY: TslNode = aOffset.y;
   let hydroWaterY: TslNode | null = null;
   if (params.hydrologyWaterTexture) {

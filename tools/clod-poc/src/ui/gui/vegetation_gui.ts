@@ -5,6 +5,9 @@ import type { PostProcessQualityPreset } from "../../app/state/postprocess_quali
 import { applyTreeQualityPreset, TREE_SHADOW_MAX_LOD_VALUES } from "../../app/state/tree_quality_presets.js";
 import { GRASS_DEPTH_PREPASS_TIER_MAX, GRASS_DEPTH_PREPASS_TIER_MIN } from "../../grass/grass_depth_prepass_runtime.js";
 import { GRASS_SHADER_MODES } from "../../grass.js";
+import { readGrassContactSettings, updateGrassContactSettings } from "../../grass/grass_contact_patches.js";
+import { hexToLinearRgb, linearRgbToHex } from "../../grass/grass_palette.js";
+import { grassSunVisibilityStrength, setGrassSunVisibilityStrength } from "../../gpu/grass_node_material.js";
 import type { GrassController } from "../../runtime/vegetation/grass_controller.js";
 import type { StoneController } from "../../runtime/vegetation/stone_controller.js";
 import type { TreeController } from "../../runtime/vegetation/tree_controller.js";
@@ -174,6 +177,44 @@ export function createVegetationGui(
   grassPatchRebuildCountController = grassFolder.add(state, "grassPatchRebuildCount").name("patch rebuilds").disable();
   grassBuildMsController = grassFolder.add(state, "grassBuildMs").name("build ms").disable();
   grassFolder.add(grassActions, "rebuild").name("rebuild");
+
+  const contactDefaults = readGrassContactSettings();
+  const contactUi = {
+    enabled: contactDefaults.enabled,
+    minHeightScale: contactDefaults.minHeightScale,
+    flattenStrength: contactDefaults.flattenStrength,
+    splayStrengthM: contactDefaults.splayStrengthM,
+    dirtTintStrength: contactDefaults.dirtTintStrength,
+    dirtColor: linearRgbToHex(contactDefaults.dirtColor),
+    innerRadiusScale: contactDefaults.innerRadiusScale,
+    outerRadiusScale: contactDefaults.outerRadiusScale,
+    sunVisibilityStrength: grassSunVisibilityStrength(),
+  };
+  const contactFolder = gui.addFolder("grass contact & shade");
+  contactFolder.add(contactUi, "enabled").name("stone contact enabled")
+    .onChange((enabled: boolean) => updateGrassContactSettings({ enabled }));
+  contactFolder.add(contactUi, "flattenStrength", 0, 1, 0.01).name("flatten strength")
+    .onChange((flattenStrength: number) => updateGrassContactSettings({ flattenStrength }));
+  contactFolder.add(contactUi, "splayStrengthM", 0, 1.5, 0.01).name("splay m")
+    .onChange((splayStrengthM: number) => updateGrassContactSettings({ splayStrengthM }));
+  contactFolder.add(contactUi, "minHeightScale", 0, 1, 0.01).name("min height scale")
+    .onChange((minHeightScale: number) => updateGrassContactSettings({ minHeightScale }));
+  contactFolder.add(contactUi, "dirtTintStrength", 0, 1, 0.01).name("dirt tint")
+    .onChange((dirtTintStrength: number) => updateGrassContactSettings({ dirtTintStrength }));
+  contactFolder.addColor(contactUi, "dirtColor").name("dirt color")
+    .onChange((hex: string) => updateGrassContactSettings({ dirtColor: hexToLinearRgb(hex, contactDefaults.dirtColor) }));
+  contactFolder.add(contactUi, "innerRadiusScale", 0, 2, 0.05).name("inner radius × (rescatter)")
+    .onFinishChange((innerRadiusScale: number) => {
+      updateGrassContactSettings({ innerRadiusScale });
+      stoneActions.rebuild();
+    });
+  contactFolder.add(contactUi, "outerRadiusScale", 0, 3, 0.05).name("outer radius × (rescatter)")
+    .onFinishChange((outerRadiusScale: number) => {
+      updateGrassContactSettings({ outerRadiusScale });
+      stoneActions.rebuild();
+    });
+  contactFolder.add(contactUi, "sunVisibilityStrength", 0, 1, 0.01).name("canopy shade strength")
+    .onChange((value: number) => setGrassSunVisibilityStrength(value));
 
   const farShellFolder = gui.addFolder("far shell");
   farShellFolder.add(state, "farShellEnabled").name("enabled").onChange((enabled: boolean) => {
