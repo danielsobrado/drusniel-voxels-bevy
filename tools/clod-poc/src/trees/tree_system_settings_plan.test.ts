@@ -27,6 +27,25 @@ describe("tree system settings update planner", () => {
     expect(plan.needsPatchRefresh).toBe(true);
   });
 
+  it("refreshes CPU patches and GPU scatter for ecology changes", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const plan = planTreeSystemSettingsUpdate(settings, {
+      ecology: {
+        ...settings.ecology,
+        density: {
+          ...settings.ecology.density,
+          baseDensity: settings.ecology.density.baseDensity * 0.5,
+        },
+      },
+    }, key);
+
+    expect(plan.nextGeometryKey).toBe(key);
+    expect(plan.needsGeometry).toBe(false);
+    expect(plan.needsPatchRefresh).toBe(true);
+    expect(plan.clearGpuRing).toBe(true);
+  });
+
   it("detects geometry rebuilds", () => {
     const settings = cloneTreeSettings();
     const key = treeGeometryKey(settings);
