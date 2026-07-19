@@ -75,16 +75,14 @@ npm --prefix tools/clod-poc run test -- \
   src/water/water_foam_distance.test.ts \
   src/water/water_foam_distance_config.test.ts \
   src/water/water_foam_distance_shader_contract.test.ts \
+  src/water/water_perf_foam_shader_contract.test.ts \
   src/water/water_foam_model.test.ts \
   src/water/water_foam_diagnostics.test.ts \
   tools/water-foam-runtime-contract.test.ts
 npm --prefix tools/clod-poc run build
 npm --prefix tools/clod-poc run water:foam:accept:matrix
+npx --prefix tools/clod-poc tsx tools/clod-poc/tools/water-foam-shade-acceptance.ts --quality=high --seed=1 --world=16
 ```
-
-The last command depends on PR #231's stable npm aliases. Before #231 merges,
-run `tsx tools/water-foam-quality-matrix.ts --seed=1 --world=16` from
-`tools/clod-poc`.
 
 ## Headed evidence still required
 
@@ -92,5 +90,6 @@ Capture one river while moving the camera smoothly across 120–320 m and confir
 
 - no clipmap-ring foam step;
 - high/low quality coverage remains within the existing cross-tier matrix;
+- the merged deterministic shade-response gate still passes;
 - WebGL follows the same distance envelope;
 - no uncaptured GPU errors or material churn regression.
