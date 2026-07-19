@@ -218,6 +218,7 @@ export interface ClodHooks {
   queryEnvironmentalPropExclusion: ((input: EnvironmentalPropExclusionQuery) => EnvironmentalPropExclusionResult | null) | null;
   flushSaveRuntime: (() => Promise<void>) | null;
   getPlayableSliceSnapshot: (() => PlayableSliceSnapshot) | null;
+  probeEarthSpellTarget: (() => readonly [number, number, number] | null) | null;
   getStreamingRootReadyPageKeys: (() => readonly string[]) | null;
   compareStreamRootBuilds: ((
     coords: readonly { px: number; pz: number; level?: number }[],
@@ -322,6 +323,7 @@ export function initHooks(): ClodHooks {
     queryEnvironmentalPropExclusion: null,
     flushSaveRuntime: null,
     getPlayableSliceSnapshot: null,
+    probeEarthSpellTarget: null,
     getStreamingRootReadyPageKeys: null,
     compareStreamRootBuilds: null,
     getStreamingResidencySnapshot: null,

@@ -235,7 +235,7 @@ export function createSpellVfxController(deps: SpellVfxControllerDeps): SpellVfx
     mesh.add(light);
 
     scene.add(mesh);
-    scene.add(fallbackMesh);
+    if (ENABLE_VISIBLE_FALLBACK) scene.add(fallbackMesh);
     return {
       mesh,
       fallbackMesh,

@@ -140,6 +140,7 @@ describe("createSpellVfxController", () => {
 
     const fireMesh = scene.getObjectByName("fire-spell") as THREE.Mesh;
     const fireLight = scene.getObjectByName("fire-spell-glow") as THREE.PointLight;
+    expect(scene.getObjectByName("fire-spell-fallback")).toBeFalsy();
     expect(fireMesh).toBeTruthy();
     expect(fireMesh.visible).toBe(false);
     expect(fireLight.visible).toBe(false);

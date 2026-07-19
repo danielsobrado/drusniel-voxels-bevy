@@ -158,12 +158,14 @@ async function runOne(
           runIndex,
           freshProfile,
           expectedWaterBodyId: waterBodyId,
+          expectedWaterEntry: route.route.waterEntry,
           startedAt,
         })
       : runContinuousPlayableSlice(driver, {
           runIndex,
           freshProfile,
           expectedWaterBodyId: waterBodyId,
+          expectedWaterEntry: route.route.waterEntry,
           startedAt,
         });
     const report = await withTimeout(

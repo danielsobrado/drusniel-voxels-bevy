@@ -18,6 +18,7 @@ import {
 import { getDigEditRevision } from "../../../terrain/terrain.js";
 import type { EarthSpellTarget } from "../../../spells/earth_spell_vfx.js";
 import type { TerrainEditStartupResult } from "./terrain_edit_startup.js";
+import { consumesGameplayShortcut } from "../../../player/gameplay_shortcut_target.js";
 import "../../../spells/spell_menu.css";
 
 const FIREBALL_COLLISION_PROBE_SECONDS = 0.075;
@@ -69,6 +70,10 @@ export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEdi
     targetRay.direction.copy(targetDirection);
     const hit = terrainRaycast.raycastEditableTerrain(targetRay, maxRange);
     return hit ? { point: hit.point.clone(), normal: targetNormal.clone() } : null;
+  };
+  longView.hooks.probeEarthSpellTarget = () => {
+    const target = getTerrainTarget(earthSpellGameplayConfig.maxRangeM);
+    return target ? [target.point.x, target.point.y, target.point.z] : null;
   };
 
   const getEarthVfxTarget = (): EarthSpellTarget | null => {
@@ -165,7 +170,11 @@ export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEdi
 
   const onKeyDown = (event: KeyboardEvent) => {
     const target = event.target;
-    if (target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+    if (target instanceof HTMLElement && consumesGameplayShortcut(
+      target.tagName.toLowerCase(),
+      target instanceof HTMLInputElement ? target.type : "",
+      target.isContentEditable,
+    )) return;
     if (event.repeat) return;
 
     if (event.code === "KeyV") {
@@ -218,5 +227,6 @@ export function runSpellUiStartup(ctx: UiStartupContext, terrainEdit: TerrainEdi
     menu.dispose();
     controller.dispose();
     ctx.session.spellVfxController = null;
+    longView.hooks.probeEarthSpellTarget = null;
   }, { once: true });
 }

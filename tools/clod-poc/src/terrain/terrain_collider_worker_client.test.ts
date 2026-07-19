@@ -74,6 +74,7 @@ describe("terrain collider worker client failover", () => {
 
     const result = await pending;
     expect(result.buildMs).toBe(0.5);
+    expect(result.serialized.version).toBe(1);
     expect(result.serialized.index).toBeInstanceOf(Uint16Array);
     expect(Array.from(result.serialized.index as Uint16Array)).toEqual([0, 1, 2]);
     expect(builder!.available()).toBe(true);

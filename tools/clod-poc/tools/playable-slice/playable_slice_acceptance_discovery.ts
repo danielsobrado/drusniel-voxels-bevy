@@ -60,6 +60,7 @@ export async function discoverPlayableSliceRoute(
             searchRadiusM: 768,
             searchSpacingM: 16,
             crossingHalfSpanM: 192,
+            maxShoreGrade: 0.75,
           });
           return route ? [route] : [];
         }),

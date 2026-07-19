@@ -25,7 +25,7 @@ export const DEFAULT_EARTH_SPELL_GAMEPLAY_CONFIG: Readonly<EarthSpellGameplayCon
   strength: 0.72,
   falloff: 0.35,
   material: 0,
-  maxRangeM: 8,
+  maxRangeM: 10,
   commandExpiryMs: 3000,
   convergenceTimeoutMs: 5000,
 });

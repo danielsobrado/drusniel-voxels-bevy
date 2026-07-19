@@ -14,6 +14,7 @@ const RUN_OPTIONS = {
   runIndex: 0,
   freshProfile: false,
   expectedWaterBodyId: "hydrology:7",
+  expectedWaterEntry: [80, 20],
 } as const;
 
 function snapshot(overrides: Partial<PlayableSliceSnapshot> = {}): PlayableSliceSnapshot {
@@ -86,6 +87,7 @@ function routeSnapshots(): Map<string, PlayableSliceSnapshot> {
   return new Map([
     ["terrain page boundary", snapshot({ page: [1, 0], pose: [65, 10, 20], frame: 2 })],
     ["terrain edit commit", dug],
+    ["construction site clearance", snapshot({ ...dug, pose: [73, 10, 20] })],
     ["construction preview", snapshot({ ...dug, construction: { ...dug.construction, active: true, currentValid: true } })],
     ["construction placement", snapshot({
       ...dug,
@@ -93,16 +95,17 @@ function routeSnapshots(): Map<string, PlayableSliceSnapshot> {
       construction: { ...dug.construction, active: true, currentValid: true, placedPieces: 1, colliders: 1 },
     })],
     ["construction break", snapshot({ ...dug, frame: 5 })],
+    ["authoritative water approach", snapshot({ ...dug, frame: 6, pose: [78, 10, 20] })],
     ["authoritative water entry", snapshot({
       ...dug,
-      frame: 6,
+      frame: 7,
       swim: { mode: "surface", submersionM: 1, bodyId: "hydrology:7" },
     })],
+    ["dry earth spell footing", snapshot({ ...dug, frame: 8, pose: [82, 10, 20] })],
     ["earth spell runtime convergence", snapshot({
       ...dug,
-      frame: 7,
+      frame: 9,
       terrain: { revision: 2, voxelDeltaCount: 40 },
-      swim: { mode: "surface", submersionM: 1, bodyId: "hydrology:7" },
       spell: spellState,
     })],
     ["save checkpoint", snapshot({
@@ -168,6 +171,8 @@ class FakeDriver implements DiagnosticPlayableSliceDriver {
   }
   async pointerMoveToCenter(): Promise<void> { this.record("pointer", "move:center"); }
   async pointerClick(button: "left" | "right"): Promise<void> { this.record("pointer", `click:${button}`); }
+  async faceShore(): Promise<void> { this.record("pointer", "face canonical dry bank"); }
+  async aimAtEditableTerrain(): Promise<void> { this.record("pointer", "aim at editable terrain"); }
   async waitForPointerLock(locked: boolean): Promise<void> {
     if (locked && this.failures.restorePointerLock) throw new Error("cleanup pointer lock failed");
     if (this.pointerLocked !== locked) throw new Error(`pointer lock expected ${locked}`);
@@ -203,6 +208,7 @@ describe("playable slice route", () => {
     expect(report.expectedWaterBodyId).toBe("hydrology:7");
     expect(report.steps.map((step) => step.step)).toHaveLength(10);
     expect(report.actions.some((action) => action.channel === "diagnostic_barrier")).toBe(false);
+    expect(report.actions.some((action) => action.channel === "keyboard" && action.action === "Space")).toBe(true);
     expect(driver.evidence).toEqual(report.steps);
   });
 
