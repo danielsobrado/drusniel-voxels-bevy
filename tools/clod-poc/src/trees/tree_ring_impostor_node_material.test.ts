@@ -116,7 +116,7 @@ describe("GPU ring baked impostor node material", () => {
     const source = materialSource();
 
     expect(source).toContain("uAmbientFloor");
-    expect(source).toContain("TREE_RING_IMPOSTOR_HDR_MAX");
+    expect(source).toContain("TREE_IMPOSTOR_HDR_MAX");
     expect(source).toContain("hemi.add(direct).add(uAmbientFloor)");
     expect(source).not.toContain("albedo.mul(0.25)");
     expect(source).not.toContain("clamp(lit, 0.0, 1.0)");
