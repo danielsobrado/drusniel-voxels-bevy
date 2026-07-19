@@ -9,7 +9,25 @@ import type { BiomeVisualStateSettings } from "./biome_visual_state_config.js";
 export const BIOME_VISUAL_SEASON_QUERY_KEYS = ["biomeSeasonT", "biomeSeason"] as const;
 export const BIOME_VISUAL_STATE_DEBUG_PROPERTY = "__drusnielBiomeVisualState";
 
+export type BiomeVisualStateOverride = Partial<Pick<BiomeVisualState,
+  | "enabled"
+  | "seasonT"
+  | "green"
+  | "autumn"
+  | "bloom"
+  | "snowlineM"
+  | "glacialMurkiness"
+  | "morningMist"
+  | "pollenAmount"
+  | "frostAmount"
+  | "wetness"
+>>;
+
 let activeBiomeVisualStateRuntime: BiomeVisualStateRuntime | null = null;
+let activeBiomeVisualStateOverride: Readonly<BiomeVisualStateOverride> | null = null;
+let cachedOverrideBase: BiomeVisualState | null = null;
+let cachedOverrideValue: Readonly<BiomeVisualStateOverride> | null = null;
+let cachedOverrideState: BiomeVisualState | null = null;
 
 export interface BiomeVisualStateRuntimeOptions {
   readonly settings: BiomeVisualStateSettings;
@@ -74,10 +92,39 @@ export function createBiomeVisualStateRuntime(
 
 export function bindActiveBiomeVisualStateRuntime(runtime: BiomeVisualStateRuntime | null): void {
   activeBiomeVisualStateRuntime = runtime;
+  invalidateOverrideCache();
 }
 
 export function readActiveBiomeVisualState(): BiomeVisualState | null {
-  return activeBiomeVisualStateRuntime?.current() ?? null;
+  const base = activeBiomeVisualStateRuntime?.current() ?? null;
+  return base ? applyBiomeVisualStateOverride(base, activeBiomeVisualStateOverride) : null;
+}
+
+export function setBiomeVisualStateOverride(override: BiomeVisualStateOverride | null): void {
+  activeBiomeVisualStateOverride = override ? sanitizeBiomeVisualStateOverride(override) : null;
+  invalidateOverrideCache();
+}
+
+export function clearBiomeVisualStateOverride(): void {
+  setBiomeVisualStateOverride(null);
+}
+
+export function readBiomeVisualStateOverride(): Readonly<BiomeVisualStateOverride> | null {
+  return activeBiomeVisualStateOverride;
+}
+
+export function applyBiomeVisualStateOverride(
+  base: BiomeVisualState,
+  override: Readonly<BiomeVisualStateOverride> | null,
+): BiomeVisualState {
+  if (!override) return base;
+  if (cachedOverrideBase === base && cachedOverrideValue === override && cachedOverrideState) {
+    return cachedOverrideState;
+  }
+  cachedOverrideBase = base;
+  cachedOverrideValue = override;
+  cachedOverrideState = Object.freeze({ ...base, ...override });
+  return cachedOverrideState;
 }
 
 export function resolveBiomeVisualSeasonT(
@@ -110,8 +157,36 @@ export function installBiomeVisualStateDebugProperty(
   Object.defineProperty(target, BIOME_VISUAL_STATE_DEBUG_PROPERTY, {
     configurable: true,
     enumerable: false,
-    get: () => runtime.current(),
+    get: () => applyBiomeVisualStateOverride(runtime.current(), activeBiomeVisualStateOverride),
   });
+}
+
+function sanitizeBiomeVisualStateOverride(
+  override: BiomeVisualStateOverride,
+): Readonly<BiomeVisualStateOverride> {
+  const next: BiomeVisualStateOverride = {};
+  if (typeof override.enabled === "boolean") next.enabled = override.enabled;
+  if (override.seasonT !== undefined) next.seasonT = normalizeCycle(override.seasonT);
+  if (override.green !== undefined) next.green = clampFraction(override.green);
+  if (override.autumn !== undefined) next.autumn = clampFraction(override.autumn);
+  if (override.bloom !== undefined) next.bloom = clampFraction(override.bloom);
+  if (override.glacialMurkiness !== undefined) {
+    next.glacialMurkiness = clampFraction(override.glacialMurkiness);
+  }
+  if (override.morningMist !== undefined) next.morningMist = clampFraction(override.morningMist);
+  if (override.pollenAmount !== undefined) next.pollenAmount = clampFraction(override.pollenAmount);
+  if (override.frostAmount !== undefined) next.frostAmount = clampFraction(override.frostAmount);
+  if (override.wetness !== undefined) next.wetness = clampFraction(override.wetness);
+  if (override.snowlineM !== undefined && Number.isFinite(override.snowlineM)) {
+    next.snowlineM = Math.max(0, override.snowlineM);
+  }
+  return Object.freeze(next);
+}
+
+function invalidateOverrideCache(): void {
+  cachedOverrideBase = null;
+  cachedOverrideValue = null;
+  cachedOverrideState = null;
 }
 
 function normalizeCycle(value: number): number {
