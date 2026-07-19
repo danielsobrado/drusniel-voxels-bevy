@@ -98,6 +98,21 @@ describe("terrain environment query", () => {
     });
   });
 
+  it("invalidates the scalar cache when the terrain revision changes", () => {
+    let revision = 1;
+    const terrain = makeTerrainAuthority();
+    terrain.revision = () => revision;
+    const query = new TerrainEnvironmentQuery({ base: makeBase(), terrain });
+
+    query.surfaceHeightBestEffort(1, 2, 8);
+    query.surfaceNormal(1, 2, 8);
+    expect(terrain.sample).toHaveBeenCalledTimes(1);
+
+    revision = 2;
+    query.surfaceHeightBestEffort(1, 2, 8);
+    expect(terrain.sample).toHaveBeenCalledTimes(2);
+  });
+
   it("samples terrain once per batch point and delegates only non-terrain fields", () => {
     const base = makeBase();
     const terrain = makeTerrainAuthority();
@@ -145,7 +160,10 @@ describe("terrain environment query", () => {
   });
 });
 
-function makeTerrainAuthority(): TerrainEnvironmentAuthority & { sample: ReturnType<typeof vi.fn> } {
+function makeTerrainAuthority(): TerrainEnvironmentAuthority & {
+  sample: ReturnType<typeof vi.fn>;
+  revision: () => number;
+} {
   return {
     sample: vi.fn(() => ({
       height: 32,
@@ -159,6 +177,7 @@ function makeTerrainAuthority(): TerrainEnvironmentAuthority & { sample: ReturnT
       valid: true,
       revision: 7,
     })),
+    revision: () => 7,
   };
 }
 
