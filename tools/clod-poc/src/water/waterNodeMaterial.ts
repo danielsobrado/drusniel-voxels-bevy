@@ -56,6 +56,7 @@ import { waterLevelColorTsl } from "./water_node_level_color.js";
 import { buildWaterBodyPresetNodes } from "./water_node_body_presets.js";
 import { buildWaterStaticGridNodes } from "./water_node_static_grid.js";
 import { buildWaterAtlasGridNodes } from "./water_node_atlas_grid.js";
+import { buildWaterGlitter, buildWaterSuspendedScatter } from "./water_node_optics.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // three 0.184's TSL node graph types are intentionally loose: extension methods
@@ -95,6 +96,12 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uFoamDropEnd = uniform(u.uFoamDropEnd.value) as TslNode;
   const uFresnelBase = uniform(u.uFresnelBase.value) as TslNode;
   const uFresnelNormalFlatten = uniform(u.uFresnelNormalFlatten.value) as TslNode;
+  const uGlitterEnabled = uniform(u.uGlitterEnabled.value) as TslNode;
+  const uGlitterTightExponent = uniform(u.uGlitterTightExponent.value) as TslNode;
+  const uGlitterTightGain = uniform(u.uGlitterTightGain.value) as TslNode;
+  const uGlitterBroadExponent = uniform(u.uGlitterBroadExponent.value) as TslNode;
+  const uGlitterBroadGain = uniform(u.uGlitterBroadGain.value) as TslNode;
+  const uGlitterLowSunGain = uniform(u.uGlitterLowSunGain.value) as TslNode;
   const uClipmapTint = uniform(u.uClipmapTint.value) as TslNode;
   const uInnerRect = uniform(u.uInnerRect.value) as TslNode;
   const uDebugMode = uniform(u.uDebugMode.value) as TslNode;
@@ -254,6 +261,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     const fres: TslNode = uFresnelBase.add(
       float(1).sub(uFresnelBase).mul(pow(float(1).sub(ndotv), uFresnelPower)),
     );
+    const suspended = buildWaterSuspendedScatter(depth, ndotv, sunDir, body);
 
     const reflectDir: TslNode = normalize(reflect(viewDir.negate(), normal));
     const reflY: TslNode = reflectDir.y;
@@ -305,7 +313,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       shallowBankColor,
       body.turbidity.mul(float(1).sub(depthNorm)).mul(0.50).add(shallowEdge.mul(riverWeight).mul(0.18).mul(uRiverShallowBankTintStrength)),
     );
-    const waterBase: TslNode = waterTint.add(causticVal.mul(vec3(0.10, 0.18, 0.16)));
+    const waterBase: TslNode = waterTint.add(causticVal.mul(vec3(0.10, 0.18, 0.16))).add(suspended.color);
 
     const screenAvail = getWaterScreenResources().available;
     const refrFallback: TslNode = waterBase;
@@ -436,10 +444,14 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       .mul(backlit.add(crestScatter))
       .mul(float(1).sub(depthNorm.mul(0.45)));
 
-    const specDot: TslNode = max(dot(reflect(sunDir.negate(), normal), viewDir), float(0.0));
-    const sunSpec: TslNode = vec3(1.0, 0.92, 0.76).mul(
-      pow(specDot, float(384.0)).mul(1.15).add(pow(specDot, float(96.0)).mul(0.28)),
-    );
+    const sunSpec: TslNode = buildWaterGlitter(normal, viewDir, sunDir, {
+      enabled: uGlitterEnabled,
+      tightExponent: uGlitterTightExponent,
+      tightGain: uGlitterTightGain,
+      broadExponent: uGlitterBroadExponent,
+      broadGain: uGlitterBroadGain,
+      lowSunGain: uGlitterLowSunGain,
+    });
 
     const finalWater: TslNode = finalLit.add(sss).add(sunSpec);
     const finalColor: TslNode = mix(
@@ -462,7 +474,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     const reflDebugCol: TslNode = skyReflection;
     const ssrHitCol: TslNode = vec3(ssrHit, float(0).sub(ssrHit).add(1).mul(0.3), float(0));
 
-    const outCol: TslNode = uDebugMode.equal(0).select(
+    const standardDebug: TslNode = uDebugMode.equal(0).select(
       finalColor,
       uDebugMode.equal(1).select(
         depthCol,
@@ -487,6 +499,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
         ),
       ),
     );
+    const outCol: TslNode = uDebugMode.equal(15).select(suspended.color, standardDebug);
     const outAlpha: TslNode = uDebugMode.equal(0).select(alpha, float(1));
     return vec4(outCol, outAlpha);
   });
@@ -534,6 +547,12 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     uFoamDropEnd.value = v.foam.dropEnd;
     uFresnelBase.value = v.fresnel.base;
     uFresnelNormalFlatten.value = v.fresnel.normalFlatten;
+    uGlitterEnabled.value = v.glitter.enabled ? 1 : 0;
+    uGlitterTightExponent.value = v.glitter.tightExponent;
+    uGlitterTightGain.value = v.glitter.tightGain;
+    uGlitterBroadExponent.value = v.glitter.broadExponent;
+    uGlitterBroadGain.value = v.glitter.broadGain;
+    uGlitterLowSunGain.value = v.glitter.lowSunGain;
     uRefrStrength.value = v.refraction.strength;
     uRefrValidationBias.value = v.refraction.depthValidationBias;
     uRefrAbsorption.value.set(v.refraction.absorptionR, v.refraction.absorptionG, v.refraction.absorptionB);
