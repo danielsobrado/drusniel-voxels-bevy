@@ -9,7 +9,10 @@ import { refreshTreeGpuRingImpostorsTransactionally } from "./tree_gpu_ring_impo
 import { treeGpuRingRequiresClear } from "./tree_gpu_ring_clear_policy.js";
 import { treeReportsGpuRingStats } from "./tree_system_gpu_status.js";
 import { treeSystemUsesGpuRingDraw } from "./tree_system_gpu_policy.js";
-import { clearTreeGpuRing } from "./tree_system_gpu_ring_runtime.js";
+import {
+  clearTreeGpuRing,
+  invalidateTreeGpuRingIndexCounts,
+} from "./tree_system_gpu_ring_runtime.js";
 import { buildTreeRuntimeStats } from "./tree_system_runtime_stats.js";
 import type { TreeSystem } from "./tree_system_runtime.js";
 import { treeLodWithinDepthPrepass } from "./tree_depth_prepass_runtime.js";
@@ -67,7 +70,9 @@ export function treeCreateGpuRingResources(self: TreeSystem, maxInstancesPerGrou
 export function treeRefreshGpuRingImpostors(self: TreeSystem): boolean {
   const draw = self.gpuRing.draw;
   if (!draw) return false;
-  return refreshTreeGpuRingImpostorsTransactionally(treeGpuRingDrawResourcesInput(self), draw);
+  const refreshed = refreshTreeGpuRingImpostorsTransactionally(treeGpuRingDrawResourcesInput(self), draw);
+  if (refreshed) invalidateTreeGpuRingIndexCounts(draw);
+  return refreshed;
 }
 
 export function treeClearGpuRing(self: TreeSystem): void {
