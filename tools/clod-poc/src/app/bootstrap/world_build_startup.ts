@@ -115,6 +115,7 @@ import { CanonicalWorldSource } from "../../world_source/world_source.js";
 import type { WorldSource } from "../../world_source/world_source.js";
 import { createCarvedGraphHydrologySampler, createGraphHydrologySampler } from "../../water/graph_hydrology.js";
 import { carveInfiniteHydrologyHeight, createTracedHydrologyCarver, measureTracedRiverContinuity, sampleInfiniteHydrology } from "../../water/infinite_hydrology.js";
+import { setStreamingRootGpuMesherRuntimeControls } from "../../terrain/streaming/streamed_root_gpu_config.js";
 import type { HydrologyWorldSampler } from "../../water/hydrologyTileSource.js";
 import { getSaveRuntimeFeatureStamps } from "../../save/save_runtime.js";
 
@@ -505,6 +506,14 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
           carveInfiniteHydrologyHeight(x, z, height, imprintSampler, tracedCarveConfig, Math.max(0, cellSizeM));
       })()
     : null;
+  // GPU-meshed roots evaluate the terrain field in WGSL, where the traced polyline carve
+  // cannot run: root-level terrain reverts to uncarved pothole chains at mid distance
+  // while near CPU pages and the imprinted far summary both carry the carve. Default the
+  // GPU root mesher off on traced worlds (before any build, so startup pages are covered
+  // too); an explicit liveClodRootGpuMesher param still wins for A/B runs.
+  if (tracedCarveConfig && searchParams.get("liveClodRootGpuMesher") === null) {
+    setStreamingRootGpuMesherRuntimeControls({ enabled: false });
+  }
   const tracedWorldSampler: HydrologyWorldSampler | undefined = tracedCarveConfig
     ? (x, z, sampler, options) => sampleInfiniteHydrology(x, z, sampler, { ...options, carve: tracedCarveConfig })
     : undefined;
