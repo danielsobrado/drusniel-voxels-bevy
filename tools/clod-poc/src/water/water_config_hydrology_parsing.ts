@@ -7,6 +7,7 @@ export function readHydrologyConfig(value: unknown, fallback: HydrologyConfig = 
   const accumulation = (record.accumulation ?? {}) as Record<string, unknown>;
   const rivers = (record.rivers ?? {}) as Record<string, unknown>;
   const gravelBars = (record.gravel_bars ?? record.gravelBars ?? {}) as Record<string, unknown>;
+  const gravelBed = (record.gravel_bar_bed ?? record.gravelBed ?? {}) as Record<string, unknown>;
   const waterSurface = (record.water_surface ?? record.waterSurface ?? {}) as Record<string, unknown>;
   const moisture = (record.moisture ?? {}) as Record<string, unknown>;
   const talus = (record.talus ?? {}) as Record<string, unknown>;
@@ -68,6 +69,13 @@ export function readHydrologyConfig(value: unknown, fallback: HydrologyConfig = 
       maxDepthM: Math.max(gravelMinDepth, readNonNegative(gravelBars.max_depth_m ?? gravelBars.maxDepthM, fallback.gravelBars.maxDepthM)),
       minFlowStrength: gravelMinFlow,
       maxFlowStrength: Math.max(gravelMinFlow, readNonNegative(gravelBars.max_flow_strength ?? gravelBars.maxFlowStrength, fallback.gravelBars.maxFlowStrength)),
+    },
+    gravelBed: {
+      enabled: readBoolean(gravelBed.enabled, fallback.gravelBed.enabled),
+      maxElevationM: readNonNegative(gravelBed.max_elevation_m ?? gravelBed.maxElevationM, fallback.gravelBed.maxElevationM),
+      minWetDepthM: readNonNegative(gravelBed.min_wet_depth_m ?? gravelBed.minWetDepthM, fallback.gravelBed.minWetDepthM),
+      continuityReserveM: readNonNegative(gravelBed.continuity_reserve_m ?? gravelBed.continuityReserveM, fallback.gravelBed.continuityReserveM),
+      bankClearanceM: readNonNegative(gravelBed.bank_clearance_m ?? gravelBed.bankClearanceM, fallback.gravelBed.bankClearanceM),
     },
     waterSurface: {
       farReduceFactor: readNumber(waterSurface.far_reduce_factor ?? waterSurface.farReduceFactor, fallback.waterSurface.farReduceFactor),
