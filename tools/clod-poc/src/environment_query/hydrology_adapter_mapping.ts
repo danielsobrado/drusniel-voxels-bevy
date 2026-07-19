@@ -5,9 +5,11 @@ import type {
   RiverQueryResult,
   WaterQueryResult,
 } from "./types.js";
+import type { HydrologyRiverMetrics } from "./hydrology_river_metrics.js";
 import type { HydrologySample } from "../water/hydrologyGrid.js";
 import { evaluateGravelBarMask } from "../water/gravel_bar_field.js";
 import { readGravelBarSettings } from "../water/gravel_bar_runtime.js";
+import { FLOW_EPSILON } from "../water/water_field_types.js";
 
 export const HYDROLOGY_QUERY_SOURCE = "hydrology-cpu" as const;
 export const ENVIRONMENT_FALLBACK_SOURCE = "fallback" as const;
@@ -59,13 +61,15 @@ export function hydrologyRiverResult(
   meta: EnvironmentQueryMeta,
   x = 0,
   z = 0,
+  metrics?: HydrologyRiverMetrics,
 ): RiverQueryResult {
   if (!sample) return emptyRiverResult(meta);
+  const resolved = sanitizeRiverMetrics(sample, metrics);
   return {
-    flowX: finiteOrZero(sample.flowX),
-    flowZ: finiteOrZero(sample.flowZ),
-    flowStrength: finiteOrZero(sample.flowStrength),
-    bedDrop: 0,
+    flowX: resolved.flowX,
+    flowZ: resolved.flowZ,
+    flowStrength: resolved.flowStrength,
+    bedDrop: resolved.bedDrop,
     rapidMask: 0,
     channelCenterWeight: finiteOrZero(sample.riverMask),
     bankContactWeight: 0,
@@ -99,12 +103,14 @@ export function writeBatchRiver(
   meta: EnvironmentQueryMeta,
   x = 0,
   z = 0,
+  metrics?: HydrologyRiverMetrics,
 ): void {
   const flowIndex = index * 2;
-  output.flowXZ[flowIndex] = sample ? finiteOrZero(sample.flowX) : 0;
-  output.flowXZ[flowIndex + 1] = sample ? finiteOrZero(sample.flowZ) : 0;
-  output.flowStrength[index] = sample ? finiteOrZero(sample.flowStrength) : 0;
-  output.bedDrop[index] = 0;
+  const resolved = sample ? sanitizeRiverMetrics(sample, metrics) : ZERO_RIVER_METRICS;
+  output.flowXZ[flowIndex] = resolved.flowX;
+  output.flowXZ[flowIndex + 1] = resolved.flowZ;
+  output.flowStrength[index] = resolved.flowStrength;
+  output.bedDrop[index] = resolved.bedDrop;
   output.rapidMask[index] = 0;
   output.channelCenterWeight[index] = sample ? finiteOrZero(sample.riverMask) : 0;
   output.bankContactWeight[index] = 0;
@@ -141,6 +147,38 @@ export function hasEnvironmentField(fieldMask: number, field: number): boolean {
   return (fieldMask & field) !== 0;
 }
 
+const ZERO_RIVER_METRICS: HydrologyRiverMetrics = {
+  flowX: 0,
+  flowZ: 0,
+  flowStrength: 0,
+  bedDrop: 0,
+};
+
+function sanitizeRiverMetrics(
+  sample: HydrologySample,
+  metrics?: HydrologyRiverMetrics,
+): HydrologyRiverMetrics {
+  if (metrics) {
+    return {
+      flowX: finiteOrZero(metrics.flowX),
+      flowZ: finiteOrZero(metrics.flowZ),
+      flowStrength: finiteNonNegative(metrics.flowStrength),
+      bedDrop: finiteNonNegative(metrics.bedDrop),
+    };
+  }
+
+  const riverMask = clamp01(sample.riverMask);
+  const flowLength = Math.hypot(sample.flowX, sample.flowZ);
+  const flowStrength = finiteNonNegative(sample.flowStrength) * riverMask;
+  if (flowLength <= FLOW_EPSILON || flowStrength <= FLOW_EPSILON) return ZERO_RIVER_METRICS;
+  return {
+    flowX: sample.flowX / flowLength,
+    flowZ: sample.flowZ / flowLength,
+    flowStrength,
+    bedDrop: 0,
+  };
+}
+
 function emptyRiverResult(meta: EnvironmentQueryMeta): RiverQueryResult {
   return {
     flowX: 0,
@@ -159,8 +197,16 @@ function gravelBarMaskAt(x: number, z: number, sample: HydrologySample): number 
   return evaluateGravelBarMask(x, z, sample, readGravelBarSettings());
 }
 
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, finiteOrZero(value)));
+}
+
 function finiteOrZero(value: number): number {
   return Number.isFinite(value) ? value : 0;
+}
+
+function finiteNonNegative(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
 function nonNegativeIntegerOrZero(value: number): number {

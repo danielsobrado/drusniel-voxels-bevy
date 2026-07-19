@@ -7,6 +7,7 @@ import {
 } from "./batch.js";
 import { ENVIRONMENT_QUERY_FIELD } from "./constants.js";
 import { EnvironmentQueryDiagnostics } from "./diagnostics.js";
+import type { HydrologyRiverMetrics } from "./hydrology_river_metrics.js";
 import type {
   EnvironmentQuery,
   EnvironmentQueryField,
@@ -35,6 +36,12 @@ import {
 
 export interface HydrologyEnvironmentAuthority {
   sample(x: number, z: number, cellSizeHint: number): HydrologySample;
+  riverMetrics?(
+    x: number,
+    z: number,
+    cellSizeHint: number,
+    sample: HydrologySample,
+  ): HydrologyRiverMetrics;
   revision?(): number;
 }
 
@@ -112,11 +119,13 @@ export class HydrologyEnvironmentQuery implements EnvironmentQuery, EnvironmentB
     const hint = resolveEnvironmentSampleHint(hintM);
     const cached = this.sampleHydrology(x, z, hint);
     const valid = isFiniteHydrologySample(cached.sample);
+    const sample = valid ? cached.sample : null;
     const result = hydrologyRiverResult(
-      valid ? cached.sample : null,
+      sample,
       createHydrologyMeta(cached.revision, valid, hint),
       x,
       z,
+      sample ? this.hydrology.riverMetrics?.(x, z, hint, sample) : undefined,
     );
     this.recordScalar("river", result.meta, startedAt);
     return result;
@@ -141,9 +150,10 @@ export class HydrologyEnvironmentQuery implements EnvironmentQuery, EnvironmentB
     const revision = this.revision();
     const hydrologyMeta = createHydrologyMeta(revision, true, options.sampleHintM);
     const fallbackMeta = createFallbackMeta(options.sampleHintM);
+    const riverRequested = hasEnvironmentField(options.fieldMask, ENVIRONMENT_QUERY_FIELD.river);
     const hydrologyRequested = hasEnvironmentField(options.fieldMask, ENVIRONMENT_QUERY_FIELD.surface)
       || hasEnvironmentField(options.fieldMask, ENVIRONMENT_QUERY_FIELD.water)
-      || hasEnvironmentField(options.fieldMask, ENVIRONMENT_QUERY_FIELD.river);
+      || riverRequested;
     let validHydrologySamples = 0;
 
     for (let index = 0; index < input.count; index += 1) {
@@ -178,8 +188,19 @@ export class HydrologyEnvironmentQuery implements EnvironmentQuery, EnvironmentB
       if (hasEnvironmentField(options.fieldMask, ENVIRONMENT_QUERY_FIELD.water)) {
         writeBatchWater(output, index, sampleValid ? sample : null, sampleMeta);
       }
-      if (hasEnvironmentField(options.fieldMask, ENVIRONMENT_QUERY_FIELD.river)) {
-        writeBatchRiver(output, index, sampleValid ? sample : null, sampleMeta, x, z);
+      if (riverRequested) {
+        const validSample = sampleValid ? sample : null;
+        writeBatchRiver(
+          output,
+          index,
+          validSample,
+          sampleMeta,
+          x,
+          z,
+          validSample
+            ? this.hydrology.riverMetrics?.(x, z, options.sampleHintM, validSample)
+            : undefined,
+        );
       }
       if (hasEnvironmentField(options.fieldMask, ENVIRONMENT_QUERY_FIELD.visibility)) {
         output.sunVisibility[index] = 1;
