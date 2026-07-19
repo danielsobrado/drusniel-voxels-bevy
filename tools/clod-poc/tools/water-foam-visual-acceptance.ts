@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
+import type { WaterFoamRuntimeDiagnostics } from "../src/water/water_foam_diagnostics.js";
 import {
   numberArg,
   parseCliArgs,
@@ -21,6 +22,7 @@ import {
   parseWaterFoamAcceptanceQuality,
 } from "./water-foam-acceptance-profile.js";
 import { extractWaterFoamAcceptancePoses } from "./water-foam-pose-parity.js";
+import { evaluateWaterFoamRuntimeContract } from "./water-foam-runtime-contract.js";
 import {
   deriveWaterPixelMask,
   measureFoamImage,
@@ -107,9 +109,19 @@ async function main(): Promise<void> {
         rapidMask,
       ),
     };
-    const acceptance = evaluateFoamVisualAcceptance(metrics);
+    const visualAcceptance = evaluateFoamVisualAcceptance(metrics);
+    const runtimeDiagnostics = await page.evaluate<WaterFoamRuntimeDiagnostics>(
+      "window.waterDebugInfo().foam",
+    );
+    const runtimeAcceptance = evaluateWaterFoamRuntimeContract(quality, runtimeDiagnostics);
+    const acceptance = {
+      passed: visualAcceptance.passed && runtimeAcceptance.passed,
+      failures: [...visualAcceptance.failures, ...runtimeAcceptance.failures],
+      visual: visualAcceptance,
+      runtime: runtimeAcceptance,
+    };
     report = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       targetUrl,
       seed,
       world,
@@ -118,6 +130,7 @@ async function main(): Promise<void> {
       poseSource: poseReportPath
         ? { kind: "canonical-report", path: poseReportPath }
         : { kind: "discovered" },
+      runtimeDiagnostics,
       captures: { rapid, smoothRiver, lakeShore },
       metrics,
       acceptance,
