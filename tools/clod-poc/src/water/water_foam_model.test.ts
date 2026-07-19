@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   WATER_FOAM_MAX_COVERAGE,
   WATER_FOAM_RIVER_SHORE_ATTENUATION,
+  WATER_FOAM_SHADE_COVERAGE_FLOOR,
   evaluateWaterFoam,
   rapidFoamEligibility,
 } from "./water_foam_model.js";
@@ -13,6 +14,7 @@ const BASE = {
   riverWeight: 1,
   pattern: 1,
   wetFade: 1,
+  sunVisibility: 1,
   shoreStrength: 0.52,
   riverStrength: 0.38,
   bankStrength: 0.45,
@@ -73,6 +75,24 @@ describe("water foam parity model", () => {
     });
 
     expect(river.shoreSource).toBeCloseTo(lake.shoreSource * WATER_FOAM_RIVER_SHORE_ATTENUATION);
+  });
+
+  it("retains reduced whitewater coverage in full shade", () => {
+    const fixture = {
+      ...BASE,
+      shoreContact: 1,
+      rapidSpeed: 1,
+      rapidDrop: 1,
+      shoreStrength: 0.1,
+      riverStrength: 0.1,
+      bankStrength: 0.1,
+      rapidStrength: 0.1,
+    };
+    const sunlit = evaluateWaterFoam({ ...fixture, sunVisibility: 1 });
+    const shaded = evaluateWaterFoam({ ...fixture, sunVisibility: 0 });
+
+    expect(shaded.shadeCoverage).toBe(WATER_FOAM_SHADE_COVERAGE_FLOOR);
+    expect(shaded.coverage).toBeCloseTo(sunlit.coverage * WATER_FOAM_SHADE_COVERAGE_FLOOR);
   });
 
   it("caps bright whitewater coverage at the parity limit", () => {
