@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { DEFAULT_CAUSTICS_CONFIG } from "./causticsConfig.js";
+import { registerSceneStyleApplier } from "../style/scene_style.js";
 import {
   WATER_BODY_KIND_COUNT,
   waterBodyPresetsByKind,
@@ -97,7 +98,7 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
   const bodyArrays = createBodyUniformArrays();
   syncWaterBodyUniformArrays(bodyArrays, visual.bodies);
 
-  return {
+  const uniforms: WaterUniforms = {
     ...bodyArrays,
     uTime: { value: 0 },
     uShallowColor: { value: new THREE.Color(...visual.shallowColor) },
@@ -150,6 +151,22 @@ export function makeWaterUniforms(params: WaterMaterialParams): WaterUniforms {
     uCausticsScale: { value: caustics.scale },
     uCausticsSpeed: { value: caustics.speed },
   };
+
+  // Scene style: the configured values stay the baseline; the applier restyles
+  // this instance live and is applied once immediately so late-created water
+  // materials come up matching the active preset.
+  const styleBaseline = {
+    foamShore: visual.foam.shoreStrength,
+    normalFlatten: visual.fresnel.normalFlatten,
+    glitterEnabled: visual.glitter.enabled ? 1 : 0,
+  };
+  registerSceneStyleApplier((preset) => {
+    uniforms.uFoamShoreStrength.value = styleBaseline.foamShore * preset.water.foamShoreMul;
+    uniforms.uFresnelNormalFlatten.value =
+      styleBaseline.normalFlatten + (1 - styleBaseline.normalFlatten) * preset.water.normalFlattenPull;
+    uniforms.uGlitterEnabled.value = preset.water.glitter ? styleBaseline.glitterEnabled : 0;
+  });
+  return uniforms;
 }
 
 function createBodyUniformArrays(): Pick<

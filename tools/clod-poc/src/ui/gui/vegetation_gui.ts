@@ -8,7 +8,13 @@ import { GRASS_SHADER_MODES } from "../../grass.js";
 import { readGrassContactSettings, updateGrassContactSettings } from "../../grass/grass_contact_patches.js";
 import { hexToLinearRgb, linearRgbToHex } from "../../grass/grass_palette.js";
 import { grassSunVisibilityStrength, setGrassSunVisibilityStrength } from "../../gpu/grass_node_material.js";
-import { readStoneStyle, setStoneStyle, STONE_STYLE_NAMES, type StoneStyleName } from "../../stones/stone_style.js";
+import {
+  readSceneStyle,
+  SCENE_STYLE_NAMES,
+  SCENE_STYLE_PRESETS,
+  setSceneStyle,
+  type SceneStyleName,
+} from "../../style/scene_style.js";
 import type { GrassController } from "../../runtime/vegetation/grass_controller.js";
 import type { StoneController } from "../../runtime/vegetation/stone_controller.js";
 import type { TreeController } from "../../runtime/vegetation/tree_controller.js";
@@ -115,6 +121,25 @@ export function createVegetationGui(
     refreshGrassStats();
     deps.updateInfo();
   };
+  const sceneStyleUi = { style: readSceneStyle().name as SceneStyleName };
+  const styleFolder = gui.addFolder("scene style");
+  styleFolder.add(sceneStyleUi, "style", [...SCENE_STYLE_NAMES]).name("preset")
+    .onChange((name: SceneStyleName) => {
+      setSceneStyle(name);
+      // Stones/trees/understory/water restyle through shared live uniforms and
+      // registered appliers; grass palette + patch coherence flow through the
+      // regular grass settings so the per-field GUI rows stay authoritative.
+      const grassPreset = SCENE_STYLE_PRESETS[name].grass;
+      state.grassBaseColor = grassPreset.baseColor;
+      state.grassTipColor = grassPreset.tipColor;
+      state.grassDryColor = grassPreset.dryColor;
+      state.grassPatchStrength = grassPreset.patchStrength;
+      grassActions.rebuild();
+      stoneActions.rebuild();
+      for (const controller of gui.controllersRecursive()) controller.updateDisplay();
+      deps.updateInfo();
+    });
+
   const grassFolder = gui.addFolder("grass shader");
   const grassShaderOptions = Object.fromEntries(
     GRASS_SHADER_MODES.map((mode) => [
@@ -266,14 +291,6 @@ export function createVegetationGui(
     refreshStoneStats();
     deps.updateInfo();
   });
-  const stoneStyleUi = { style: readStoneStyle().name as StoneStyleName };
-  stoneFolder.add(stoneStyleUi, "style", [...STONE_STYLE_NAMES]).name("style preset")
-    .onChange((name: StoneStyleName) => {
-      setStoneStyle(name);
-      // Shading uniforms update live; the rebuild regenerates geometry so the
-      // silhouette softening of the new style applies too.
-      stoneActions.rebuild();
-    });
   stoneFolder.add(state, "stoneDensity", 0, 2, 0.05).name("density").onFinishChange(stoneActions.rebuild);
   stoneFolder.add(state, "stoneMaxInstances", 0, 500000, 1000).name("max instances").onFinishChange(stoneActions.rebuild);
   stoneFolder.add(state, "stoneSeed", 0, 1000000, 1).name("seed").onFinishChange(stoneActions.rebuild);

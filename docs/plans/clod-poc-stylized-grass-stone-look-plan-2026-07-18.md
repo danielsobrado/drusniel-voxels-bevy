@@ -421,3 +421,28 @@ ground-level poses judge blade shading; `clodPerf=1` disables vegetation;
     (mean ΔRGB 42), realistic→toon 56,550 (Δ 31) — effect scales with preset
     intensity. Shots: `shots/grass-look/s1-realistic/stylized/toon.png`.
   - Gates: typecheck ✓, stone tests 41/41 ✓, build ✓.
+- 2026-07-19 SCENE-WIDE STYLE PRESETS (user request — homogeneous coverage):
+  - New `src/style/scene_style.ts`: master realistic/stylized/toon preset
+    table + applier registry. `setSceneStyle` fans out to stones
+    (`setStoneStyle`), trees + understory (shared `styleWrappedSunTerm` wrap
+    uniform in both node materials), grass (palette + patch strength via the
+    normal grass settings so the per-field GUI rows stay authoritative), and
+    water (`makeWaterUniforms` registers an applier per uniforms instance:
+    shore-foam multiplier, fresnel normal-flatten pull, glitter kill on toon —
+    baselines captured from the configured visuals, applied immediately so
+    late-created water materials come up styled).
+  - GUI: single "scene style → preset" dropdown replaces the stones-only one.
+  - Gates: typecheck ✓, build ✓, suite 4,383 passed (same 4 pre-existing
+    foam/biome failures, tracked separately). `scene_style.test.ts` locks the
+    realistic-equals-defaults contract and the registry fan-out.
+  - In-app evaluation (single boot, scene dropdown driven via lil-gui DOM,
+    fixed pose): realistic→stylized 11,575 scene px changed (Δ64),
+    realistic→toon 18,413 (Δ68); toon↔realistic close-up under trees 218,140
+    px (Δ25) — trees/ground respond strongly. Contact-dirt patches visible
+    around midground stones in the slope view. Caveats: no water surface in
+    the captured frames (water preset verified by unit contract + code path
+    only), and ground-level stone close-ups keep getting safety-lifted into
+    canopy — interactive in-app inspection via the new dropdown is the
+    intended evaluation surface. Shots: `shots/grass-look/scene-*.png`.
+  - Known limits: far/billboard/impostor tree materials keep realistic
+    shading until rebake; terrain albedo not restyled.

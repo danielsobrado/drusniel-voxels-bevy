@@ -36,6 +36,7 @@ import {
   vec3,
 } from "three/tsl";
 import type { EnvironmentLighting } from "../environment/environment.js";
+import { styleWrappedSunTerm } from "../style/scene_style.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { TREE_LODS, type TreeLod, type TreeSettings } from "./tree_config.js";
@@ -233,7 +234,7 @@ export function createTreeNodeMaterialHandle(
 
     const n0: TslNode = normalize(normalWorld);
     const n: TslNode = frontFacing.select(n0, n0.negate());
-    const sun: TslNode = max(dot(n, uLight), 0.0);
+    const sun: TslNode = styleWrappedSunTerm(dot(n, uLight));
     const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
     const hemi: TslNode = mix(uGround, uSky, sky);
     const direct: TslNode = uSun.mul(sun);
@@ -426,7 +427,7 @@ export function createTreeRingNodeMaterialHandle(
       vec3(c.mul(localNormal.x).add(s.mul(localNormal.z)), localNormal.y, s.mul(localNormal.x).negate().add(c.mul(localNormal.z))),
     );
     const n: TslNode = frontFacing.select(rotatedNormal, rotatedNormal.negate());
-    const sun: TslNode = max(dot(n, uLight), 0.0);
+    const sun: TslNode = styleWrappedSunTerm(dot(n, uLight));
     const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
     const hemi: TslNode = mix(uGround, uSky, sky);
     const direct: TslNode = uSun.mul(sun);

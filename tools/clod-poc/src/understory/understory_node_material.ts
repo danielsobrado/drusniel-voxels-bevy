@@ -15,7 +15,6 @@ import {
   fract,
   frontFacing,
   instanceIndex,
-  max,
   mix,
   normalWorld,
   normalize,
@@ -27,6 +26,7 @@ import {
   vec3,
 } from "three/tsl";
 import type { EnvironmentLighting } from "../environment/environment.js";
+import { styleWrappedSunTerm } from "../style/scene_style.js";
 import { sampleCarvedBedBilinearTsl } from "../gpu/placement_height.js";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import { UNDERSTORY_CLASSES, type UnderstoryClass, type UnderstorySettings } from "./understory_config.js";
@@ -87,7 +87,7 @@ export function createUnderstoryNodeMaterialHandle(
 
     const n0: TslNode = normalize(normalWorld);
     const n: TslNode = frontFacing.select(n0, n0.negate());
-    const sun: TslNode = max(dot(n, uLight), 0.0);
+    const sun: TslNode = styleWrappedSunTerm(dot(n, uLight));
     const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
     const hemi: TslNode = mix(uGround, uSky, sky);
     const albedo: TslNode = albedoFactory(aColor);
@@ -214,7 +214,7 @@ export function createUnderstoryRingNodeMaterialHandle(
 
     const n0: TslNode = normalize(normalWorld);
     const n: TslNode = frontFacing.select(n0, n0.negate());
-    const sun: TslNode = max(dot(n, uLight), 0.0);
+    const sun: TslNode = styleWrappedSunTerm(dot(n, uLight));
     const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
     const hemi: TslNode = mix(uGround, uSky, sky);
     const albedo: TslNode = albedoFactory(aColor);
