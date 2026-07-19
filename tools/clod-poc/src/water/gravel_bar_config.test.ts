@@ -22,6 +22,12 @@ water:
       max_depth_m: 1
       min_flow_strength: 3
       max_flow_strength: 1
+    gravel_bar_bed:
+      enabled: true
+      max_elevation_m: -3
+      min_wet_depth_m: -2
+      continuity_reserve_m: -1
+      bank_clearance_m: -4
 `;
 
 afterEach(() => {
@@ -43,8 +49,26 @@ describe("gravel bar hydrology config", () => {
     expect(gravel.maxFlowStrength).toBe(gravel.minFlowStrength);
   });
 
+  it("parses the independent gravel-bed authority and sanitizes safety limits", () => {
+    const bed = parseWaterConfig(MINIMAL_WATER, null).hydrology.gravelBed;
+    expect(bed).toEqual({
+      enabled: true,
+      maxElevationM: 0,
+      minWetDepthM: 0,
+      continuityReserveM: 0,
+      bankClearanceM: 0,
+    });
+  });
+
   it("publishes the resolved settings to query and shader consumers", () => {
     const parsed = parseWaterConfig(MINIMAL_WATER, null).hydrology.gravelBars;
     expect(readGravelBarSettings()).toEqual(parsed);
+  });
+
+  it("deep-clones gravel-bed configuration", () => {
+    const first = cloneHydrologyConfig();
+    const second = cloneHydrologyConfig(first);
+    second.gravelBed.maxElevationM = 4;
+    expect(first.gravelBed.maxElevationM).not.toBe(second.gravelBed.maxElevationM);
   });
 });
