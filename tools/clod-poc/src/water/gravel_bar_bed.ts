@@ -84,19 +84,23 @@ export function evaluateGravelBarBedElevation(
   safety: GravelBarBedSafety = {},
 ): GravelBarBedDecision {
   const mask = evaluateGravelBarMask(x, z, sample, fieldConfig);
-  if (!bedConfig.enabled || bedConfig.maxElevationM <= 0) {
+  const maxElevationM = nonNegativeFinite(bedConfig.maxElevationM);
+  const minWetDepthM = nonNegativeFinite(bedConfig.minWetDepthM);
+  const continuityReserveM = nonNegativeFinite(bedConfig.continuityReserveM);
+  const bankClearanceM = nonNegativeFinite(bedConfig.bankClearanceM);
+  if (!bedConfig.enabled || maxElevationM <= 0) {
     return decision(mask, 0, 0, "disabled");
   }
   if (mask <= 0) return decision(0, 0, 0, "not_candidate");
 
-  const desiredElevationM = mask * bedConfig.maxElevationM;
+  const desiredElevationM = mask * maxElevationM;
   const baseBedY = sample.terrainY;
   const waterY = sample.waterY;
   if (!Number.isFinite(baseBedY) || !Number.isFinite(waterY)) {
     return decision(mask, desiredElevationM, 0, "depth");
   }
 
-  const depthCeilingY = waterY - bedConfig.minWetDepthM;
+  const depthCeilingY = waterY - minWetDepthM;
   if (depthCeilingY <= baseBedY + ELEVATION_EPSILON_M) {
     return decision(mask, desiredElevationM, 0, "depth");
   }
@@ -107,14 +111,15 @@ export function evaluateGravelBarBedElevation(
     safety.channelCenterWeight ?? sample.bodyMask,
   );
   const continuityCeilingY = waterY
-    - bedConfig.minWetDepthM
-    - bedConfig.continuityReserveM * centerWeight;
+    - minWetDepthM
+    - continuityReserveM * centerWeight;
   if (continuityCeilingY <= baseBedY + ELEVATION_EPSILON_M) {
     return decision(mask, desiredElevationM, 0, "continuity");
   }
 
-  const bankCeilingY = Number.isFinite(safety.localBankY)
-    ? (safety.localBankY as number) - bedConfig.bankClearanceM
+  const localBankY = safety.localBankY;
+  const bankCeilingY = typeof localBankY === "number" && Number.isFinite(localBankY)
+    ? localBankY - bankClearanceM
     : Number.POSITIVE_INFINITY;
   if (bankCeilingY <= baseBedY + ELEVATION_EPSILON_M) {
     return decision(mask, desiredElevationM, 0, "bank");
@@ -150,6 +155,10 @@ function limitingRejection(
   if (depthCeilingY <= continuityCeilingY && depthCeilingY <= bankCeilingY) return "depth";
   if (continuityCeilingY <= bankCeilingY) return "continuity";
   return "bank";
+}
+
+function nonNegativeFinite(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
 function smoothRamp(start: number, end: number, value: number): number {
