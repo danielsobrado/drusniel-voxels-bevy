@@ -13,6 +13,7 @@ import {
   createGrassNodeMaterial,
 } from "../../gpu/grass_node_material.js";
 import { GrassGpuRingCompute } from "../../gpu/grass_ring_compute.js";
+import { registerForestLightingGpuDevice } from "../../forest_lighting/forest_lighting_texture.js";
 import { createGrassController } from "./grass_controller.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { grassUiState } from "../../app/clod_app_state.js";
@@ -53,6 +54,7 @@ export function runGrassStartup(input: GrassStartupInput): GrassStartupResult {
     gpuBackend, hydrologySystem, currentLighting,
   } = input;
 
+  registerForestLightingGpuDevice(isWebGpu ? rendererWebGpuDevice : null);
   const grassHydrologyData = hydrologySystem ? packHydrologyData(hydrologySystem) : null;
 
   const currentGrassLighting = (): GrassLighting => {
