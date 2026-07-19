@@ -32,12 +32,14 @@ export function updateTreeGpuRingTreesSafely(
       logCpuFallbackError(input, previousLoggedError);
       return false;
     }
-    if (input.state.stats.status !== "failed") return true;
-    return failTreeGpuRingExecution(
-      input,
-      currentTreeGpuRingKey(input),
-      input.state.stats.reason ?? DEFAULT_EXECUTION_ERROR,
-    );
+    if (input.state.stats.status === "failed") {
+      return failTreeGpuRingExecution(
+        input,
+        currentTreeGpuRingKey(input),
+        input.state.stats.reason ?? DEFAULT_EXECUTION_ERROR,
+      );
+    }
+    return treeGpuRingGenerationIsLive(input);
   } catch (error) {
     return failTreeGpuRingExecution(input, currentTreeGpuRingKey(input), error);
   }
@@ -112,6 +114,13 @@ function treeGpuRingHasOwnedResources(input: TreeGpuRingRuntimeInput): boolean {
     || !!input.state.draw
     || input.state.ringMeshes.length > 0
     || input.state.prepassTwins.length > 0;
+}
+
+function treeGpuRingGenerationIsLive(input: TreeGpuRingRuntimeInput): boolean {
+  const status = input.state.stats.status;
+  return !!input.state.compute
+    && !!input.state.draw
+    && (status === "ready" || status === "running");
 }
 
 function currentTreeGpuRingKey(input: TreeGpuRingRuntimeInput): string {
