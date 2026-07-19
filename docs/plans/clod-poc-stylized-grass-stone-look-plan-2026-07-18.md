@@ -1,7 +1,7 @@
 # clod-poc Stylized Grass & Stone Look Plan
 
 Created: 2026-07-18
-Status: **PLANNED — no phase started**
+Status: **IN PROGRESS — Phase 0 + G1–G4 code landed; G5/G6 + visual/perf verify pending**
 Reference: https://github.com/cortiz2894/stylized-components (GrassField system analysis)
 
 ## Goal
@@ -106,14 +106,14 @@ phases; re-capture only if an unrelated change lands on main mid-stream.
 
 **Goal:** frozen before-state so every later phase has an A/B anchor.
 
-- [ ] Pick and record 3 canonical poses (open meadow near, meadow with stones,
+- [x] Pick and record 3 canonical poses (open meadow near, meadow with stones,
       forest-edge grass) via `__drusnielClod.setPose` / `getPose`; store poses
       in this file.
-- [ ] Capture baseline shots + stats JSON for the 3 poses (paths under
+- [x] Capture baseline shots + stats JSON for the 3 poses (paths under
       `shots/grass-look/baseline-*`).
-- [ ] Capture perf baseline: 2 runs, islands scene, veg-visible pose,
+- [x] Capture perf baseline: 2 runs, islands scene, veg-visible pose,
       `gpuReadbacks=acceptance`. Record p50/p95 + grass counters below.
-- [ ] Note current grass settings used (density/spacing, distance, maxBlades).
+- [x] Note current grass settings used (density/spacing, distance, maxBlades).
 
 **Acceptance:** paths + numbers recorded in Progress Log.
 
@@ -124,17 +124,17 @@ phases; re-capture only if an unrelated change lands on main mid-stream.
 **Goal:** blade bases and the terrain's grass/meadow color resolve to the same
 color so gaps between blades stop reading as a different-colored floor.
 
-- [ ] Introduce a shared grass palette (base/mid/tip + dry) as uniforms in one
+- [x] Introduce a shared grass palette (base/mid/tip + dry) as uniforms in one
       place (grass config → lighting-style handle), replacing the hardcoded
       `vec3`s in `grass_node_material.ts` (both patchV2 and legacy branches).
-- [ ] Feed the *same* base color into the terrain materials' grass/meadow
+- [x] Feed the *same* base color into the terrain materials' grass/meadow
       constants (far clipmap `grass`/`meadowColor`; find and wire the near
       terrain material's equivalent).
-- [ ] Blade base color = terrain grass color exactly; mid/tip stay independent
+- [x] Blade base color = terrain grass color exactly; mid/tip stay independent
       (slightly brighter/yellower per reference gradient design).
-- [ ] Stone moss tint (`rock_builder` moss channel → `stone_node_material`)
+- [x] Stone moss tint (`rock_builder` moss channel → `stone_node_material`)
       pulls toward the same shared base color (weld stones into the meadow).
-- [ ] GUI: expose the shared base color + tip color in vegetation GUI as live
+- [x] GUI: expose the shared base color + tip color in vegetation GUI as live
       uniforms (no rebuild).
 - [ ] Verify: A/B shots on all 3 poses; grass coverage should read continuous.
       Typecheck/test/build green. Perf: no measurable change expected — confirm
@@ -151,9 +151,9 @@ Keep old colors as a config fallback for quick visual revert.
 **Goal:** shade every blade with the terrain normal; keep the true blade
 normal only for the transmission term (mirrors reference `vBladeN` design).
 
-- [ ] In `grass_node_material.ts`: raise terrain-normal pull to ~1.0 over the
+- [x] In `grass_node_material.ts`: raise terrain-normal pull to ~1.0 over the
       whole blade (uniform `uNormalPull`, default 1.0, live-tunable for A/B).
-- [ ] Keep `bladeNormal` (true facing) as a separate node; use it only in the
+- [x] Keep `bladeNormal` (true facing) as a separate node; use it only in the
       `transmission`/`back` term and (if needed) a subtle edge darkening.
 - [ ] Check interaction with alpha-to-coverage and the depth prepass tiers
       (no shading change should affect masks, but verify prepass parity).
@@ -170,14 +170,14 @@ final value is an art call (reference uses 1.0).
 **Goal:** one world-space wind direction with harmonics; all blades lean
 together; gust waves travel across the field.
 
-- [ ] Add `uWindDir` (vec2, normalized) to grass config + material + GUI.
-- [ ] Build wind displacement in world space: primary sine along `uWindDir`,
+- [x] Add `uWindDir` (vec2, normalized) to grass config + material + GUI.
+- [x] Build wind displacement in world space: primary sine along `uWindDir`,
       second harmonic at ~2.6× freq, perpendicular turbulence term (reference
       recipe); keep our existing gust field as amplitude modulation.
-- [ ] Counter-rotate the wind vector by `aRotY` before adding to local X/Z
+- [x] Counter-rotate the wind vector by `aRotY` before adding to local X/Z
       (equivalent of reference's `transpose(instRot)` fix) so lean direction is
       world-consistent despite per-blade yaw.
-- [ ] Keep amplitude ∝ `uvY²` base-pinning (already correct).
+- [x] Keep amplitude ∝ `uvY²` base-pinning (already correct).
 - [ ] If the depth prepass encodes wind, share the same formulation to avoid
       shadow/mask desync (reference caveat).
 - [ ] Verify: short animated capture (settle + N frames) at meadow pose —
@@ -190,10 +190,10 @@ together; gust waves travel across the field.
 **Goal:** dryness/color variation in multi-meter regions instead of per-blade
 speckle.
 
-- [ ] In `grass_ring.compute.wgsl`: add a low-frequency FBM/noise term (reuse
+- [x] In `grass_ring.compute.wgsl`: add a low-frequency FBM/noise term (reuse
       existing WGSL noise helpers) sampled at blade world XZ; combine with the
       existing hash so `color_mix = patch_term ⊕ small per-blade jitter`.
-- [ ] Expose patch scale (m) + strength in config/GUI (compute-side params;
+- [x] Expose patch scale (m) + strength in config/GUI (compute-side params;
       document that changes need a ring refresh, not a scene rebuild).
 - [ ] Optional (stretch): drift the terrain grass color with the same noise for
       ground/blade patch agreement (reference does this; needs the shared
@@ -315,3 +315,10 @@ ground-level poses judge blade shading; `clodPerf=1` disables vegetation;
   blades (gpu n/m/f/s 386/955/160/0). Pre-existing findings to flag: broken
   plain infinite-islands boot (weld error), grass-ring HUD counter lags ~1
   probe behind after teleports.
+- 2026-07-19 G1–G4 CODE: commit `ef5682fa5` — shared palette + terrain/stone
+  moss weld, `uNormalPull`, world-space `uWindDir` wind, compute patch FBM +
+  config/GUI. Visual/perf verify checkboxes still open. Next: G5 dirt/trample,
+  then G6 sun-light term (or verify pass first).
+- 2026-07-19: Fixed 5 stale clod-poc tests (hydrology Layout B packing, tree
+  impostor async readback mock, bake handoff expectations, TREE-9 WGSL
+  already-applied compose form). Typecheck green.

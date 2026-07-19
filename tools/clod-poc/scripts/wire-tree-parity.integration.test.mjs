@@ -46,9 +46,12 @@ describe("tree parity wiring against current source", () => {
     expect(result.applied.length + result.skipped.length).toBe(WGSL_EDIT_COUNT);
     expect(result.source).toContain("applyTreeRingSpeciesWgslExpansion");
     expect(result.source).toContain("const baseTreeEntry =");
-    expect(result.source).toContain("withTreePcgHash(withTreeFinalPlacementHeight(withRiverEcologyConstants(treeRingEntry)))");
+    expect(result.source).toContain("withTreePcgHash(");
+    expect(result.source).toContain("withTreeFinalPlacementHeight(");
+    expect(result.source).toContain("withRiverEcologyConstants(treeRingEntry)");
     expect(result.source).toContain("const expandedTreeEntry = applyTreeRingSpeciesWgslExpansion(baseTreeEntry, TREE_SPECIES.length)");
-    expect(result.source).toContain("applyTreeRingWgslLayoutConstants(expandedTreeEntry, treeLayout)");
+    expect(result.source).toContain("withTreeCrownProxyShadowIndexCount");
+    expect(result.source).toContain("applyTreeRingWgslLayoutConstants(crownProxyTreeEntry, treeLayout)");
 
     const again = wireTreeRingWgslExpansionSource(result.source);
     expect(again.changed).toBe(false);

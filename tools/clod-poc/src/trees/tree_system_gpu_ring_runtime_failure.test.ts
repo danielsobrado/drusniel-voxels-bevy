@@ -47,11 +47,10 @@ describe("tree GPU ring runtime failure handling", () => {
 
   it("latches an asynchronous compute initialization failure", async () => {
     const fixture = runtimeFixture(true);
-    fixture.createDrawResources.mockReturnValue({
+    fixture.createDrawResources.mockReturnValue(partialDrawResources({
       meshes: [],
       materialHandles: {},
-      outputBuffers: {},
-    } as TreeGpuRingDrawResources);
+    }));
     vi.spyOn(TreeGpuRingCompute, "create").mockRejectedValue(new Error("compute init failed"));
 
     expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(true);
@@ -103,19 +102,19 @@ describe("tree GPU ring runtime failure handling", () => {
     const geometry = new THREE.InstancedBufferGeometry();
     const geometryDispose = vi.spyOn(geometry, "dispose");
     const handle = fakeHandle();
-    const mesh = new THREE.Mesh(geometry, handle.regularMaterial) as TreeGpuRingMesh;
-    const meshDispose = vi.spyOn(mesh as THREE.Mesh & { dispose(): void }, "dispose");
+    const mesh = disposableRingMesh(geometry, handle.regularMaterial);
+    const meshDispose = mesh.dispose;
     const twinMaterial = new THREE.MeshBasicMaterial();
     const twinMaterialDispose = vi.spyOn(twinMaterial, "dispose");
-    const twin = new THREE.Mesh(geometry, twinMaterial);
-    const twinDispose = vi.spyOn(twin as THREE.Mesh & { dispose(): void }, "dispose");
+    const twin = disposableMesh(geometry, twinMaterial);
+    const twinDispose = twin.dispose;
     fixture.input.root.add(mesh, twin);
     fixture.input.state.ringMeshes = [mesh];
     fixture.input.state.prepassTwins = [twin];
-    fixture.input.state.draw = {
+    fixture.input.state.draw = partialDrawResources({
       meshes: [mesh],
       materialHandles: { oak: handle },
-    } as TreeGpuRingDrawResources;
+    });
 
     clearTreeGpuRing(fixture.input);
 
@@ -135,18 +134,18 @@ describe("tree GPU ring runtime failure handling", () => {
     const geometry = new THREE.InstancedBufferGeometry();
     const geometryDispose = vi.spyOn(geometry, "dispose");
     const handle = fakeHandle();
-    const mesh = new THREE.Mesh(geometry, handle.regularMaterial) as TreeGpuRingMesh;
-    const meshDispose = vi.spyOn(mesh as THREE.Mesh & { dispose(): void }, "dispose");
+    const mesh = disposableRingMesh(geometry, handle.regularMaterial);
+    const meshDispose = mesh.dispose;
     const destroy = vi.fn(() => {
       throw new Error("compute destroy failed");
     });
     fixture.input.state.compute = { destroy } as unknown as NonNullable<typeof fixture.input.state.compute>;
     fixture.input.root.add(mesh);
     fixture.input.state.ringMeshes = [mesh];
-    fixture.input.state.draw = {
+    fixture.input.state.draw = partialDrawResources({
       meshes: [mesh],
       materialHandles: { oak: handle },
-    } as TreeGpuRingDrawResources;
+    });
 
     clearTreeGpuRing(fixture.input);
 
@@ -183,6 +182,27 @@ function runtimeFixture(fallbackToCpu: boolean) {
     geometryForGpuRing: () => new THREE.BoxGeometry(1, 1, 1),
   };
   return { createDrawResources, input };
+}
+
+type DisposableMesh<T extends THREE.BufferGeometry = THREE.BufferGeometry> = THREE.Mesh<T> & {
+  dispose: ReturnType<typeof vi.fn<() => void>>;
+};
+
+function disposableMesh<T extends THREE.BufferGeometry>(geometry: T, material: THREE.Material): DisposableMesh<T> {
+  return Object.assign(new THREE.Mesh(geometry, material), { dispose: vi.fn<() => void>() });
+}
+
+function disposableRingMesh(
+  geometry: THREE.InstancedBufferGeometry,
+  material: THREE.Material,
+): TreeGpuRingMesh & DisposableMesh<THREE.InstancedBufferGeometry> {
+  return Object.assign(new THREE.Mesh(geometry, material) as TreeGpuRingMesh, { dispose: vi.fn<() => void>() });
+}
+
+function partialDrawResources(
+  partial: Partial<TreeGpuRingDrawResources> & Pick<TreeGpuRingDrawResources, "meshes" | "materialHandles">,
+): TreeGpuRingDrawResources {
+  return partial as unknown as TreeGpuRingDrawResources;
 }
 
 function fakeHandle(): TreeMaterialHandle & { dispose: ReturnType<typeof vi.fn> } {

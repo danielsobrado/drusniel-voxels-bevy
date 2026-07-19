@@ -9,8 +9,9 @@ describe("stone gravel bar hydrology packing", () => {
   it("preserves canonical fields while carrying phase below the body-kind round threshold", () => {
     const grid = createHydrologyGrid(2, 16, { surfaceHeight: () => 0 }, 1);
     const index = 0;
-    grid.flowDirX[index] = 0.6;
-    grid.flowDirZ[index] = 0.8;
+    // Layout B stores flowDir already pre-scaled by strength (see hydrologyGpuPacking).
+    grid.flowDirX[index] = 0.24;
+    grid.flowDirZ[index] = 0.32;
     grid.flowStrength[index] = 0.4;
     grid.moisture[index] = 0.7;
     grid.bodyKind[index] = HYDROLOGY_BODY_RIVER;

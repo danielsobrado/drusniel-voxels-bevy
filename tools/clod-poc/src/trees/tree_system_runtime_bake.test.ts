@@ -26,17 +26,15 @@ describe("tree system bake ring refresh", () => {
 
   it("refreshes GPU impostors in place and reapplies CPU materials when a bake succeeds", async () => {
     const ctx = bakeContext({ supported: true, reason: null });
-    const onSubmittedWorkDone = vi.fn(async () => undefined);
+    ctx.settings.impostors.swapOnBake = true;
 
-    const result = await TreeSystem.prototype.bakeImpostors.call(ctx as unknown as TreeSystem, {
-      backend: { device: { queue: { onSubmittedWorkDone } } },
-    });
+    // TreeSystemAssets drains submitted GPU work before publishing the atlas;
+    // TreeSystem only runs the consumer handoff after assets.bakeImpostors returns.
+    const result = await TreeSystem.prototype.bakeImpostors.call(ctx as unknown as TreeSystem, {});
 
     expect(result).toEqual({ supported: true, reason: null });
-    expect(onSubmittedWorkDone).toHaveBeenCalledTimes(1);
     expect(ctx.refreshGpuRingImpostors).toHaveBeenCalledTimes(1);
     expect(ctx.clearGpuRing).not.toHaveBeenCalled();
-    expect(onSubmittedWorkDone.mock.invocationCallOrder[0]).toBeLessThan(ctx.refreshGpuRingImpostors.mock.invocationCallOrder[0]!);
     expect(ctx.assets.applyMaterials).toHaveBeenCalledWith(ctx.patches);
     expect(ctx.assets.replaceImpostorMeshGeometries).toHaveBeenCalledWith(ctx.patches, ctx.meshBoundsState);
     expect(ctx.updatePatchLods).toHaveBeenCalledWith(ctx.lastCenter, ctx.lastCenter);

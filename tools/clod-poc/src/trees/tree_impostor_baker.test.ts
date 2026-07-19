@@ -128,6 +128,13 @@ function fakeRenderTargetRenderer(options: { rejectShaderMaterial?: boolean } = 
   getViewport(target: THREE.Vector4): THREE.Vector4;
   setViewport(viewport: THREE.Vector4): void;
   setViewport(x: number, y: number, width: number, height: number): void;
+  readRenderTargetPixelsAsync(
+    target: THREE.WebGLRenderTarget,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): Promise<Uint8Array>;
 } {
   let currentTarget: THREE.WebGLRenderTarget | null = null;
   let clearColor = new THREE.Color(0x000000);
@@ -162,6 +169,9 @@ function fakeRenderTargetRenderer(options: { rejectShaderMaterial?: boolean } = 
     setViewport(...args: [THREE.Vector4] | [number, number, number, number]) {
       if (args.length === 1) viewport = args[0].clone();
       else viewport = new THREE.Vector4(args[0], args[1], args[2], args[3]);
+    },
+    async readRenderTargetPixelsAsync(_target, _x, _y, width, height) {
+      return new Uint8Array(width * height * 4);
     },
   };
 }
