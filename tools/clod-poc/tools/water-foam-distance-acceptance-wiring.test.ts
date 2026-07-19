@@ -17,6 +17,10 @@ const TIME_SOURCE = readFileSync(
   new URL("../src/runtime/water_weather/water_foam_time_freeze.ts", import.meta.url),
   "utf8",
 );
+const AUXILIARY_SOURCE = readFileSync(
+  new URL("../src/runtime/water_weather/water_foam_auxiliary_visibility.ts", import.meta.url),
+  "utf8",
+);
 
 describe("water foam distance acceptance wiring", () => {
   it("uses one rapid pose and one camera placement", () => {
@@ -25,14 +29,16 @@ describe("water foam distance acceptance wiring", () => {
     expect(RUNNER_SOURCE).toContain('"rapid-bed-step"');
   });
 
-  it("freezes time before capturing one body/depth mask and three foam distances", () => {
+  it("isolates auxiliary overlays and freezes time before fixed-mask captures", () => {
+    const auxiliary = RUNNER_SOURCE.indexOf("setWaterFoamAuxiliaryOverlaysHidden(page, true)");
     const freeze = RUNNER_SOURCE.indexOf("setWaterFoamTimeFrozen(page, true)");
     const body = RUNNER_SOURCE.indexOf('setWaterDebugMode(page, "bodyMask")');
     const near = RUNNER_SOURCE.indexOf("setWaterFoamDistanceOverride(page, distances.nearM)");
     const mid = RUNNER_SOURCE.indexOf("setWaterFoamDistanceOverride(page, distances.midM)");
     const far = RUNNER_SOURCE.indexOf("setWaterFoamDistanceOverride(page, distances.farM)");
 
-    expect(freeze).toBeGreaterThan(0);
+    expect(auxiliary).toBeGreaterThan(0);
+    expect(freeze).toBeGreaterThan(auxiliary);
     expect(body).toBeGreaterThan(freeze);
     expect(near).toBeGreaterThan(body);
     expect(mid).toBeGreaterThan(near);
@@ -40,11 +46,14 @@ describe("water foam distance acceptance wiring", () => {
     expect(RUNNER_SOURCE.match(/deriveWaterPixelMask\(/g)).toHaveLength(1);
   });
 
-  it("resets both controls in a finally block", () => {
+  it("resets distance, time, and overlay visibility in a finally block", () => {
     expect(RUNNER_SOURCE).toContain("finally {");
     expect(RUNNER_SOURCE).toContain("resetWaterFoamDistanceControls(page)");
     expect(CONTROLS_SOURCE).toContain("distance = await setWaterFoamDistanceOverride(page, null)");
     expect(CONTROLS_SOURCE).toContain("time = await setWaterFoamTimeFrozen(page, false)");
+    expect(CONTROLS_SOURCE).toContain(
+      "auxiliary = await setWaterFoamAuxiliaryOverlaysHidden(page, false)",
+    );
   });
 
   it("keeps camera and atlas updates live while freezing only clipmap delta", () => {
@@ -54,12 +63,23 @@ describe("water foam distance acceptance wiring", () => {
     expect(TIME_SOURCE).not.toContain("materialHandle");
   });
 
+  it("isolates only the three known auxiliary water overlays", () => {
+    expect(AUXILIARY_SOURCE).toContain('"river-bank-residue-overlay"');
+    expect(AUXILIARY_SOURCE).toContain('"river-cascade-particles"');
+    expect(AUXILIARY_SOURCE).toContain('"river-mist-overlay"');
+    expect(AUXILIARY_SOURCE).toContain("object.visible = snapshot.visible");
+    expect(AUXILIARY_SOURCE).toContain("new WeakMap<THREE.Scene");
+  });
+
   it("exposes controls only through the existing water debug API", () => {
     expect(DEBUG_SOURCE).toContain("setWaterFoamDistanceOverrideM");
     expect(DEBUG_SOURCE).toContain("setWaterFoamTimeFrozen");
+    expect(DEBUG_SOURCE).toContain("setWaterFoamAuxiliaryOverlaysHidden");
     expect(DEBUG_SOURCE).toContain("setWaterFoamDistanceDebugOverrideM(null)");
+    expect(DEBUG_SOURCE).toContain("auxiliaryVisibility.setHidden(false)");
     expect(DEBUG_SOURCE).not.toContain('searchParams.get("foamDistance');
     expect(DEBUG_SOURCE).not.toContain('searchParams.get("foamTime');
+    expect(DEBUG_SOURCE).not.toContain('searchParams.get("foamAuxiliary');
   });
 
   it("gates renderer-specific runtime and browser errors", () => {
