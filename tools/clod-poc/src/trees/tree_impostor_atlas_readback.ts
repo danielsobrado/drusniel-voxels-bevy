@@ -3,8 +3,10 @@ import {
   copyTreeImpostorPixels,
   dilateTreeImpostorAtlasTiles,
   flipTreeImpostorPixelRows,
+  treeImpostorPixelLayoutFor,
   viewTreeImpostorPixels,
 } from "./tree_impostor_atlas_pixels.js";
+import type { TreeImpostorMipLevel } from "./tree_impostor_mipmaps.js";
 
 const TREE_IMPOSTOR_ATLAS_ANISOTROPY = 8;
 export const TREE_IMPOSTOR_PORTABLE_MAX_TEXTURE_DIMENSION = 8192;
@@ -67,10 +69,13 @@ export function createTreeImpostorRenderTarget(
   return renderTarget;
 }
 
-export function configureTreeImpostorAtlasTexture(texture: THREE.Texture): void {
+export function configureTreeImpostorAtlasTexture(
+  texture: THREE.Texture,
+  customMipmaps = false,
+): void {
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.generateMipmaps = true;
+  texture.generateMipmaps = !customMipmaps;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.anisotropy = Math.max(texture.anisotropy, TREE_IMPOSTOR_ATLAS_ANISOTROPY);
@@ -94,6 +99,7 @@ export function createTreeImpostorDataTexture(
   name: string,
 ): THREE.DataTexture {
   validateTreeImpostorRenderTargetSize(width, height);
+  const mipmaps = createTreeImpostorMipmaps(pixels);
   const texture = new THREE.DataTexture(
     pixels,
     width,
@@ -103,7 +109,17 @@ export function createTreeImpostorDataTexture(
   );
   texture.name = name;
   texture.colorSpace = THREE.NoColorSpace;
-  configureTreeImpostorAtlasTexture(texture);
+  texture.mipmaps = mipmaps.length > 0
+    ? [
+        { data: pixels, width, height },
+        ...mipmaps.map(({ data, width: mipWidth, height: mipHeight }) => ({
+          data,
+          width: mipWidth,
+          height: mipHeight,
+        })),
+      ]
+    : [];
+  configureTreeImpostorAtlasTexture(texture, mipmaps.length > 0);
   texture.needsUpdate = true;
   return texture;
 }
@@ -132,6 +148,12 @@ export async function readCleanedTreeImpostorAtlasTextures(
     albedo: createTreeImpostorDataTexture(albedo, width, height, albedoTarget.texture.name),
     normalDepth: createTreeImpostorDataTexture(normalDepth, width, height, normalDepthTarget.texture.name),
   };
+}
+
+function createTreeImpostorMipmaps(
+  pixels: Uint8Array,
+): readonly TreeImpostorMipLevel[] {
+  return treeImpostorPixelLayoutFor(pixels)?.mipmaps ?? [];
 }
 
 function requireTreeImpostorReadback(
