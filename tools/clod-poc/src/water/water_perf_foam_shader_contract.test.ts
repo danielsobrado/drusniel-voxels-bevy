@@ -5,7 +5,7 @@ const PERF_SOURCE = readFileSync(new URL("./waterPerfNodeMaterial.ts", import.me
 const HQ_SOURCE = readFileSync(new URL("./waterNodeMaterial.ts", import.meta.url), "utf8");
 const FOAM_SOURCE = readFileSync(new URL("./water_foam_nodes.ts", import.meta.url), "utf8");
 
- describe("performance water foam shader contract", () => {
+describe("performance water foam shader contract", () => {
   it("uses the same coherent foam authority as HQ water", () => {
     expect(PERF_SOURCE).toContain("buildWaterFoamNodes");
     expect(HQ_SOURCE).toContain("buildWaterFoamNodes");
