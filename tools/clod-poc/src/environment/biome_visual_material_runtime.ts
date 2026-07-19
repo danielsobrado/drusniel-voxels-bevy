@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { GrassController } from "../runtime/vegetation/grass_controller.js";
 import type { TerrainMaterialHandle } from "../rendering/terrain_material.js";
 import type { TerrainMaterialController } from "../terrain/material/terrain_material_controller.js";
+import { installBiomeVisualAcceptanceApi } from "./biome_visual_acceptance_api.js";
 import {
   createBiomeVisualMaterialBinding,
   type BiomeMaterialBinding,
@@ -120,6 +121,7 @@ export function installBiomeVisualMaterialRouting(
   hookTerrainMaterialCreation(input.materialController, bindTerrainHandle, tick);
   hookGrassUpdate(input.grassController, tick);
   scanActiveMaterials();
+  if (typeof window !== "undefined") installBiomeVisualAcceptanceApi(input.scene, window);
 }
 
 function hookTerrainMaterialCreation(
