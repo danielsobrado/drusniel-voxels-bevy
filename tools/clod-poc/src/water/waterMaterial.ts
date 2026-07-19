@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { WaterVisualConfig } from "./waterConfig.js";
 import type { WaterMaterialParams, WaterMaterialHandle } from "./water_material_types.js";
+import { resolveWaterFoamDistanceFade } from "./water_foam_distance.js";
 import { makeWaterUniforms, syncWaterBodyUniformArrays, WATER_VERT, WATER_FRAG, type WaterUniforms } from "./water_material_uniforms.js";
 import {
   materialChurnDiagnostics,
@@ -13,6 +14,7 @@ export type { WaterMaterialParams, WaterMaterialHandle } from "./water_material_
 export { makeWaterUniforms, waterLevelColor, type WaterUniforms } from "./water_material_uniforms.js";
 
 export function applyWaterVisual(uniforms: WaterUniforms, v: WaterVisualConfig): void {
+  const foamDistance = resolveWaterFoamDistanceFade(v.foam);
   uniforms.uShallowColor.value.setRGB(v.shallowColor[0], v.shallowColor[1], v.shallowColor[2]);
   uniforms.uDeepColor.value.setRGB(v.deepColor[0], v.deepColor[1], v.deepColor[2]);
   uniforms.uFoamColor.value.setRGB(v.foamColor[0], v.foamColor[1], v.foamColor[2]);
@@ -31,6 +33,8 @@ export function applyWaterVisual(uniforms: WaterUniforms, v: WaterVisualConfig):
   uniforms.uShoreFoamEnd.value = v.shoreFoamEnd;
   uniforms.uShoreDistFoamStart.value = v.foam.shoreDistanceStart;
   uniforms.uShoreDistFoamEnd.value = v.foam.shoreDistanceEnd;
+  uniforms.uFoamDetailFadeStartM.value = foamDistance.startM;
+  uniforms.uFoamDetailFadeEndM.value = foamDistance.endM;
   syncWaterBodyUniformArrays(uniforms, v.bodies);
   uniforms.uFoamNoiseScale.value = v.foam.noiseScale;
   uniforms.uFoamShoreStrength.value = v.foam.shoreStrength;
