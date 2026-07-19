@@ -1,5 +1,4 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,10 +13,10 @@ import {
   stringArg,
 } from "./water-harness.js";
 import {
-  assertWaterFoamAcceptancePosesMatch,
-  extractWaterFoamAcceptancePoses,
-  type WaterFoamAcceptancePoses,
-} from "./water-foam-pose-parity.js";
+  runWaterFoamRendererMatrixLeg,
+  waterFoamRendererMatrixLegKey,
+  type WaterFoamRendererMatrixLegResult,
+} from "./water-foam-renderer-matrix-leg.js";
 import {
   evaluateWaterFoamQualityParity,
   type WaterFoamQualityParityResult,
@@ -27,36 +26,8 @@ import {
   type WaterFoamRendererParityResult,
 } from "./water-foam-renderer-parity-contract.js";
 import type { WaterFoamAcceptanceRenderer } from "./water-foam-renderer-profile.js";
-import { extractWaterFoamAcceptanceMetrics } from "./water-foam-report-metrics.js";
-import type { FoamVisualAcceptanceInput } from "./water-foam-visual-contract.js";
 
 const RENDERERS: readonly WaterFoamAcceptanceRenderer[] = ["webgpu", "webgl"];
-
-interface LegResult {
-  readonly renderer: WaterFoamAcceptanceRenderer;
-  readonly quality: WaterFoamAcceptanceQuality;
-  readonly reportPath: string;
-  readonly processStatus: number | null;
-  readonly reportFound: boolean;
-  readonly passed: boolean;
-  readonly poseParity: boolean;
-  readonly failures: readonly string[];
-  readonly metrics: FoamVisualAcceptanceInput | null;
-  readonly poses: WaterFoamAcceptancePoses | null;
-}
-
-interface ParsedReport {
-  readonly quality?: unknown;
-  readonly renderer?: {
-    readonly requested?: unknown;
-    readonly actual?: unknown;
-  };
-  readonly acceptance?: {
-    readonly passed?: unknown;
-    readonly failures?: unknown;
-  };
-  readonly [key: string]: unknown;
-}
 
 function main(): void {
   const args = parseCliArgs(process.argv.slice(2));
@@ -68,9 +39,9 @@ function main(): void {
 
   const runnerPath = fileURLToPath(new URL("./water-foam-visual-acceptance.ts", import.meta.url));
   const tsxCli = createRequire(import.meta.url).resolve("tsx/cli");
-  const legs: LegResult[] = [];
+  const legs: WaterFoamRendererMatrixLegResult[] = [];
 
-  const canonical = runLeg({
+  const canonical = runWaterFoamRendererMatrixLeg({
     renderer: "webgpu",
     quality: "high",
     seed,
@@ -89,7 +60,7 @@ function main(): void {
   for (const renderer of RENDERERS) {
     for (const quality of WATER_FOAM_ACCEPTANCE_QUALITIES) {
       if (renderer === "webgpu" && quality === "high") continue;
-      legs.push(runLeg({
+      legs.push(runWaterFoamRendererMatrixLeg({
         renderer,
         quality,
         seed,
@@ -104,22 +75,25 @@ function main(): void {
     }
   }
 
-  const byKey = new Map(legs.map((leg) => [legKey(leg.renderer, leg.quality), leg]));
+  const byKey = new Map(legs.map((leg) => [
+    waterFoamRendererMatrixLegKey(leg.renderer, leg.quality),
+    leg,
+  ]));
   const webGpuQualityParity = evaluateQualityParity(
-    byKey.get(legKey("webgpu", "high")),
-    byKey.get(legKey("webgpu", "low")),
+    byKey.get(waterFoamRendererMatrixLegKey("webgpu", "high")),
+    byKey.get(waterFoamRendererMatrixLegKey("webgpu", "low")),
     "WebGPU high/low",
   );
   const webGlQualityParity = evaluateQualityParity(
-    byKey.get(legKey("webgl", "high")),
-    byKey.get(legKey("webgl", "low")),
+    byKey.get(waterFoamRendererMatrixLegKey("webgl", "high")),
+    byKey.get(waterFoamRendererMatrixLegKey("webgl", "low")),
     "WebGL high/low",
   );
   const rendererParity = Object.fromEntries(WATER_FOAM_ACCEPTANCE_QUALITIES.map((quality) => [
     quality,
     evaluateRendererParity(
-      byKey.get(legKey("webgpu", quality)),
-      byKey.get(legKey("webgl", quality)),
+      byKey.get(waterFoamRendererMatrixLegKey("webgpu", quality)),
+      byKey.get(waterFoamRendererMatrixLegKey("webgl", quality)),
       `${quality} WebGL/WebGPU`,
     ),
   ])) as Record<WaterFoamAcceptanceQuality, WaterFoamRendererParityResult>;
@@ -155,114 +129,9 @@ function main(): void {
   }
 }
 
-function runLeg(options: {
-  readonly renderer: WaterFoamAcceptanceRenderer;
-  readonly quality: WaterFoamAcceptanceQuality;
-  readonly seed: string;
-  readonly world: number;
-  readonly sourceUrl?: string;
-  readonly outRoot: string;
-  readonly runnerPath: string;
-  readonly tsxCli: string;
-  readonly canonicalReportPath: string | null;
-  readonly canonicalPoses: WaterFoamAcceptancePoses | null;
-}): LegResult {
-  const output = join(options.outRoot, options.renderer, options.quality);
-  const reportPath = join(output, "report.json");
-  mkdirSync(output, { recursive: true });
-  rmSync(reportPath, { force: true });
-  const failures: string[] = [];
-
-  if (options.renderer !== "webgpu" || options.quality !== "high") {
-    if (!options.canonicalReportPath || !options.canonicalPoses) {
-      return failedLeg(options.renderer, options.quality, reportPath, [
-        "canonical WebGPU-high pose report is unavailable",
-      ]);
-    }
-  }
-
-  const childArgs = [
-    options.tsxCli,
-    options.runnerPath,
-    `--renderer=${options.renderer}`,
-    `--quality=${options.quality}`,
-    `--seed=${options.seed}`,
-    `--world=${options.world}`,
-    `--out=${output}`,
-  ];
-  if (options.sourceUrl) childArgs.push(`--url=${options.sourceUrl}`);
-  if (options.canonicalReportPath) childArgs.push(`--pose-report=${options.canonicalReportPath}`);
-
-  const child = spawnSync(process.execPath, childArgs, {
-    cwd: process.cwd(),
-    env: process.env,
-    stdio: "inherit",
-  });
-  if (child.error) failures.push(child.error.message);
-  if (child.status !== 0) failures.push(`acceptance process exited with status ${String(child.status)}`);
-  if (!existsSync(reportPath)) {
-    failures.push(`acceptance report was not written: ${reportPath}`);
-    return failedLeg(options.renderer, options.quality, reportPath, failures, child.status);
-  }
-
-  let parsed: ParsedReport;
-  try {
-    parsed = JSON.parse(readFileSync(reportPath, "utf8")) as ParsedReport;
-  } catch (error) {
-    failures.push(`could not parse acceptance report: ${message(error)}`);
-    return failedLeg(options.renderer, options.quality, reportPath, failures, child.status, true);
-  }
-  if (parsed.quality !== options.quality) {
-    failures.push(`report quality ${String(parsed.quality)} did not equal ${options.quality}`);
-  }
-  if (parsed.renderer?.requested !== options.renderer) {
-    failures.push(`requested renderer ${String(parsed.renderer?.requested)} did not equal ${options.renderer}`);
-  }
-  if (parsed.renderer?.actual !== options.renderer) {
-    failures.push(`actual renderer ${String(parsed.renderer?.actual)} did not equal ${options.renderer}`);
-  }
-  if (parsed.acceptance?.passed !== true) failures.push(...reportFailures(parsed.acceptance?.failures));
-
-  let metrics: FoamVisualAcceptanceInput | null = null;
-  let poses: WaterFoamAcceptancePoses | null = null;
-  try {
-    metrics = extractWaterFoamAcceptanceMetrics(parsed);
-  } catch (error) {
-    failures.push(message(error));
-  }
-  try {
-    poses = extractWaterFoamAcceptancePoses(parsed);
-  } catch (error) {
-    failures.push(message(error));
-  }
-
-  let poseParity = options.canonicalPoses === null;
-  if (options.canonicalPoses && poses) {
-    try {
-      assertWaterFoamAcceptancePosesMatch(options.canonicalPoses, poses);
-      poseParity = true;
-    } catch (error) {
-      failures.push(message(error));
-    }
-  }
-
-  return {
-    renderer: options.renderer,
-    quality: options.quality,
-    reportPath,
-    processStatus: child.status,
-    reportFound: true,
-    passed: failures.length === 0 && metrics !== null && poses !== null && poseParity,
-    poseParity,
-    failures,
-    metrics,
-    poses,
-  };
-}
-
 function evaluateQualityParity(
-  high: LegResult | undefined,
-  low: LegResult | undefined,
+  high: WaterFoamRendererMatrixLegResult | undefined,
+  low: WaterFoamRendererMatrixLegResult | undefined,
   label: string,
 ): WaterFoamQualityParityResult {
   if (!high?.passed || !low?.passed || !high.metrics || !low.metrics) {
@@ -272,8 +141,8 @@ function evaluateQualityParity(
 }
 
 function evaluateRendererParity(
-  webGpu: LegResult | undefined,
-  webGl: LegResult | undefined,
+  webGpu: WaterFoamRendererMatrixLegResult | undefined,
+  webGl: WaterFoamRendererMatrixLegResult | undefined,
   label: string,
 ): WaterFoamRendererParityResult {
   if (!webGpu?.passed || !webGl?.passed || !webGpu.metrics || !webGl.metrics) {
@@ -290,36 +159,8 @@ function unavailableRendererParity(failure: string): WaterFoamRendererParityResu
   return { passed: false, failures: [failure], measurements: {} };
 }
 
-function failedLeg(
-  renderer: WaterFoamAcceptanceRenderer,
-  quality: WaterFoamAcceptanceQuality,
-  reportPath: string,
-  failures: readonly string[],
-  processStatus: number | null = null,
-  reportFound = false,
-): LegResult {
-  return {
-    renderer,
-    quality,
-    reportPath,
-    processStatus,
-    reportFound,
-    passed: false,
-    poseParity: false,
-    failures,
-    metrics: null,
-    poses: null,
-  };
-}
-
-function reportFailures(value: unknown): string[] {
-  if (!Array.isArray(value)) return ["acceptance report did not pass"];
-  const failures = value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
-  return failures.length > 0 ? failures : ["acceptance report did not pass"];
-}
-
 function collectFailures(
-  legs: readonly LegResult[],
+  legs: readonly WaterFoamRendererMatrixLegResult[],
   webGpuQualityParity: WaterFoamQualityParityResult,
   webGlQualityParity: WaterFoamQualityParityResult,
   rendererParity: Readonly<Record<WaterFoamAcceptanceQuality, WaterFoamRendererParityResult>>,
@@ -332,10 +173,6 @@ function collectFailures(
       rendererParity[quality].failures.map((failure) => `${quality} renderer parity: ${failure}`),
     ),
   ];
-}
-
-function legKey(renderer: WaterFoamAcceptanceRenderer, quality: WaterFoamAcceptanceQuality): string {
-  return `${renderer}/${quality}`;
 }
 
 function message(error: unknown): string {
