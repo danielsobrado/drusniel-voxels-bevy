@@ -29,15 +29,24 @@ export interface SunLightGpuAtlasNodes {
   readonly atlasInside: TslNode;
 }
 
+export interface SunLightGpuAtlasDebugOverrideState {
+  readonly enabled: boolean;
+  readonly visibility: number;
+}
+
 interface SharedUniformState {
   readonly texture: THREE.Texture;
   readonly originX: TslNode;
   readonly originZ: TslNode;
   readonly worldSize: TslNode;
   readonly valid: TslNode;
+  readonly debugOverrideEnabled: TslNode;
+  readonly debugOverrideVisibility: TslNode;
 }
 
 let shared: SharedUniformState | null = null;
+let debugOverrideEnabled = 0;
+let debugOverrideVisibility = 1;
 
 export function buildSunLightGpuAtlasNodes(worldXZ: TslNode): SunLightGpuAtlasNodes {
   const refs = getOrCreateSharedState();
@@ -61,8 +70,34 @@ export function buildSunLightGpuAtlasNodes(worldXZ: TslNode): SunLightGpuAtlasNo
     abs(sampled.sub(MISSING_VISIBILITY_CENTER)),
   );
   const resolvedSample = (mix as (...args: TslNode[]) => TslNode)(float(1), sampled, knownSample);
-  const visibility = (mix as (...args: TslNode[]) => TslNode)(float(1), resolvedSample, atlasInside);
+  const atlasVisibility = (mix as (...args: TslNode[]) => TslNode)(float(1), resolvedSample, atlasInside);
+  const visibility = (mix as (...args: TslNode[]) => TslNode)(
+    atlasVisibility,
+    refs.debugOverrideVisibility,
+    refs.debugOverrideEnabled,
+  );
   return { visibility, atlasInside };
+}
+
+export function setSunLightGpuAtlasDebugOverride(
+  value: number | null,
+): SunLightGpuAtlasDebugOverrideState {
+  if (value === null) {
+    debugOverrideEnabled = 0;
+    debugOverrideVisibility = 1;
+  } else {
+    if (!Number.isFinite(value)) throw new Error("sun-light GPU atlas debug override must be finite or null");
+    debugOverrideEnabled = 1;
+    debugOverrideVisibility = Math.min(1, Math.max(0, value));
+  }
+  if (shared) {
+    shared.debugOverrideEnabled.value = debugOverrideEnabled;
+    shared.debugOverrideVisibility.value = debugOverrideVisibility;
+  }
+  return {
+    enabled: debugOverrideEnabled > 0,
+    visibility: debugOverrideVisibility,
+  };
 }
 
 function syncSharedState(source: SunLightGpuAtlasState): void {
@@ -83,6 +118,8 @@ function getOrCreateSharedState(): SharedUniformState {
       originZ: uniform(source.originZ) as TslNode,
       worldSize: uniform(Math.max(ATLAS_EDGE_EPSILON, source.worldSize)) as TslNode,
       valid: uniform(source.valid) as TslNode,
+      debugOverrideEnabled: uniform(debugOverrideEnabled) as TslNode,
+      debugOverrideVisibility: uniform(debugOverrideVisibility) as TslNode,
     };
     subscribeSunLightGpuAtlas(syncSharedState);
   }

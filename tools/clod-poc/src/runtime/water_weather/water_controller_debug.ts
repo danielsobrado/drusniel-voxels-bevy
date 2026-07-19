@@ -84,6 +84,16 @@ export function installWaterDebugApi(
       yaw,
     };
   };
+  const setWaterFoamSunVisibilityOverride = async (value?: number | null) => {
+    const visibility = value === undefined || value === null ? null : Number(value);
+    if (visibility !== null && !Number.isFinite(visibility)) {
+      throw new Error("foam sun visibility override must be finite or null");
+    }
+    const { setSunLightGpuAtlasDebugOverride } = await import(
+      "../../terrain/sun_visibility/sun_light_gpu_atlas_nodes.js"
+    );
+    return setSunLightGpuAtlasDebugOverride(visibility);
+  };
   const waterDebugInfo = () => {
     const uiState = deps.getUiState();
     return {
@@ -122,6 +132,7 @@ export function installWaterDebugApi(
     setWaterDebugMode,
     setShoreSurfBand,
     setCameraPose,
+    setWaterFoamSunVisibilityOverride,
     waterDebugInfo,
   });
 }
