@@ -12,6 +12,11 @@ import { surfaceHeight } from "../../terrain/terrain.js";
 import { createWaterController } from "./water_controller.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { waterUiState } from "../../app/clod_app_state.js";
+import {
+  createEnvironmentQueryRuntime,
+  type ComposedEnvironmentQuery,
+  type EnvironmentQueryRuntime,
+} from "../../environment_query/runtime.js";
 
 const INFINITE_ISLANDS_SCENE = "infinite-islands";
 const INFINITE_WATER_RUNTIME_WORLD_CELLS = 1_000_000_000;
@@ -32,6 +37,7 @@ export interface WaterStartupInput {
 
 export interface WaterStartupResult {
   waterController: Awaited<ReturnType<typeof createWaterController>>;
+  environmentQuery: ComposedEnvironmentQuery | null;
   waterField: Awaited<ReturnType<typeof createWaterController>>["field"];
   waterDebugState: Awaited<ReturnType<typeof createWaterController>>["debugState"];
   makeWaterVisual: () => ReturnType<Awaited<ReturnType<typeof createWaterController>>["makeVisual"]>;
@@ -63,22 +69,43 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
   } = input;
   const runtimeWorldCells = waterRuntimeWorldCells(searchParams, worldCells, hydrologySystem);
   const streamedWorldWater = runtimeWorldCells === INFINITE_WATER_RUNTIME_WORLD_CELLS;
+  const environmentQueryRuntime: EnvironmentQueryRuntime | null = hydrologySystem
+    ? createEnvironmentQueryRuntime(hydrologySystem)
+    : null;
 
-  const waterController = await createWaterController({
-    scene,
-    nodes: lod0Nodes,
-    waterConfig,
-    worldCells: runtimeWorldCells,
-    isWebGpu,
-    surfaceHeight,
-    hydrologySystem,
-    camera,
-    getSunDirection: () => currentLighting().sunDirection,
-    getUiState: () => waterUiState(state),
-    searchParams,
-    devMode: import.meta.env.DEV,
-    borderCoastOceanConfig,
-  });
+  let waterController: Awaited<ReturnType<typeof createWaterController>>;
+  try {
+    waterController = await createWaterController({
+      scene,
+      nodes: lod0Nodes,
+      waterConfig,
+      worldCells: runtimeWorldCells,
+      isWebGpu,
+      surfaceHeight,
+      hydrologySystem,
+      camera,
+      getSunDirection: () => currentLighting().sunDirection,
+      getUiState: () => waterUiState(state),
+      searchParams,
+      devMode: import.meta.env.DEV,
+      borderCoastOceanConfig,
+    });
+  } catch (error) {
+    environmentQueryRuntime?.dispose();
+    throw error;
+  }
+
+  const disposeWaterController = waterController.dispose.bind(waterController);
+  let disposed = false;
+  waterController.dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    try {
+      disposeWaterController();
+    } finally {
+      environmentQueryRuntime?.dispose();
+    }
+  };
 
   const deepOceanConfig = borderCoastOceanConfig.deepOcean;
   const oceanSampler = deepOceanConfig.enabled
@@ -111,6 +138,7 @@ export async function runWaterStartup(input: WaterStartupInput): Promise<WaterSt
 
   return {
     waterController,
+    environmentQuery: environmentQueryRuntime?.query ?? null,
     waterField: waterController.field,
     waterDebugState: waterController.debugState,
     makeWaterVisual: () => waterController.makeVisual(),
