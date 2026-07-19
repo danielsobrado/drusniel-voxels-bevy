@@ -86,7 +86,7 @@
     "trees:wire-shadow-proxies": "npm run trees:wire-tree7-shadows && npm run trees:wire-tree8-proxies && npm run trees:repair-generated",
     "trees:wire-shadow-proxies:check": "npm run trees:wire-tree7-shadows:check && npm run trees:wire-tree8-proxies:check && npm run trees:repair-generated:check",
     "trees:wire-parity": "npm run trees:wire-shadow-proxies && npm run trees:wire-tree9-wgsl && npm run trees:wire-tree9-config",
-    "trees:wire-parity:check": "npm run trees:wire-shadow-proxies:check && npm run trees:wire-tree8-proxies:check && npm run trees:wire-tree9-wgsl:check && npm run trees:wire-tree9-config:check",
+    "trees:wire-parity:check": "npm run trees:wire-shadow-proxies:check && npm run trees:wire-tree9-wgsl:check && npm run trees:wire-tree9-config:check",
     "trees:check-parity-manifest": "tsx tools/verify-tree-parity-evidence.ts --check-manifest",
     "trees:preflight-parity": "npm run trees:wire-parity:check && npm run trees:check-parity-manifest",
     "trees:qa-parity": "npm run trees:preflight-parity && npm run typecheck && npm run test",
