@@ -17,6 +17,7 @@ function diagnostics(
     shadeCoverageFloor: 0.55,
     rapidEligibility: "speed-times-drop-times-river",
     cpuFieldSamples: 0,
+    webGpuUncapturedErrors: 0,
     distanceFade: {
       valid: true,
       version: 2,
@@ -84,5 +85,14 @@ describe("water foam runtime contract", () => {
     expect(result.passed).toBe(false);
     expect(result.failures.join("\n")).toMatch(/CPU field samples/);
     expect(result.failures.join("\n")).toMatch(/sun atlas valid/);
+  });
+
+  it("rejects any session-cumulative WebGPU uncaptured error", () => {
+    const result = evaluateWaterFoamRuntimeContract("high", diagnostics({
+      webGpuUncapturedErrors: 1,
+    }));
+
+    expect(result.passed).toBe(false);
+    expect(result.failures.join("\n")).toMatch(/WebGPU uncaptured errors 1 did not equal 0/);
   });
 });
