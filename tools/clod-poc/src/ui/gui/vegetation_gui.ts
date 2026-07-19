@@ -16,6 +16,7 @@ import { TREE_DEPTH_PREPASS_MAX_LODS } from "../../trees/tree_depth_prepass_runt
 import type { TreeSettings } from "../../trees/index.js";
 import { understoryDepthPrepassFromQuery } from "../../understory/understory_depth_prepass_runtime.js";
 import type { UnderstorySettings } from "../../understory/understory_config.js";
+import { addGravelBarGui } from "./gravel_bar_gui.js";
 import type { GuiController } from "./gui_controller.js";
 
 export const TREE_DISTANCE_GUI_MAX_M = 1600;
@@ -232,6 +233,7 @@ export function createVegetationGui(
   const stoneTotalController = stoneFolder.add(state, "stoneTotal").name("total").disable();
   const stoneClassSummaryController = stoneFolder.add(state, "stoneClassSummary").name("L/M/S").disable();
   const stoneVisibleController = stoneFolder.add(state, "stoneVisible").name("visible").disable();
+  addGravelBarGui(stoneFolder, { rebuildStones: stoneActions.rebuild });
   stoneFolder.add(stoneActions, "rebuild").name("rebuild");
 
   const refreshTreeStats = () => {

@@ -8,6 +8,7 @@ water:
   hydrology:
     gravel_bars:
       enabled: true
+      stones_enabled: true
       strength: 5
       seed_salt: 77.9
       longitudinal_period_m: 2
@@ -30,6 +31,7 @@ afterEach(() => {
 describe("gravel bar hydrology config", () => {
   it("parses and clamps inverted or unsafe ranges", () => {
     const gravel = parseWaterConfig(MINIMAL_WATER, null).hydrology.gravelBars;
+    expect(gravel.stonesEnabled).toBe(true);
     expect(gravel.strength).toBe(1);
     expect(gravel.seedSalt).toBe(77);
     expect(gravel.longitudinalPeriodM).toBe(8);
