@@ -14,6 +14,7 @@
 import { BufferAttribute, BufferGeometry, Vector3 } from "three";
 import { fbm3, ridged3 } from "./noise.js";
 import { Rng } from "./seed.js";
+import { readStoneStyle, rockFacetRounding, softenRockParams } from "./stone_style.js";
 
 export interface RockParams {
   /** overall radius (m) */
@@ -155,7 +156,11 @@ export function buildRock(
   rng: Rng,
   detail: number,
 ): BuiltRock {
-  const p: RockParams = ROCK_PRESETS[preset];
+  // Style softening keeps determinism per (style, seed, preset, detail);
+  // the realistic default leaves the params byte-identical to before.
+  const style = readStoneStyle();
+  const p: RockParams = softenRockParams(ROCK_PRESETS[preset], style.geometrySoften);
+  const facetRounding = rockFacetRounding(style.geometrySoften);
   const seedA = rng.u32() & 0x7fffffff;
   const seedB = rng.u32() & 0x7fffffff;
   const seedC = rng.u32() & 0x7fffffff;
@@ -204,7 +209,7 @@ export function buildRock(
         const rCut = c.off / dn;
         if (rCut < r) {
           const depth = Math.min((r - rCut) * 3, 1);
-          r = rCut + (r - rCut) * 0.035; // slight rounding on the facet
+          r = rCut + (r - rCut) * facetRounding; // slight rounding on the facet
           cav = Math.max(cav, depth * 0.4);
         }
       }

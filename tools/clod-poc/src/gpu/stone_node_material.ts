@@ -34,6 +34,7 @@ import { STONE_META_UNDERWATER_FLAG } from "../stones/stone_instance_meta.js";
 import { sampleCarvedBedBilinearTsl, sampleHydrologyBilinearTsl } from "./placement_height.js";
 import { readRiverMaterialSettings } from "../water/riverMaterialRuntime.js";
 import { GRASS_SHARED_BASE_LINEAR } from "../grass/grass_palette.js";
+import { stoneStyleUniforms } from "../stones/stone_style.js";
 
 export interface StoneHydrologyWater {
   /** RGBA32F hydrology field; G = wet mask, B = carved-bed Y. */
@@ -143,14 +144,20 @@ export function createStoneNodeMaterial(
   const n0: TslNode = normalNode;
   const n: TslNode = frontFacing.select(n0, n0.negate());
 
+  const style = stoneStyleUniforms() as { wrap: TslNode; grain: TslNode; flatten: TslNode };
   const hue = hash2(floor(worldPos.xz.mul(0.5)));
   const lightStone = vec3(0.52, 0.5, 0.47);
   const darkStone = vec3(0.34, 0.33, 0.32);
-  let rock: TslNode = mix(darkStone, lightStone, smoothstep(0.0, 1.0, vdata.y));
+  const strataColor: TslNode = mix(darkStone, lightStone, smoothstep(0.0, 1.0, vdata.y));
+  let rock: TslNode = strataColor;
   rock = mix(rock, rock.mul(vec3(1.05, 0.98, 0.9)), hue.mul(0.5));
 
   const grain = hash2(floor(worldPos.xz.mul(7.0).add(worldPos.y)));
-  rock = rock.mul(grain.mul(0.15).add(0.9));
+  // Grain amplitude scales with the style (amp 0.15 at realistic keeps the
+  // original 0.9 base exactly; amp 0 collapses to a flat 0.975 factor).
+  const grainAmp: TslNode = style.grain.mul(0.15);
+  rock = rock.mul(grain.mul(grainAmp).add(float(0.975).sub(grainAmp.mul(0.5))));
+  rock = mix(rock, strataColor, style.flatten);
 
   const up = clamp(n.y, 0.0, 1.0);
   rock = mix(rock, vec3(0.6, 0.55, 0.47), up.mul(0.18));
@@ -179,7 +186,9 @@ export function createStoneNodeMaterial(
   }
 
   const ao = clamp(vdata.w, 0.0, 1.0);
-  const sun = max(dot(n, uLight), 0.0);
+  const nl: TslNode = dot(n, uLight);
+  // Style wrap blends the hard n·l sun term toward a half-Lambert ramp.
+  const sun = mix(max(nl, 0.0), clamp(nl.mul(0.5).add(0.5), 0.0, 1.0), style.wrap);
   const sky = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
   const hemi = mix(uGround, uSky, sky);
   const direct = uSun.mul(sun);

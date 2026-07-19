@@ -1,7 +1,7 @@
 # clod-poc Stylized Grass & Stone Look Plan
 
 Created: 2026-07-18
-Status: **G1–G6 IMPLEMENTED + REVIEW-FIXED + VERIFIED (2026-07-19); S1 parked pending art-direction call**
+Status: **COMPLETE 2026-07-19 — G1–G6 + S1 implemented and verified; realistic stays the default, styles selectable in the GUI**
 Reference: https://github.com/cortiz2894/stylized-components (GrassField system analysis)
 
 ## Current position
@@ -15,7 +15,7 @@ Reference: https://github.com/cortiz2894/stylized-components (GrassField system 
 | G4 — dry/lush patches | Done | Done (compute-side, dispatch 0.0–0.1 ms unchanged) |
 | G5 — stone dirt/trampling | Done (PR #190 **+ 2026-07-19 raster-dispatch fix — effect was inert without it**) | Done (GUI toggle A/B: 1,247 scene px change; perf no-regression) |
 | G6 — per-blade sun-light | Done (PR #219 + #223) | Done (GUI shade-strength A/B: blade-scale px change; gates green) |
-| S1 — stylized stone preset | Parked | Art-direction decision for the user |
+| S1 — stylized stone preset | Done as optional GUI presets (realistic/stylized/toon) | Done (single-boot dropdown A/B; default stays realistic) |
 
 ## Goal
 
@@ -405,3 +405,19 @@ ground-level poses judge blade shading; `clodPerf=1` disables vegetation;
     bilinear contact-field sampling if the 1 m cell blockiness bothers in
     close-ups; G1–G4 blade-level close-up A/B still limited by the
     pose-vs-placement quirks recorded above.
+- 2026-07-19 S1 DONE as optional selectable style presets (user request):
+  - New `src/stones/stone_style.ts` — named presets `realistic` (default,
+    byte-identical to the previous look), `stylized`, `toon`. Each preset sets
+    live shading uniforms (half-Lambert wrap on the sun term, grain amplitude,
+    albedo flatten toward clean strata bands) plus a `geometrySoften` factor
+    that scales macro/ridged/micro/strata displacement and increases fracture
+    facet rounding in `rock_builder` (applies on stone rebuild).
+  - GUI: "style preset" dropdown in the stones folder; shading switches
+    instantly, and the change triggers a stone rebuild so the softened
+    silhouettes apply too. Deterministic per (style, seed, preset, detail),
+    locked by `src/stones/stone_style.test.ts`.
+  - Visual evidence (single boot, identical pose X2048 Z1320 H45 across all
+    three shots): realistic→stylized changes 25,729 sampled scene pixels
+    (mean ΔRGB 42), realistic→toon 56,550 (Δ 31) — effect scales with preset
+    intensity. Shots: `shots/grass-look/s1-realistic/stylized/toon.png`.
+  - Gates: typecheck ✓, stone tests 41/41 ✓, build ✓.

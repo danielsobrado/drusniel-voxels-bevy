@@ -8,6 +8,7 @@ import { GRASS_SHADER_MODES } from "../../grass.js";
 import { readGrassContactSettings, updateGrassContactSettings } from "../../grass/grass_contact_patches.js";
 import { hexToLinearRgb, linearRgbToHex } from "../../grass/grass_palette.js";
 import { grassSunVisibilityStrength, setGrassSunVisibilityStrength } from "../../gpu/grass_node_material.js";
+import { readStoneStyle, setStoneStyle, STONE_STYLE_NAMES, type StoneStyleName } from "../../stones/stone_style.js";
 import type { GrassController } from "../../runtime/vegetation/grass_controller.js";
 import type { StoneController } from "../../runtime/vegetation/stone_controller.js";
 import type { TreeController } from "../../runtime/vegetation/tree_controller.js";
@@ -265,6 +266,14 @@ export function createVegetationGui(
     refreshStoneStats();
     deps.updateInfo();
   });
+  const stoneStyleUi = { style: readStoneStyle().name as StoneStyleName };
+  stoneFolder.add(stoneStyleUi, "style", [...STONE_STYLE_NAMES]).name("style preset")
+    .onChange((name: StoneStyleName) => {
+      setStoneStyle(name);
+      // Shading uniforms update live; the rebuild regenerates geometry so the
+      // silhouette softening of the new style applies too.
+      stoneActions.rebuild();
+    });
   stoneFolder.add(state, "stoneDensity", 0, 2, 0.05).name("density").onFinishChange(stoneActions.rebuild);
   stoneFolder.add(state, "stoneMaxInstances", 0, 500000, 1000).name("max instances").onFinishChange(stoneActions.rebuild);
   stoneFolder.add(state, "stoneSeed", 0, 1000000, 1).name("seed").onFinishChange(stoneActions.rebuild);
