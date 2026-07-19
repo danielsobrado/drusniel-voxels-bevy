@@ -4,7 +4,7 @@
 # meet. Tuned 2026-07-12 alongside the far-clipmap refresh throttle.
 aerial_perspective:
   enabled: true
-  start_m: 260
+  start_m: 220
   end_m: 2600
-  strength: 0.5
-  color: [0.62, 0.72, 0.86]
+  strength: 0.62
+  color: [0.60, 0.65, 0.66]

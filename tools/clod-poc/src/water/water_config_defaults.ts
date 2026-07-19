@@ -15,7 +15,7 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
   alpha: 0.90,
   rippleCycle: 0.07,
   fresnelPower: 5.0,
-    rippleAmp: 0.32,
+  rippleAmp: 0.32,
   rippleSpeed: 0.52,
   rippleScaleA: 0.16,
   rippleScaleB: 0.105,
@@ -42,7 +42,7 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
   fresnel: {
     base: 0.045,
     power: 4.2,
-      normalFlatten: 0.92,
+    normalFlatten: 0.92,
   },
   color: {
     depthScale: 5.0,
@@ -50,7 +50,7 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
   },
   bodies: deriveDefaultWaterBodyPresets({
     shallowColor: [0.00, 0.32, 0.55],
-    deepColor: [0.02, 0.14, 0.24],
+    deepColor: [0.00, 0.025, 0.12],
     depthScale: 5.0,
     turbidity: 0.10,
   }),

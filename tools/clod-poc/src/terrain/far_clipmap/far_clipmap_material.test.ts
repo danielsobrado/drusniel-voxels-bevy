@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type * as THREE from "three";
+import farClipmapMaterialSource from "./far_clipmap_material.ts?raw";
 import {
   createFarClipmapMaterial,
   setFarClipmapMaterialDebugMode,
+  smoothFarClipmapLandHeights,
   type FarClipmapMaterial,
 } from "./far_clipmap_material.js";
 
@@ -67,5 +69,28 @@ describe("far clipmap WebGPU material debug modes", () => {
     expect(nodeUniforms.uDebugMode.value).toBe(3);
     setFarClipmapMaterialDebugMode(material, "final");
     expect(nodeUniforms.uDebugMode.value).toBe(0);
+  });
+});
+
+describe("far clipmap height smoothing", () => {
+  it("rounds an isolated dry-land peak without bleeding across water", () => {
+    const source = new Float32Array(3 * 3 * 4);
+    const water = new Float32Array(3 * 3 * 4);
+    source[(1 * 3 + 1) * 4] = 10;
+
+    smoothFarClipmapLandHeights(source, water, 3);
+    expect(source[(1 * 3 + 1) * 4]).toBeCloseTo(5);
+
+    source[(1 * 3 + 1) * 4] = 10;
+    water[(1 * 3 + 0) * 4 + 3] = 1;
+    smoothFarClipmapLandHeights(source, water, 3);
+    expect(source[(1 * 3 + 1) * 4]).toBe(10);
+  });
+});
+
+describe("far clipmap water routing", () => {
+  it("requires positive water depth before water can replace the land material", () => {
+    expect(farClipmapMaterialSource).toContain("const waterDepthMask: TslNode");
+    expect(farClipmapMaterialSource).toContain(".mul(waterDepthMask)");
   });
 });

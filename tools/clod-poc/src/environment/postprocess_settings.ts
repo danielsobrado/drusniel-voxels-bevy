@@ -125,7 +125,7 @@ const POST_PROCESS_FALLBACK_SETTINGS: Required<PostProcessSettings> = {
   aerialPerspectiveStart: 120,
   aerialPerspectiveEnd: 1800,
   aerialPerspectiveStrength: 0.35,
-  aerialPerspectiveColor: [0.62, 0.72, 0.86],
+  aerialPerspectiveColor: [0.60, 0.65, 0.66],
   cloudsEnabled: false,
   gtaoEnabled: false,
   froxelsEnabled: false,

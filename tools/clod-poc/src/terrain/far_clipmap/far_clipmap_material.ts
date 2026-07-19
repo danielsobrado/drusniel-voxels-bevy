@@ -342,7 +342,10 @@ function createWebGpuFarClipmapMaterial(input: {
   const terrainHeight: TslNode = rawHeight.mul(uniforms.uHeightScale).add(uniforms.uYOffset);
   const unifiedChannels: TslNode = tslSmoothstep(-0.5, 0.0, waterSample.w);
   const waterCoverage: TslNode = max(0.0, waterSample.w);
-  const waterMask: TslNode = tslSmoothstep(0.04, 0.35, waterCoverage).mul(unifiedChannels);
+  const waterDepthMask: TslNode = tslSmoothstep(0.02, 0.18, waterSample.x.sub(rawHeight));
+  const waterMask: TslNode = tslSmoothstep(0.04, 0.35, waterCoverage)
+    .mul(unifiedChannels)
+    .mul(waterDepthMask);
   const waterHeight: TslNode = waterSample.x.mul(uniforms.uHeightScale).add(uniforms.uYOffset).add(0.18);
   const height: TslNode = tslMix(terrainHeight, waterHeight, waterMask);
   const worldXZ: TslNode = positionGeometry.xz.mul(uniforms.uCellSize).add(uniforms.uRingOrigin);
@@ -357,7 +360,6 @@ function createWebGpuFarClipmapMaterial(input: {
   const normalZ: TslNode = sourceSample.z;
   const normalY: TslNode = max(0.0, normalX.mul(normalX).add(normalZ.mul(normalZ)).oneMinus()).sqrt();
   const sourceNormal: TslNode = tslVec3(normalX, normalY, normalZ).normalize();
-  const shadingNormal: TslNode = tslMix(sourceNormal, tslVec3(0.0, 1.0, 0.0), waterMask).normalize();
   const meadowColor: TslNode = tslVec3(0.30, 0.26, 0.18);
   const forestColor: TslNode = tslVec3(0.18, 0.22, 0.12);
   const swampColor: TslNode = tslVec3(0.18, 0.23, 0.13);
@@ -389,41 +391,13 @@ function createWebGpuFarClipmapMaterial(input: {
     terrainHeight,
   ).mul(tslSmoothstep(0.58, 0.9, normalY));
   const sunDirection: TslNode = tslVec3(0.38, 0.82, 0.34).normalize();
-  const directLight: TslNode = max(0.0, shadingNormal.dot(sunDirection));
+  const directLight: TslNode = max(0.0, sourceNormal.dot(sunDirection));
   const terrainLight: TslNode = max(0.5, normalY.mul(0.24).add(directLight.mul(0.55)).add(0.24));
   const rockyLandColor: TslNode = tslMix(biomeColor, mountainColor, max(slopeRock, elevationRock));
   const landColor: TslNode = tslMix(rockyLandColor, tslVec3(0.72, 0.74, 0.72), snowMask).mul(terrainLight);
-  const waterColor: TslNode = tslVec3(0.09, 0.19, 0.22);
-  const legacyTerrainColor: TslNode = tslMix(
-    waterColor,
-    landColor,
-    tslSmoothstep(uniforms.uSeaLevel.sub(0.25), uniforms.uSeaLevel.add(0.25), terrainHeight),
-  );
-  const shoreTint: TslNode = tslSmoothstep(0.0, 96.0, waterSample.z).oneMinus();
-  const bodyTint: TslNode = tslSmoothstep(1.0, 3.0, waterSample.y).mul(0.12);
-  const unifiedWaterColor: TslNode = tslMix(
-    waterColor,
-    tslVec3(0.13, 0.25, 0.26),
-    max(shoreTint.mul(0.45), bodyTint),
-  );
-  const terrainColor: TslNode = tslMix(legacyTerrainColor, unifiedWaterColor, waterMask);
-  const distanceFog: TslNode = tslSmoothstep(
-    uniforms.uClipInnerRadius,
-    uniforms.uClipOuterRadius.mul(0.72),
-    distance,
-  );
-  const lowlandFog: TslNode = tslSmoothstep(
-    uniforms.uClipInnerRadius,
-    uniforms.uClipOuterRadius.mul(0.6),
-    distance,
-  ).mul(tslSmoothstep(
-    uniforms.uSeaLevel.add(120),
-    uniforms.uSeaLevel.add(24),
-    terrainHeight,
-  ));
-  const fog: TslNode = max(distanceFog.mul(0.78), lowlandFog.mul(0.36));
-
-  const finalColor: TslNode = tslMix(terrainColor, tslVec3(0.55, 0.60, 0.60), fog);
+  // Distance fog is applied once in the shared post-process path so refined CLOD and
+  // clipmap terrain cross the same haze field instead of exposing a material boundary.
+  const finalColor: TslNode = landColor;
   // Debug-mode codes mirror the WebGL fragment shader: 1=biome, 2=height, 3=ownership.
   // Ownership colours the per-cell mask directly (amber = far clipmap owns as fallback,
   // blue = refined pages own) so the sector hand-off is provable from a capture.
@@ -443,7 +417,7 @@ function createWebGpuFarClipmapMaterial(input: {
     ownershipDebugColor,
     tslSelect(
       debugMode.greaterThan(1.5),
-      tslVec3(waterMask, waterMask, waterMask),
+      tslVec3(heightShade, heightShade, heightShade),
       tslSelect(debugMode.greaterThan(0.5), biomeColor, finalColor),
     ),
   );
@@ -705,6 +679,7 @@ export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMateri
       }
     }
   }
+  smoothFarClipmapLandHeights(data, waterData, gridResolution);
   if (input.deferUpload) return { fallbackSamples, exceptionSamples };
   if (sourceStorage && waterStorage) {
     sourceStorage.needsUpdate = true;
@@ -714,6 +689,40 @@ export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMateri
     waterTexture!.needsUpdate = true;
   }
   return { fallbackSamples, exceptionSamples };
+}
+
+export function smoothFarClipmapLandHeights(
+  sourceData: Float32Array,
+  waterData: Float32Array,
+  gridResolution: number,
+): void {
+  const resolution = Math.max(2, Math.floor(gridResolution));
+  if (resolution < 3) return;
+  const originalHeights = new Float32Array(resolution * resolution);
+  for (let i = 0; i < originalHeights.length; i++) originalHeights[i] = sourceData[i * 4] ?? 0;
+
+  const dryUnifiedSample = (x: number, z: number): boolean => {
+    const coverage = waterData[(z * resolution + x) * 4 + 3] ?? -1;
+    return coverage >= 0 && coverage <= 0.04;
+  };
+  for (let z = 1; z < resolution - 1; z++) {
+    for (let x = 1; x < resolution - 1; x++) {
+      if (
+        !dryUnifiedSample(x, z)
+        || !dryUnifiedSample(x - 1, z)
+        || !dryUnifiedSample(x + 1, z)
+        || !dryUnifiedSample(x, z - 1)
+        || !dryUnifiedSample(x, z + 1)
+      ) continue;
+      const center = z * resolution + x;
+      const smoothed = originalHeights[center] * 0.5
+        + (originalHeights[center - 1]
+          + originalHeights[center + 1]
+          + originalHeights[center - resolution]
+          + originalHeights[center + resolution]) * 0.125;
+      sourceData[center * 4] = smoothed;
+    }
+  }
 }
 
 export function commitFarClipmapMaterialSourceUpdate(
