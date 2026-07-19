@@ -38,10 +38,9 @@ describe("biome visual material routing", () => {
   });
 
   it("derives dew from wetness without stacking it on frost", () => {
-    expect(resolveBiomeVisualMaterialState(state({ wetness: 0.8, frostAmount: 0.25 }))).toMatchObject({
-      frost: 0.25,
-      dew: 0.6,
-    });
+    const resolved = resolveBiomeVisualMaterialState(state({ wetness: 0.8, frostAmount: 0.25 }));
+    expect(resolved.frost).toBe(0.25);
+    expect(resolved.dew).toBeCloseTo(0.6);
   });
 
   it("makes low-green grass drier and frost grass cooler", () => {

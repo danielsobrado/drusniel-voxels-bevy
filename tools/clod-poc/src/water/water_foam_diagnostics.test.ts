@@ -14,8 +14,13 @@ describe("water foam runtime diagnostics", () => {
   });
 
   it("reports the forced performance tier", () => {
-    const result = getWaterFoamRuntimeDiagnostics(new URLSearchParams("waterQuality=high&waterPerf=1"));
+    const result = getWaterFoamRuntimeDiagnostics(new URLSearchParams("waterPerf=1"));
     expect(result.qualityTier).toBe("low");
+  });
+
+  it("reports an explicit high-tier override in performance mode", () => {
+    const result = getWaterFoamRuntimeDiagnostics(new URLSearchParams("waterQuality=high&waterPerf=1"));
+    expect(result.qualityTier).toBe("high");
   });
 
   it("includes finite sun-atlas diagnostics", () => {

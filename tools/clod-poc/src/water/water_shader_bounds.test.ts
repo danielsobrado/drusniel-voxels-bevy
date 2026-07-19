@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import waterNodeMaterialSource from "./waterNodeMaterial.ts?raw";
 import waterPerfNodeMaterialSource from "./waterPerfNodeMaterial.ts?raw";
+import waterFoamNodesSource from "./water_foam_nodes.ts?raw";
 import { WATER_FRAG } from "./water_material_uniforms.js";
 
 describe("water shader world bounds", () => {
@@ -20,15 +21,16 @@ describe("water shader world bounds", () => {
   });
 
   it("fades perf shoreline foam across partially wet edge fragments", () => {
-    expect(waterPerfNodeMaterialSource).toContain(
-      "const wetFade: TslNode = smoothstep(0.005, 0.05, depth).mul(aBodyMask);",
+    expect(waterFoamNodesSource).toContain(
+      "const wetFade = smoothstep(0.005, 0.05, input.depth).mul(input.bodyMask);",
+    );
+    expect(waterFoamNodesSource).toContain(
+      "source.mul(pattern).mul(wetFade).mul(shadeCoverage)",
     );
     expect(waterPerfNodeMaterialSource).toContain(
-      "bankContact.mul(wetFade).mul(foamBreakup).mul(uFoamShoreStrength)",
+      "const farDetailFade: TslNode = float(1).sub(",
     );
-    expect(waterPerfNodeMaterialSource).toContain(
-      "const shoreDetailFade: TslNode = float(1).sub(smoothstep(0.25, 1.25, aLevel));",
-    );
+    expect(waterPerfNodeMaterialSource).toContain("foamNodes.coverage.mul(farDetailFade)");
     expect(waterPerfNodeMaterialSource).not.toContain("const foamHash:");
   });
 
