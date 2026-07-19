@@ -58,8 +58,9 @@ export interface AcceptanceSceneCacheEvidence {
   startup_reexecuted: number;
 }
 
+// GPU root-mesher knobs only — do not pin liveClodRootGpuMesher so traced worlds
+// follow the app default (CPU roots). Opt in via URL for A/B.
 const STREAMED_ROOT_GPU_PARAMS = {
-  liveClodRootGpuMesher: "1",
   liveClodRootGpuBatchSize: "4",
   liveClodRootGpuMaxInflightBatches: "2",
   liveClodRootGpuFallback: "1",

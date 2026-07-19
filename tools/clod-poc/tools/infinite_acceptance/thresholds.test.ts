@@ -168,15 +168,34 @@ describe("infinite islands thresholds", () => {
     );
   });
 
-  it("fails unless streamed-root GPU work dispatched or came from GPU cache without fallback", () => {
-    expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_mesher_enabled: 0 })).failures).toContain(
-      "live_clod_stream_gpu_mesher_enabled=0 failed: must equal 1",
+  it("allows CPU streamed roots and requires GPU proof only while the mesher is enabled", () => {
+    expect(evaluateThresholds(validCounters({
+      live_clod_stream_gpu_mesher_enabled: 0,
+      live_clod_stream_gpu_batches_dispatched: 0,
+      live_clod_stream_gpu_pages_dispatched: 0,
+      live_clod_stream_gpu_chunk_slots_dispatched: 0,
+      live_clod_stream_cache_backend_gpu: 0,
+      live_clod_stream_cache_nodes_from_cache: 0,
+    })).passed).toBe(true);
+    expect(evaluateThresholds(validCounters({
+      live_clod_stream_gpu_mesher_enabled: 1,
+      live_clod_stream_cache_backend_gpu: 0,
+      live_clod_stream_cache_nodes_from_cache: 0,
+      live_clod_stream_gpu_batches_dispatched: 0,
+      live_clod_stream_gpu_pages_dispatched: 0,
+      live_clod_stream_gpu_chunk_slots_dispatched: 0,
+    })).failures).toContain(
+      "live_clod_stream_gpu_batches_dispatched=0 failed: must dispatch GPU batches or reuse GPU stream-root cache while the GPU mesher is enabled",
     );
-    expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_batches_dispatched: 0 })).failures).toContain(
-      "live_clod_stream_gpu_batches_dispatched=0 failed: must dispatch GPU batches or reuse GPU stream-root cache",
-    );
-    expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_chunk_slots_dispatched: 4 })).failures).toContain(
-      "live_clod_stream_gpu_chunk_slots_dispatched=4 failed: must exceed pages dispatched or reuse GPU stream-root cache",
+    expect(evaluateThresholds(validCounters({
+      live_clod_stream_gpu_mesher_enabled: 1,
+      live_clod_stream_cache_backend_gpu: 0,
+      live_clod_stream_cache_nodes_from_cache: 0,
+      live_clod_stream_gpu_batches_dispatched: 1,
+      live_clod_stream_gpu_pages_dispatched: 4,
+      live_clod_stream_gpu_chunk_slots_dispatched: 4,
+    })).failures).toContain(
+      "live_clod_stream_gpu_chunk_slots_dispatched=4 failed: must exceed pages dispatched or reuse GPU stream-root cache while the GPU mesher is enabled",
     );
     expect(evaluateThresholds(validCounters({ live_clod_stream_gpu_failed_batches: 1 })).failures).toContain(
       "live_clod_stream_gpu_failed_batches=1 failed: must equal 0",
@@ -184,6 +203,20 @@ describe("infinite islands thresholds", () => {
     expect(evaluateThresholds(validCounters({ live_clod_stream_worker_fallback_pages: 1 })).failures).toContain(
       "live_clod_stream_worker_fallback_pages=1 failed: must equal 0",
     );
+  });
+
+  it("does not require GPU stream-root counters when the mesher never published them", () => {
+    const { live_clod_stream_cache_backend_gpu: _a,
+      live_clod_stream_cache_nodes_from_cache: _b,
+      live_clod_stream_gpu_mesher_enabled: _c,
+      live_clod_stream_gpu_batches_dispatched: _d,
+      live_clod_stream_gpu_pages_dispatched: _e,
+      live_clod_stream_gpu_chunk_slots_dispatched: _f,
+      live_clod_stream_gpu_failed_batches: _g,
+      live_clod_stream_worker_fallback_pages: _h,
+      ...cpuRoots } = validCounters();
+    expect(evaluateThresholds(cpuRoots).passed).toBe(true);
+    expect(evaluateThresholds(cpuRoots).missing).toEqual([]);
   });
 
   it("allows GPU-backed stream-root cache reuse without fresh dispatch", () => {

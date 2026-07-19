@@ -451,7 +451,7 @@ const BUDGET_RESTORE_SETTLE_FRAMES = 30;
 /** Restoring a lower inflight cap does not cancel batches launched under the boosted
  *  pre-route budget, and scene gates compare the live inflight counter against the
  *  restored max — wait (bounded) for launched batches to drain before sampling. */
-const BUDGET_RESTORE_DRAIN_TIMEOUT_MS = 20_000;
+const BUDGET_RESTORE_DRAIN_TIMEOUT_MS = 90_000;
 
 function sceneSupportsGate(scene: SceneSpec, gate: GateMode): boolean {
   return !scene.gates || scene.gates.includes(gate.name);

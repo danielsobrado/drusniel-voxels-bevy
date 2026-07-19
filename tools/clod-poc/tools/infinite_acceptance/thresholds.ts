@@ -148,14 +148,6 @@ export const REQUIRED_COUNTERS = [
   "live_clod_stream_probe_evictions_total",
   "live_clod_stream_probe_stale_discards_total",
   "live_clod_stream_out_of_world_edits_supported",
-  "live_clod_stream_cache_backend_gpu",
-  "live_clod_stream_cache_nodes_from_cache",
-  "live_clod_stream_gpu_mesher_enabled",
-  "live_clod_stream_gpu_batches_dispatched",
-  "live_clod_stream_gpu_pages_dispatched",
-  "live_clod_stream_gpu_chunk_slots_dispatched",
-  "live_clod_stream_gpu_failed_batches",
-  "live_clod_stream_worker_fallback_pages",
   "live_clod_stream_bounds_guard_enabled",
   "live_clod_stream_bounds_guard_checked_pages",
   "live_clod_stream_bounds_guard_rejected_pages",
@@ -186,6 +178,24 @@ export const REQUIRED_COUNTERS = [
 export type RequiredCounter = typeof REQUIRED_COUNTERS[number];
 
 /**
+ * GPU streamed-root mesher counters are absent when traced worlds use the CPU-roots default
+ * (or when the GPU mesher never boots). Optional like continent tiles: never "missing", but
+ * strictly gated when present — and GPU-dispatch proof only applies while the mesher is enabled.
+ */
+export const STREAM_ROOT_GPU_COUNTERS = [
+  "live_clod_stream_cache_backend_gpu",
+  "live_clod_stream_cache_nodes_from_cache",
+  "live_clod_stream_gpu_mesher_enabled",
+  "live_clod_stream_gpu_batches_dispatched",
+  "live_clod_stream_gpu_pages_dispatched",
+  "live_clod_stream_gpu_chunk_slots_dispatched",
+  "live_clod_stream_gpu_failed_batches",
+  "live_clod_stream_worker_fallback_pages",
+] as const;
+
+export type StreamRootGpuCounter = typeof STREAM_ROOT_GPU_COUNTERS[number];
+
+/**
  * Streamed continent heightfield tiles are opt-in (`heightTiles`, and authoritative only in
  * `scene=continent`), so these counters are absent from a default infinite-islands run. They are
  * therefore optional — never reported as "missing" — but strictly gated whenever they are present.
@@ -210,7 +220,7 @@ export const CONTINENT_TILE_COUNTERS = [
 ] as const;
 
 export type ContinentTileCounter = typeof CONTINENT_TILE_COUNTERS[number];
-export type AcceptanceCounter = RequiredCounter | ContinentTileCounter;
+export type AcceptanceCounter = RequiredCounter | StreamRootGpuCounter | ContinentTileCounter;
 
 export interface ThresholdRule {
   key: AcceptanceCounter;
@@ -255,7 +265,10 @@ const liveBubbleRequiredResident = (values: Readonly<Record<string, number>>): b
 };
 const liveBubbleChunkWorkDrainedOrBackground = (value: number, values: Readonly<Record<string, number>>): boolean =>
   finiteNonNegative(value) && (value === 0 || liveBubbleRequiredResident(values));
+const gpuStreamRootsActive = (values: Readonly<Record<string, number>>): boolean =>
+  values["live_clod_stream_gpu_mesher_enabled"] === 1;
 const gpuStreamRootsProven = (values: Readonly<Record<string, number>>): boolean => {
+  if (!gpuStreamRootsActive(values)) return true;
   const gpuDispatch = (values["live_clod_stream_gpu_batches_dispatched"] ?? 0) > 0
     && (values["live_clod_stream_gpu_pages_dispatched"] ?? 0) > 0
     && (values["live_clod_stream_gpu_chunk_slots_dispatched"] ?? 0) > (values["live_clod_stream_gpu_pages_dispatched"] ?? Number.POSITIVE_INFINITY);
@@ -447,12 +460,20 @@ export const THRESHOLD_RULES: ThresholdRule[] = [
   { key: "live_clod_stream_worker_transfer_bytes", label: "must be finite and >= 0", pass: finiteNonNegative },
   { key: "live_clod_stream_cache_backend_gpu", label: "must be explicit 0 or 1", pass: (value) => value === 0 || value === 1 },
   { key: "live_clod_stream_cache_nodes_from_cache", label: "must be finite and >= 0", pass: finiteNonNegative },
-  { key: "live_clod_stream_gpu_mesher_enabled", label: "must equal 1", pass: (value) => value === 1 },
-  { key: "live_clod_stream_gpu_batches_dispatched", label: "must dispatch GPU batches or reuse GPU stream-root cache", pass: (_value, values) => gpuStreamRootsProven(values) },
-  { key: "live_clod_stream_gpu_pages_dispatched", label: "must dispatch GPU pages or reuse GPU stream-root cache", pass: (_value, values) => gpuStreamRootsProven(values) },
+  { key: "live_clod_stream_gpu_mesher_enabled", label: "must equal 0 or 1", pass: (value) => value === 0 || value === 1 },
+  {
+    key: "live_clod_stream_gpu_batches_dispatched",
+    label: "must dispatch GPU batches or reuse GPU stream-root cache while the GPU mesher is enabled",
+    pass: (_value, values) => gpuStreamRootsProven(values),
+  },
+  {
+    key: "live_clod_stream_gpu_pages_dispatched",
+    label: "must dispatch GPU pages or reuse GPU stream-root cache while the GPU mesher is enabled",
+    pass: (_value, values) => gpuStreamRootsProven(values),
+  },
   {
     key: "live_clod_stream_gpu_chunk_slots_dispatched",
-    label: "must exceed pages dispatched or reuse GPU stream-root cache",
+    label: "must exceed pages dispatched or reuse GPU stream-root cache while the GPU mesher is enabled",
     pass: (_value, values) => gpuStreamRootsProven(values),
   },
   { key: "live_clod_stream_gpu_failed_batches", label: "must equal 0", pass: (value) => value === 0 },
@@ -536,7 +557,7 @@ export interface ThresholdEvaluation {
 export function extractAcceptanceCounters(stats: Record<string, unknown>): Record<string, number> {
   const counters = stats["counters"] as Record<string, unknown> | undefined;
   const out: Record<string, number> = {};
-  for (const key of [...REQUIRED_COUNTERS, ...CONTINENT_TILE_COUNTERS]) {
+  for (const key of [...REQUIRED_COUNTERS, ...STREAM_ROOT_GPU_COUNTERS, ...CONTINENT_TILE_COUNTERS]) {
     const value = counters?.[key] ?? stats[key];
     if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
   }

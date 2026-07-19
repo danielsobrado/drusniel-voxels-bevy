@@ -236,7 +236,6 @@ describe("infinite acceptance convergence helpers", () => {
       liveClodRootMaxCached: "512",
       liveClodRootMaxLevel: "1",
       liveClodRootRadius: "384",
-      liveClodRootGpuMesher: "1",
       liveClodRootGpuBatchSize: "4",
       liveClodRootGpuMaxInflightBatches: "2",
       liveClodRootGpuFallback: "1",
@@ -245,6 +244,8 @@ describe("infinite acceptance convergence helpers", () => {
       farSummaryMaxTileBuildsPerFrame: "8",
       farSummaryMaxBuildMsPerFrame: "8",
     });
+    expect(profileAcceptanceParams("reuse")).not.toHaveProperty("liveClodRootGpuMesher");
+    expect(profileAcceptanceParams("fast")).not.toHaveProperty("liveClodRootGpuMesher");
     expect(profileAcceptanceParams("reuse")).not.toHaveProperty("farClipmap");
     expect(profileAcceptanceParams("reuse")).not.toHaveProperty("farClipmapMode");
     expect(profileAcceptanceParams("fast")).not.toHaveProperty("farClipmap");
