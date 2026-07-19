@@ -17,10 +17,12 @@ export function updateTreeGpuRingTreesSafely(
   const availabilityReason = treeGpuRingAvailabilityFailureReason(input);
   if (availabilityReason) return applyTreeGpuRingAvailabilityFallback(input, availabilityReason);
 
-  const key = treeGpuRingKey(input.settings, input.worldCells);
-  if (input.state.failedKey === key) {
-    input.state.status = input.settings.gpu.fallbackToCpu ? "fallback-cpu" : "error";
-    return false;
+  if (input.state.failedKey) {
+    const key = currentTreeGpuRingKey(input);
+    if (input.state.failedKey === key) {
+      input.state.status = input.settings.gpu.fallbackToCpu ? "fallback-cpu" : "error";
+      return false;
+    }
   }
 
   const previousLoggedError = input.state.loggedError;
@@ -31,9 +33,13 @@ export function updateTreeGpuRingTreesSafely(
       return false;
     }
     if (input.state.stats.status !== "failed") return true;
-    return failTreeGpuRingExecution(input, key, input.state.stats.reason ?? DEFAULT_EXECUTION_ERROR);
+    return failTreeGpuRingExecution(
+      input,
+      currentTreeGpuRingKey(input),
+      input.state.stats.reason ?? DEFAULT_EXECUTION_ERROR,
+    );
   } catch (error) {
-    return failTreeGpuRingExecution(input, key, error);
+    return failTreeGpuRingExecution(input, currentTreeGpuRingKey(input), error);
   }
 }
 
@@ -106,4 +112,8 @@ function treeGpuRingHasOwnedResources(input: TreeGpuRingRuntimeInput): boolean {
     || !!input.state.draw
     || input.state.ringMeshes.length > 0
     || input.state.prepassTwins.length > 0;
+}
+
+function currentTreeGpuRingKey(input: TreeGpuRingRuntimeInput): string {
+  return treeGpuRingKey(input.settings, input.worldCells);
 }
