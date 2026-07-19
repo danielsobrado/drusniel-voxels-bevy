@@ -37,7 +37,9 @@ describe("water foam distance visual metrics", () => {
     expect(result.midNearRatio).toBeCloseTo(0.5, 1);
     expect(result.farNearRatio).toBe(0);
     expect(result.monotonicFraction).toBe(1);
+    expect(result.nearActiveMonotonicFraction).toBe(1);
     expect(result.linearSampleCount).toBe(3);
+    expect(result.linearMonotonicFraction).toBe(1);
     expect(result.linearMidNearRatio).toBeCloseTo(0.5, 1);
     expect(result.linearFarNearRatio).toBe(0);
   });
@@ -51,11 +53,14 @@ describe("water foam distance visual metrics", () => {
     );
 
     expect(result.waterPixelCount).toBe(3);
+    expect(result.nearActivePixelCount).toBe(3);
+    expect(result.nearActiveMonotonicFraction).toBe(1);
     expect(result.linearSampleCount).toBe(2);
+    expect(result.linearMonotonicFraction).toBe(1);
     expect(result.linearMidNearRatio).toBeCloseTo(0.5, 1);
   });
 
-  it("detects non-monotonic pixel response", () => {
+  it("detects non-monotonic response in active and uncapped foam", () => {
     const result = measureWaterFoamDistanceResponse(
       grayscale([0.20, 0.20, 0.20, 0.20]),
       grayscale([0.10, 0.30, 0.10, 0.30]),
@@ -64,6 +69,8 @@ describe("water foam distance visual metrics", () => {
     );
 
     expect(result.monotonicFraction).toBe(0.25);
+    expect(result.nearActiveMonotonicFraction).toBe(0.25);
+    expect(result.linearMonotonicFraction).toBe(0.25);
   });
 
   it("rejects incompatible image and mask dimensions", () => {
