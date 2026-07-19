@@ -36,6 +36,23 @@ export interface EstimateTreeGpuHeroFidelityInput {
   triangleFloor?: number;
 }
 
+type GeometryAttribute = THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+
+interface TreeHeroGeometryCacheEntry {
+  position: GeometryAttribute | undefined;
+  positionVersion: number;
+  positionCount: number;
+  foliage: GeometryAttribute | undefined;
+  foliageVersion: number;
+  foliageCount: number;
+  index: THREE.BufferAttribute | null;
+  indexVersion: number;
+  indexCount: number;
+  stats: TreeHeroGeometryStats;
+}
+
+const HERO_GEOMETRY_STATS_CACHE = new WeakMap<THREE.BufferGeometry, TreeHeroGeometryCacheEntry>();
+
 export function createEmptyTreeHeroFidelityStats(): TreeHeroFidelityStats {
   return {
     nearTreeCount: 0,
@@ -93,15 +110,22 @@ export function estimateTreeGpuHeroFidelity(input: EstimateTreeGpuHeroFidelityIn
 }
 
 export function treeHeroGeometryStats(geometry: THREE.BufferGeometry): TreeHeroGeometryStats {
-  const vertexCount = geometry.getAttribute("position")?.count ?? 0;
+  const position = geometry.getAttribute("position");
+  const foliage = geometry.getAttribute("treeFoliageMask");
+  const index = geometry.getIndex();
+  const cached = HERO_GEOMETRY_STATS_CACHE.get(geometry);
+  if (cached && geometryCacheMatches(cached, position, foliage, index)) return cached.stats;
+
   const triangleCount = geometryTriangleCount(geometry);
-  const foliageTriangleCount = geometryFoliageTriangleCount(geometry);
-  return {
-    vertexCount,
+  const foliageTriangleCount = geometryFoliageTriangleCount(geometry, foliage, index, triangleCount);
+  const stats = {
+    vertexCount: position?.count ?? 0,
     triangleCount,
     foliageTriangleCount,
     hasRealFoliage: foliageTriangleCount > 0,
   };
+  HERO_GEOMETRY_STATS_CACHE.set(geometry, createGeometryCacheEntry(position, foliage, index, stats));
+  return stats;
 }
 
 function addHeroGeometryStats(stats: TreeHeroFidelityStats, geometryStats: TreeHeroGeometryStats, instanceCount: number): void {
@@ -149,17 +173,66 @@ function averageNearHeroGeometryStats(geometries: TreeGeometryMap, species?: Tre
   };
 }
 
+function geometryCacheMatches(
+  cached: TreeHeroGeometryCacheEntry,
+  position: GeometryAttribute | undefined,
+  foliage: GeometryAttribute | undefined,
+  index: THREE.BufferAttribute | null,
+): boolean {
+  return cached.position === position
+    && cached.positionVersion === attributeVersion(position)
+    && cached.positionCount === attributeCount(position)
+    && cached.foliage === foliage
+    && cached.foliageVersion === attributeVersion(foliage)
+    && cached.foliageCount === attributeCount(foliage)
+    && cached.index === index
+    && cached.indexVersion === attributeVersion(index)
+    && cached.indexCount === attributeCount(index);
+}
+
+function createGeometryCacheEntry(
+  position: GeometryAttribute | undefined,
+  foliage: GeometryAttribute | undefined,
+  index: THREE.BufferAttribute | null,
+  stats: TreeHeroGeometryStats,
+): TreeHeroGeometryCacheEntry {
+  return {
+    position,
+    positionVersion: attributeVersion(position),
+    positionCount: attributeCount(position),
+    foliage,
+    foliageVersion: attributeVersion(foliage),
+    foliageCount: attributeCount(foliage),
+    index,
+    indexVersion: attributeVersion(index),
+    indexCount: attributeCount(index),
+    stats,
+  };
+}
+
+function attributeVersion(attribute: GeometryAttribute | null | undefined): number {
+  if (!attribute) return -1;
+  if ("version" in attribute && typeof attribute.version === "number") return attribute.version;
+  return attribute.data.version;
+}
+
+function attributeCount(attribute: GeometryAttribute | null | undefined): number {
+  return attribute?.count ?? 0;
+}
+
 function geometryTriangleCount(geometry: THREE.BufferGeometry): number {
   const index = geometry.getIndex();
   if (index) return Math.floor(index.count / 3);
   return Math.floor((geometry.getAttribute("position")?.count ?? 0) / 3);
 }
 
-function geometryFoliageTriangleCount(geometry: THREE.BufferGeometry): number {
-  const foliage = geometry.getAttribute("treeFoliageMask");
+function geometryFoliageTriangleCount(
+  geometry: THREE.BufferGeometry,
+  foliage = geometry.getAttribute("treeFoliageMask"),
+  index = geometry.getIndex(),
+  triangleCount = geometryTriangleCount(geometry),
+): number {
   if (!foliage) return 0;
-  const index = geometry.getIndex();
-  const triangleCount = geometryTriangleCount(geometry);
   let count = 0;
   for (let triangle = 0; triangle < triangleCount; triangle++) {
     const a = vertexIndex(index, triangle * 3);
