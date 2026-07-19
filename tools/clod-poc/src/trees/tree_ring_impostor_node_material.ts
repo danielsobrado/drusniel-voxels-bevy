@@ -30,9 +30,15 @@ import {
   type ForestLightingMaterialState,
 } from "../forest_lighting/index.js";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
+import { styleWrappedSunTerm } from "../style/scene_style.js";
 import type { TreeLod, TreeSettings } from "./tree_config.js";
 import { TREE_LODS } from "./tree_config.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import {
+  TREE_IMPOSTOR_FOLIAGE_TRANSMISSION,
+  TREE_IMPOSTOR_HDR_MAX,
+  treeImpostorFoliageTransmissionWeight,
+} from "./tree_impostor_lighting.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import type { TreeHydrologyWater, TreeRingInstanceBuffers } from "./tree_node_material.js";
 import { treeMorphologyHash01Node, treeMorphologyRecordNodes } from "./morphology/node_deformation.js";
@@ -55,12 +61,9 @@ const LOD_COLORS: Record<TreeLod, THREE.Color> = {
 };
 
 const v3 = (c: THREE.Color): THREE.Vector3 => new THREE.Vector3(c.r, c.g, c.b);
-const TREE_RING_IMPOSTOR_LEAF_TRANSMISSION = 0.22;
 const TREE_RING_IMPOSTOR_NORMAL_DETAIL_WEIGHT = 0.65;
-const TREE_RING_IMPOSTOR_SUN_MAX = 0.85;
 const TREE_RING_IMPOSTOR_MIN_COVERAGE = 0.0001;
 const TREE_RING_IMPOSTOR_DEFAULT_AMBIENT_FLOOR = 0.025;
-const TREE_RING_IMPOSTOR_HDR_MAX = 4.0;
 const TREE_RING_IMPOSTOR_AERIAL_TINT_SCALE = 0.15;
 const TREE_RING_IMPOSTOR_AERIAL_TINT_MAX = 0.04;
 const TREE_RING_IMPOSTOR_SHAFT_HINT = 0.01;
@@ -89,6 +92,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
   const uSky = uniform(v3(lighting.skyLight));
   const uGround = uniform(v3(lighting.groundLight));
   const uAmbientFloor = uniform(lighting.ambientFloor ?? TREE_RING_IMPOSTOR_DEFAULT_AMBIENT_FLOOR);
+  const foliageTransmissionWeight = float(treeImpostorFoliageTransmissionWeight(atlas.species));
   const neutralForestPackedTexture = createNeutralForestTexture("tree-ring-impostor-forest-neutral-packed");
   const neutralForestAuxTexture = createNeutralForestTexture("tree-ring-impostor-forest-neutral-aux");
   const uForestEnabled = uniform(0);
@@ -169,6 +173,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
           uSky,
           uGround,
           uAmbientFloor,
+          foliageTransmissionWeight,
         )
       : albedo;
 
@@ -520,17 +525,20 @@ function relightTreeRingImpostor(
   uSky: TslNode,
   uGround: TslNode,
   uAmbientFloor: TslNode,
+  foliageTransmissionWeight: TslNode,
 ): TslNode {
   const n0: TslNode = treeRingImpostorSurfaceNormal(localNormal, billboardNormal, yawCos, yawSin);
   const n: TslNode = frontFacing.select(n0, n0.negate());
-  const sun: TslNode = clamp(max(dot(n, uLight), 0.0), 0.0, TREE_RING_IMPOSTOR_SUN_MAX);
+  const sun: TslNode = styleWrappedSunTerm(dot(n, uLight));
   const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
   const hemi: TslNode = mix(uGround, uSky, sky);
   const direct: TslNode = uSun.mul(sun);
   const back: TslNode = max(dot(n.negate(), uLight), 0.0);
-  const transmission: TslNode = albedo.mul(uSun).mul(back).mul(TREE_RING_IMPOSTOR_LEAF_TRANSMISSION);
+  const transmission: TslNode = albedo.mul(uSun).mul(back)
+    .mul(foliageTransmissionWeight)
+    .mul(TREE_IMPOSTOR_FOLIAGE_TRANSMISSION);
   const lit: TslNode = albedo.mul(hemi.add(direct).add(uAmbientFloor)).add(transmission);
-  return clamp(lit, 0.0, TREE_RING_IMPOSTOR_HDR_MAX);
+  return clamp(lit, 0.0, TREE_IMPOSTOR_HDR_MAX);
 }
 
 function treeAboveWaterKeep(hydrology: TreeHydrologyWater | undefined, worldXZ: TslNode): TslNode | null {
