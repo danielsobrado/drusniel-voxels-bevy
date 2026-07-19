@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { syncSunLightGpuAtlasNodes } from "./sun_light_gpu_atlas_nodes.js";
 import { LIGHT_SAMPLE, type LightTile } from "./light_builder.js";
 import type { SunLightOptions } from "./sun_light_options.js";
 import type { SunVisibilityTileKey } from "./sun_visibility_tile.js";
@@ -25,6 +24,8 @@ export interface SunLightGpuAtlasSample {
   readonly cellSizeM: number;
 }
 
+export type SunLightGpuAtlasListener = (state: SunLightGpuAtlasState) => void;
+
 const state: SunLightGpuAtlasState = {
   texture: createTexture(DEFAULT_ATLAS_SIZE, DEFAULT_ATLAS_SIZE, new Uint8Array([VISIBILITY_LIT])),
   originX: 0,
@@ -33,6 +34,7 @@ const state: SunLightGpuAtlasState = {
   valid: 0,
   version: 0,
 };
+const listeners = new Set<SunLightGpuAtlasListener>();
 
 function createTexture(width: number, height: number, data: Uint8Array): THREE.DataTexture {
   const texture = new THREE.DataTexture(data, width, height, THREE.RedFormat, THREE.UnsignedByteType);
@@ -59,6 +61,12 @@ function resizeTexture(width: number, height: number, data: Uint8Array): void {
 
 export function getSunLightGpuAtlas(): SunLightGpuAtlasState {
   return state;
+}
+
+export function subscribeSunLightGpuAtlas(listener: SunLightGpuAtlasListener): () => void {
+  listeners.add(listener);
+  listener(state);
+  return () => listeners.delete(listener);
 }
 
 export function sampleSunLightGpuAtlas(x: number, z: number): SunLightGpuAtlasSample {
@@ -134,7 +142,7 @@ export function updateSunLightGpuAtlas(
   state.valid = options.active && tileCount > 0 ? 1 : 0;
   state.version += 1;
   resizeTexture(width, height, data);
-  syncSunLightGpuAtlasNodes(state);
+  notifyListeners();
 }
 
 export function invalidateSunLightGpuAtlas(): void {
@@ -142,7 +150,11 @@ export function invalidateSunLightGpuAtlas(): void {
   state.valid = 0;
   state.version += 1;
   resizeTexture(DEFAULT_ATLAS_SIZE, DEFAULT_ATLAS_SIZE, new Uint8Array([VISIBILITY_LIT]));
-  syncSunLightGpuAtlasNodes(state);
+  notifyListeners();
+}
+
+function notifyListeners(): void {
+  for (const listener of listeners) listener(state);
 }
 
 function atlasImage(): { readonly data: ArrayLike<number>; readonly width: number; readonly height: number } {
