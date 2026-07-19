@@ -12,7 +12,6 @@ import {
   storage,
   uint,
   uniform,
-  vec2,
 } from "three/tsl";
 import configText from "../../config/grass_contact.yaml?raw";
 
@@ -77,7 +76,9 @@ const DEFAULT_SETTINGS: GrassContactSettings = {
 };
 
 const settings = parseGrassContactSettings(configText);
-export const GRASS_CONTACT_FIELD_OFFSET = GRASS_CONTACT_PATCH_CAPACITY;
+export const GRASS_CONTACT_METADATA_INDEX = 0;
+export const GRASS_CONTACT_PATCH_OFFSET = 1;
+export const GRASS_CONTACT_FIELD_OFFSET = GRASS_CONTACT_PATCH_OFFSET + GRASS_CONTACT_PATCH_CAPACITY;
 export const GRASS_CONTACT_FIELD_CAPACITY = settings.fieldGrid * settings.fieldGrid;
 export const GRASS_CONTACT_STORAGE_CAPACITY = GRASS_CONTACT_FIELD_OFFSET + GRASS_CONTACT_FIELD_CAPACITY;
 
@@ -87,7 +88,6 @@ const initializedBackends = new WeakSet<object>();
 fieldAttribute.name = "grass-stone-contact-field";
 
 const uEnabled = uniform(settings.enabled ? 1 : 0);
-const uFieldCenter = uniform(new THREE.Vector2());
 const uMinHeightScale = uniform(settings.minHeightScale);
 const uFlattenStrength = uniform(settings.flattenStrength);
 const uSplayStrengthM = uniform(settings.splayStrengthM);
@@ -128,10 +128,6 @@ export function readGrassContactSettings(): GrassContactSettings {
   };
 }
 
-export function setGrassContactFieldCenter(x: number, z: number): void {
-  uFieldCenter.value.set(Number.isFinite(x) ? x : 0, Number.isFinite(z) ? z : 0);
-}
-
 export function grassContactPatchAttribute(): StorageBufferAttribute {
   return fieldAttribute;
 }
@@ -150,18 +146,22 @@ export function ensureGrassContactPatchGpuResources(
 
 export function grassContactPatchInfluence(worldXZ: TslNode): GrassContactInfluenceNodes {
   const field: TslNode = storage(fieldAttribute, "vec4", GRASS_CONTACT_STORAGE_CAPACITY).toReadOnly();
-  const halfExtentM = settings.fieldGrid * settings.fieldCellM * 0.5;
-  const localCell: TslNode = worldXZ.sub(uFieldCenter).add(halfExtentM).div(settings.fieldCellM);
+  const metadata: TslNode = field.element(GRASS_CONTACT_METADATA_INDEX);
+  const grid: TslNode = max(metadata.w, 1);
+  const cellM: TslNode = max(metadata.z, 0.001);
+  const halfExtentM: TslNode = grid.mul(cellM).mul(0.5);
+  const localCell: TslNode = worldXZ.sub(metadata.xy).add(halfExtentM).div(cellM);
   const cellX: TslNode = floor(localCell.x);
   const cellZ: TslNode = floor(localCell.y);
-  const inside: TslNode = cellX.greaterThanEqual(0)
+  const inside: TslNode = metadata.w.greaterThan(0.5)
+    .and(cellX.greaterThanEqual(0))
     .and(cellZ.greaterThanEqual(0))
-    .and(cellX.lessThan(settings.fieldGrid))
-    .and(cellZ.lessThan(settings.fieldGrid));
-  const clampedX: TslNode = clamp(cellX, 0, settings.fieldGrid - 1);
-  const clampedZ: TslNode = clamp(cellZ, 0, settings.fieldGrid - 1);
+    .and(cellX.lessThan(grid))
+    .and(cellZ.lessThan(grid));
+  const clampedX: TslNode = clamp(cellX, 0, grid.sub(1));
+  const clampedZ: TslNode = clamp(cellZ, 0, grid.sub(1));
   const fieldIndex: TslNode = uint(
-    clampedZ.mul(settings.fieldGrid).add(clampedX).add(GRASS_CONTACT_FIELD_OFFSET),
+    clampedZ.mul(grid).add(clampedX).add(GRASS_CONTACT_FIELD_OFFSET),
   );
   const sample: TslNode = field.element(fieldIndex);
   const active: TslNode = inside.select(float(1), float(0)).mul(uEnabled);
