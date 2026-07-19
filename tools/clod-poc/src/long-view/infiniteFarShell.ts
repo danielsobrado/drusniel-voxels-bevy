@@ -10,7 +10,8 @@ import { createFarTerrainVertexColorScratch, computeFarTerrainVertexColorsRange,
 import { createFarWaterMaterial, updateFarWaterMaterialCenter, updateFarWaterMaterialSummaryAtlas } from "../farTerrain/farWaterMaterial.js";
 import type { FarTerrainUniformData } from "../farTerrain/farTerrainUniforms.js";
 import type { FarSummaryGpuAtlasView } from "../naadf/gpu/farSummaryAtlas.js";
-import { writeBiomeRgb } from "../world_source/biome_colors.js";
+import { biomeRgbForId, writeBiomeRgb } from "../world_source/biome_colors.js";
+import { BIOME_IDS } from "../world_source/biome_region_field.js";
 export type { FarShellHeightSamplingMode, InfiniteFarShellOptions, SnappedCenter } from "./infinite_far_shell_types.js";
 import type { FarShellHeightSamplingMode, InfiniteFarShellOptions } from "./infinite_far_shell_types.js";
 import { FAR_SHELL_RENDER_ORDER, FAR_SHELL_WATER_RENDER_ORDER, FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M } from "./infinite_far_shell_constants.js";
@@ -20,6 +21,8 @@ import {
   buildAnnularGeometryData, flushGeometryAttributes,
   attachColorAttribute, createDefaultParityColors, createDefaultBiomeColors,
 } from "./infinite_far_shell_helpers.js";
+
+const FAR_OCEAN_RGB = biomeRgbForId(BIOME_IDS.ocean);
 
 type PendingFarShellHeightRebuild = {
   cursor: number;
@@ -54,6 +57,7 @@ export class InfiniteFarShell {
   private parityColorBuffer: Float32Array | null = null;
   private parityVertexScratch: FarTerrainVertexColors | null = null;
   private biomeColorBuffer: Float32Array | null = null;
+  private oceanMask: Uint8Array | null = null;
   private positions: Float32Array;
   private normals: Float32Array;
   private uvs: Float32Array;
@@ -271,6 +275,9 @@ export class InfiniteFarShell {
     if (writeBiomeColors && (!this.biomeColorBuffer || this.biomeColorBuffer.length !== vertexCount * 3)) {
       this.biomeColorBuffer = new Float32Array(vertexCount * 3);
     }
+    if (this.options.seaLevelMeters !== undefined && (!this.oceanMask || this.oceanMask.length !== vertexCount)) {
+      this.oceanMask = new Uint8Array(vertexCount);
+    }
   }
 
   private sampleHeightVertexRange(startVi: number, endVi: number, snapX: number, snapZ: number): void {
@@ -287,15 +294,20 @@ export class InfiniteFarShell {
       const localX = r * Math.cos(theta);
       const localZ = r * Math.sin(theta);
       const sample: HeightNormalMaterial = sampleBlendedHeightNormalMaterial(snapX + localX, snapZ + localZ, r, this.heightProvider, this.samplerOptions);
+      const seaLevel = this.options.seaLevelMeters;
+      const isOcean = seaLevel !== undefined && Number.isFinite(sample.height) && sample.height < seaLevel;
       this.positions[vi * 3] = localX;
-      this.positions[vi * 3 + 1] = Number.isFinite(sample.height) ? sample.height + farShellHeightBiasMeters : 0;
+      this.positions[vi * 3 + 1] = isOcean
+        ? seaLevel + farShellHeightBiasMeters
+        : Number.isFinite(sample.height) ? sample.height + farShellHeightBiasMeters : 0;
       this.positions[vi * 3 + 2] = localZ;
-      this.normals[vi * 3] = sample.normal.x;
-      this.normals[vi * 3 + 1] = sample.normal.y;
-      this.normals[vi * 3 + 2] = sample.normal.z;
+      this.normals[vi * 3] = isOcean ? 0 : sample.normal.x;
+      this.normals[vi * 3 + 1] = isOcean ? 1 : sample.normal.y;
+      this.normals[vi * 3 + 2] = isOcean ? 0 : sample.normal.z;
       this.uvs[vi * 2] = rNorm;
       this.uvs[vi * 2 + 1] = ai / angularSegments;
-      if (writeBiomeColors && this.biomeColorBuffer) writeBiomeRgb(this.biomeColorBuffer, vi, sample.material);
+      if (this.oceanMask) this.oceanMask[vi] = isOcean ? 1 : 0;
+      if (writeBiomeColors && this.biomeColorBuffer) writeBiomeRgb(this.biomeColorBuffer, vi, isOcean ? BIOME_IDS.ocean : sample.material);
     }
   }
 
@@ -387,6 +399,7 @@ export class InfiniteFarShell {
         0,
         this.positions,
       );
+      this.applyOceanParityColors(pending.colorCursor, end);
       pending.colorCursor = end;
       this.publishRebuildProgress();
       if (!completeSmallRebuild && pending.colorCursor < vertexCount && elapsedMs() >= budgetMs) {
@@ -400,6 +413,18 @@ export class InfiniteFarShell {
     if (this.useParityMaterial) this.attachVertexColors();
     this.finishHeightRebuild(pending.buildMs);
     if (pending.snapX !== this.snappedX || pending.snapZ !== this.snappedZ) this.requestSlicedHeightRebuild();
+  }
+
+  // The parity classifier only knows land bands (sand..snow), so ocean-clamped
+  // vertices would otherwise render as beach at sea level.
+  private applyOceanParityColors(startVi: number, endVi: number): void {
+    if (!this.oceanMask || !this.parityColorBuffer) return;
+    for (let vi = startVi; vi < endVi; vi++) {
+      if (!this.oceanMask[vi]) continue;
+      this.parityColorBuffer[vi * 3] = FAR_OCEAN_RGB[0];
+      this.parityColorBuffer[vi * 3 + 1] = FAR_OCEAN_RGB[1];
+      this.parityColorBuffer[vi * 3 + 2] = FAR_OCEAN_RGB[2];
+    }
   }
 
   private flushAttributes(): void {

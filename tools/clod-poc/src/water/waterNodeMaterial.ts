@@ -219,14 +219,25 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     const uvB: TslNode = worldPos.xz.mul(uRippleScaleB)
       .add(advectDir.mul(phaseB.mul(uRippleLoopDistance).mul(advectSpeed)))
       .add(vec2(17.31, -9.47));
-    const gAx: TslNode = cos(uvA.x.add(phaseA.mul(tau))).mul(uRippleStrengthA)
-      .add(cos(uvA.x.add(uvA.y).mul(0.73).sub(phaseA.mul(tau * 0.7))).mul(uRippleStrengthB));
-    const gAz: TslNode = sin(uvA.y.sub(phaseA.mul(tau))).negate().mul(uRippleStrengthA)
-      .add(cos(uvA.x.sub(uvA.y).mul(0.61).add(phaseA.mul(tau * 0.9))).mul(uRippleStrengthB));
-    const gBx: TslNode = cos(uvB.x.add(phaseB.mul(tau))).mul(uRippleStrengthA)
-      .add(cos(uvB.x.add(uvB.y).mul(0.73).sub(phaseB.mul(tau * 0.7))).mul(uRippleStrengthB));
-    const gBz: TslNode = sin(uvB.y.sub(phaseB.mul(tau))).negate().mul(uRippleStrengthA)
-      .add(cos(uvB.x.sub(uvB.y).mul(0.61).add(phaseB.mul(tau * 0.9))).mul(uRippleStrengthB));
+    // Four rotated directional waves with non-harmonic frequencies (1.0, 1.83,
+    // 3.11, 5.27); the previous paired axis-aligned sinusoids interfered into
+    // stable moire bands over calm pools.
+    const rippleGrad = (uv: TslNode, phase: TslNode): { x: TslNode; z: TslNode } => {
+      const w1: TslNode = cos(uv.x.mul(0.94).add(uv.y.mul(0.34)).add(phase.mul(tau))).mul(uRippleStrengthA);
+      const w2: TslNode = cos(uv.x.mul(-0.75).add(uv.y.mul(1.665)).sub(phase.mul(tau * 0.7))).mul(uRippleStrengthA.mul(0.55));
+      const w3: TslNode = cos(uv.x.mul(1.773).add(uv.y.mul(-2.55)).add(phase.mul(tau * 0.9))).mul(uRippleStrengthB);
+      const w4: TslNode = cos(uv.x.mul(-4.585).add(uv.y.mul(-2.635)).sub(phase.mul(tau * 1.3))).mul(uRippleStrengthB.mul(0.6));
+      return {
+        x: w1.mul(0.94).add(w2.mul(-0.41)).add(w3.mul(0.57)).add(w4.mul(-0.87)),
+        z: w1.mul(0.34).add(w2.mul(0.91)).add(w3.mul(-0.82)).add(w4.mul(-0.50)),
+      };
+    };
+    const gradA = rippleGrad(uvA, phaseA);
+    const gradB = rippleGrad(uvB, phaseB);
+    const gAx: TslNode = gradA.x;
+    const gAz: TslNode = gradA.z;
+    const gBx: TslNode = gradB.x;
+    const gBz: TslNode = gradB.z;
     const flowCoord: TslNode = vec2(dot(worldPos.xz, riverDir), dot(worldPos.xz, sideDir));
     const channelPhase: TslNode = uTime.mul(advectSpeed).mul(1.35);
     const channelWave: TslNode = sin(
@@ -365,7 +376,10 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
         vec3(normal.x.mul(0.55), normal.y, normal.z.mul(0.55)).normalize(),
       );
       const dirV: TslNode = cameraViewMatrix.mul(vec4(rdir, 0)).xyz;
-      const stepLen: TslNode = clamp(camDist.mul(uReflStepScale), 0.25, 28);
+      // Long steps with a wide hit window accept unrelated depth surfaces and
+      // produce alternating dark/bright reflection bands; cap the step and keep
+      // the window proportional but tight, letting misses fall back to sky.
+      const stepLen: TslNode = clamp(camDist.mul(uReflStepScale), 0.25, 14);
       const jitter: TslNode = interleavedGradientNoise(screenCoordinate.xy);
       const hitUv: TslNode = vec2(0, 0).toVar();
 
@@ -379,7 +393,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
         );
         const zS: TslNode = perspectiveDepthToViewZ(viewportDepthTexture(uvS).x, cameraNear, cameraFar);
         If(
-          zS.greaterThan(pV.z.add(0.06)).and(zS.lessThan(pV.z.add(stepLen.mul(2.6).add(0.7)))),
+          zS.greaterThan(pV.z.add(0.06)).and(zS.lessThan(pV.z.add(stepLen.mul(1.35).add(0.5)))),
           () => {
             ssrHit.assign(1);
             hitUv.assign(uvS);

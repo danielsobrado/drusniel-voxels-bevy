@@ -24,6 +24,8 @@ export interface InfiniteFarShellOptions {
   };
   useParityMaterial?: boolean;
   parityConfig?: FarTerrainUniformData;
+  /** CPU-mode ocean handling: vertices sampled below this height are clamped to it and colored as ocean water. */
+  seaLevelMeters?: number;
   heightSamplingMode?: FarShellHeightSamplingMode;
   /** Per-frame CPU budget for sliced height rebuilds after the first reposition (default 2 ms). */
   cpuRebuildBudgetMs?: number;

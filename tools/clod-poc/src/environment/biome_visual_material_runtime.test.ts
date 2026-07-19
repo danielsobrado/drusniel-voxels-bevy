@@ -7,7 +7,7 @@ import { installBiomeVisualMaterialRouting } from "./biome_visual_material_routi
 const GRASS_FRAGMENT_SHADER = `
 precision highp float;
 varying vec3 vWorldNormal;
-void main() {
+  void main() {
     vec3 base = vec3(0.02, 0.06, 0.01);
     vec3 mid = vec3(0.08, 0.17, 0.04);
     vec3 color = mix(base, mid, 0.5);

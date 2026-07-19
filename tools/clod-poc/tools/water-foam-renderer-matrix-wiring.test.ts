@@ -4,11 +4,11 @@ import { describe, expect, it } from "vitest";
 const MATRIX_SOURCE = readFileSync(
   new URL("./water-foam-renderer-matrix.ts", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 const LEG_SOURCE = readFileSync(
   new URL("./water-foam-renderer-matrix-leg.ts", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 
 describe("water foam renderer matrix wiring", () => {
   it("discovers one canonical WebGPU-high pose set first", () => {

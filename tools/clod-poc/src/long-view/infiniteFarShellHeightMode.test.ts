@@ -180,6 +180,26 @@ describe("InfiniteFarShell height sampling mode", () => {
     shell.dispose();
   });
 
+  it("clamps below-sea vertices to sea level and colors them as ocean", () => {
+    const shell = makeShell({ useParityMaterial: true, parityConfig, seaLevelMeters: 10 });
+
+    shell.setHeightProvider({
+      sampleHeight: () => -40,
+      sampleNormal: () => new THREE.Vector3(0.5, 0.5, 0.5),
+    });
+
+    const positions = shell.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
+    const normals = shell.mesh.geometry.getAttribute("normal") as THREE.BufferAttribute;
+    const color = shell.mesh.geometry.getAttribute("color") as THREE.BufferAttribute;
+    const [r, g, b] = biomeRgbForId(BIOME_IDS.ocean);
+    expect(positions.getY(0)).toBe(10 + FAR_SHELL_PRIORITY_HEIGHT_OFFSET_M);
+    expect(normals.getY(0)).toBe(1);
+    expect(color.getX(0)).toBeCloseTo(r, 5);
+    expect(color.getY(0)).toBeCloseTo(g, 5);
+    expect(color.getZ(0)).toBeCloseTo(b, 5);
+    shell.dispose();
+  });
+
   it("updates missing-summary debug fallback through a material uniform", () => {
     const shell = makeShell();
     const material = shell.mesh.material as import("three/webgpu").MeshBasicNodeMaterial;

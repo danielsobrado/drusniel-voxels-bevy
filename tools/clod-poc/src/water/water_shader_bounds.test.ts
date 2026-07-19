@@ -25,12 +25,11 @@ describe("water shader world bounds", () => {
       "const wetFade = smoothstep(0.005, 0.05, input.depth).mul(input.bodyMask);",
     );
     expect(waterFoamNodesSource).toContain(
-      "source.mul(pattern).mul(wetFade).mul(shadeCoverage)",
+      "source.mul(pattern).mul(wetFade).mul(shadeCoverage).mul(detailFade)",
     );
-    expect(waterPerfNodeMaterialSource).toContain(
-      "const farDetailFade: TslNode = float(1).sub(",
-    );
-    expect(waterPerfNodeMaterialSource).toContain("foamNodes.coverage.mul(farDetailFade)");
+    expect(waterFoamNodesSource).toContain("buildWaterFoamDistanceFadeNode");
+    expect(waterPerfNodeMaterialSource).toContain("const foam: TslNode = foamNodes.coverage");
+    expect(waterPerfNodeMaterialSource).not.toContain("farDetailFade");
     expect(waterPerfNodeMaterialSource).not.toContain("const foamHash:");
   });
 

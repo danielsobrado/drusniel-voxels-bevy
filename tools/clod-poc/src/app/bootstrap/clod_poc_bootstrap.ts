@@ -392,11 +392,14 @@ export async function bootstrapClodPoc() {
       },
       useParityMaterial: useParity,
       parityConfig,
+      seaLevelMeters: world.worldSource.metadata.seaLevel,
       heightSamplingMode: effectiveHeightSamplingMode,
       farSummaryGpuAtlas: effectiveHeightSamplingMode === "gpu" ? farSummaryGpuAtlas : undefined,
       debugShowMissingFallback: lvConfig.debug.showMissingSummaryFallback,
       metrics: farShellMetrics,
     });
+
+    (window as any).__drusnielInfiniteFarShell = infiniteFarShell;
 
     // In replace mode the shell mesh is hidden and its per-frame update is skipped, so a
     // height provider would only queue an initial sliced rebuild that never steps —

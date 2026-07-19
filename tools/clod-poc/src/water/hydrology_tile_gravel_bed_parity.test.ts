@@ -69,9 +69,10 @@ describe("gravel bed hydrology tile parity", () => {
         const worldZ = tile.originZ + z * tile.cellSize;
         const expected = wrapped(worldX, worldZ, terrain, { drySentinelDepthM: 2 });
         const index = z * vertices + x;
-        expect(tile.terrainY[index]).toBe(expected.terrainY);
-        expect(tile.waterY[index]).toBe(expected.waterY);
-        expect(tile.riverDepth[index]).toBe(expected.riverDepth);
+        // Tile channels are Float32; compare against f32-quantized samples.
+        expect(tile.terrainY[index]).toBe(Math.fround(expected.terrainY));
+        expect(tile.waterY[index]).toBe(Math.fround(expected.waterY));
+        expect(tile.riverDepth[index]).toBe(Math.fround(expected.riverDepth));
       }
     }
   });
