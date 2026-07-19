@@ -51,7 +51,7 @@ export const DEFAULT_RIVER_MATERIAL_SETTINGS: RiverMaterialSettings = {
   rapidNormalBoost: 1.35,
   bankFoamStrength: 0.45,
   rapidFoamStrength: 1.0,
-  foamStreakStrength: 1.0,
+  foamStreakStrength: 0.0,
   shallowBankTintStrength: 1.0,
   centerChannelDarkening: 1.0,
 };
