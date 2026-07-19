@@ -11,6 +11,7 @@
 import { baseSurfaceHeight, setTerrainFieldConfig } from "../terrain/terrain.js";
 import { makeFakeBodyCarvedSampler } from "./fakeBodyCarve.js";
 import { createCarvedGraphHydrologySampler } from "./graph_hydrology.js";
+import { createGravelBarBedAuthority } from "./gravel_bar_bed_authority.js";
 import { sampleInfiniteHydrology } from "./infinite_hydrology.js";
 import {
   buildHydrologyTileData,
@@ -34,7 +35,7 @@ const ctx = self as unknown as {
 interface WorkerState {
   configId: number;
   sampler: TerrainHeightSampler;
-  sampleHydrology?: HydrologyWorldSampler;
+  sampleHydrology: HydrologyWorldSampler;
   options: HydrologyTileBuildOptions;
 }
 
@@ -57,16 +58,23 @@ function handleConfigure(request: HydrologyTileWorkerConfigureRequest): void {
   // itself applies the carve, so tiles report the carved bed as terrainY — identical
   // to the synchronous main-thread path, which passes the same carve option.
   const tracedCarve = !request.hydrologyGraph ? request.hydrologyCarve : null;
+  const sampler: TerrainHeightSampler = graphSampler
+    ? { surfaceHeight: baseSurfaceHeight }
+    : makeFakeBodyCarvedSampler(carveConfig, { surfaceHeight: baseSurfaceHeight });
+  const baseHydrology: HydrologyWorldSampler = graphSampler
+    ? (x, z) => graphSampler.sample(x, z)
+    : tracedCarve
+      ? (x, z, source, options) => sampleInfiniteHydrology(x, z, source, { ...options, carve: tracedCarve })
+      : sampleInfiniteHydrology;
+  const gravelBed = createGravelBarBedAuthority(
+    request.gravelBars,
+    request.gravelBed,
+    sampler,
+  );
   state = {
     configId: request.configId,
-    sampler: graphSampler
-      ? { surfaceHeight: baseSurfaceHeight }
-      : makeFakeBodyCarvedSampler(carveConfig, { surfaceHeight: baseSurfaceHeight }),
-    sampleHydrology: graphSampler
-      ? (x, z) => graphSampler.sample(x, z)
-      : tracedCarve
-        ? (x, z, sampler, options) => sampleInfiniteHydrology(x, z, sampler, { ...options, carve: tracedCarve })
-        : undefined,
+    sampler,
+    sampleHydrology: gravelBed.wrap(baseHydrology),
     options: {
       tileSizeM: request.tileSizeM,
       tileRes: request.tileRes,
