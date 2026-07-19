@@ -6,6 +6,8 @@ import type { PropStats } from "../props/prop_stats.js";
 import type { ClodHooks } from "../core/hooks.js";
 import { resolvePropSnapPlacement, type PropSnapPlacementInput, type PropSnapPlacementResult } from "../props/prop_snap.js";
 import type { PropSpatialGrid } from "../props/prop_spatial_grid.js";
+import { propGpuRingUnsupportedReason } from "../gpu/prop_ring_compute.js";
+import { reportGpuCpuFallback } from "../gpu/gpu_cpu_fallback_log.js";
 
 const COLLIDER_SYNC_MIN_INTERVAL_MS = 75;
 const COLLIDER_SYNC_MIN_DISTANCE_M = 0.35;
@@ -47,6 +49,9 @@ export interface PropController {
 }
 
 export function createPropController(deps: PropControllerDeps): PropController {
+  const fallbackReason = propGpuCpuFallbackReason(deps);
+  if (fallbackReason) reportGpuCpuFallback("props-gpu-ring", fallbackReason);
+
   const system = new PropSystem({
     scene: deps.scene,
     settings: { ...deps.settings },
@@ -135,4 +140,12 @@ export function createPropController(deps: PropControllerDeps): PropController {
       system.dispose();
     },
   };
+}
+
+export function propGpuCpuFallbackReason(deps: PropControllerDeps): string | null {
+  const gpu = deps.settings.gpu;
+  if (!deps.settings.enabled || !gpu.enabled || !gpu.fallbackToCpu || gpu.debugForceCpu) return null;
+  if (!deps.gpuDevice) return "WebGPU device unavailable";
+  if (!deps.gpuBackend) return "WebGPU renderer backend unavailable";
+  return propGpuRingUnsupportedReason(deps.gpuDevice);
 }
