@@ -1,8 +1,12 @@
 const reportedFallbacks = new Set<string>();
 
-export function reportGpuCpuFallback(scope: string, reason: unknown): void {
+export function reportGpuCpuFallback(
+  scope: string,
+  reason: unknown,
+  dedupeKey?: string,
+): void {
   const message = fallbackReason(reason);
-  const key = `${scope}:${message}`;
+  const key = `${scope}:${dedupeKey ?? message}`;
   if (reportedFallbacks.has(key)) return;
   reportedFallbacks.add(key);
 
