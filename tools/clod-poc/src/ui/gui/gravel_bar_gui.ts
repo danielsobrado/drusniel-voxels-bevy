@@ -12,7 +12,8 @@ export interface GravelBarGuiDeps {
 }
 
 interface EnvironmentGuiController extends GuiController {
-  disable(): unknown;
+  name(label: string): EnvironmentGuiController;
+  disable(): EnvironmentGuiController;
 }
 
 interface GravelBarGuiModel {
