@@ -56,14 +56,16 @@ describe("tree system GPU status helpers", () => {
     })).toBe("unsupported");
   });
 
-  it("reports GPU ring stats only for active ring/error paths", () => {
+  it("uses GPU lighting proxies only for a live compute and draw generation", () => {
     expect(treeReportsGpuRingStats(false, "ring", true, true, "ready")).toBe(false);
     expect(treeReportsGpuRingStats(true, "fallback-cpu", true, true, "ready")).toBe(false);
     expect(treeReportsGpuRingStats(true, "unsupported", true, true, "ready")).toBe(false);
-    expect(treeReportsGpuRingStats(true, "ring", false, false, "idle")).toBe(true);
-    expect(treeReportsGpuRingStats(true, "error", false, false, "idle")).toBe(true);
-    expect(treeReportsGpuRingStats(true, "disabled", true, false, "idle")).toBe(true);
-    expect(treeReportsGpuRingStats(true, "disabled", false, false, "running")).toBe(true);
-    expect(treeReportsGpuRingStats(true, "disabled", false, false, "idle")).toBe(false);
+    expect(treeReportsGpuRingStats(true, "error", true, true, "ready")).toBe(false);
+    expect(treeReportsGpuRingStats(true, "ring", false, true, "ready")).toBe(false);
+    expect(treeReportsGpuRingStats(true, "ring", true, false, "ready")).toBe(false);
+    expect(treeReportsGpuRingStats(true, "ring", true, true, "initializing")).toBe(false);
+    expect(treeReportsGpuRingStats(true, "ring", true, true, "failed")).toBe(false);
+    expect(treeReportsGpuRingStats(true, "ring", true, true, "ready")).toBe(true);
+    expect(treeReportsGpuRingStats(true, "ring", true, true, "running")).toBe(true);
   });
 });
