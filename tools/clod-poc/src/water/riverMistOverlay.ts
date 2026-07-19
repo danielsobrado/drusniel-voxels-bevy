@@ -1,11 +1,16 @@
 import * as THREE from "three";
 import { readActiveBiomeVisualState } from "../environment/biome_visual_state_runtime.js";
 import type { BiomeVisualState } from "../environment/biome_visual_state.js";
-import type { WaterField, WaterFieldResult } from "./waterField.js";
+import { readActiveEnvironmentQuery } from "../environment_query/runtime.js";
+import type { EnvironmentQuery } from "../environment_query/types.js";
+import type { WaterField } from "./waterField.js";
 import { RiverMistParticlePool } from "./riverMistParticlePool.js";
 import {
+  riverMistSampleFromEnvironment,
+  riverMistSampleFromWaterField,
   riverMistSignal,
   type RiverMistRuntimeSettings,
+  type RiverMistSample,
 } from "./riverMistRuntime.js";
 
 const MIST_SPRITE_SIZE = 32;
@@ -17,11 +22,15 @@ export interface RiverMistOverlayStats {
   readonly lastSampledCells: number;
   readonly lastEmitters: number;
   readonly lastMaxSignal: number;
+  readonly lastEnvironmentSamples: number;
+  readonly lastFallbackSamples: number;
+  readonly lastInvalidSamples: number;
 }
 
 export interface RiverMistOverlayOptions {
   readonly settings: RiverMistRuntimeSettings;
   readonly readBiomeState?: () => BiomeVisualState | null;
+  readonly readEnvironmentQuery?: () => EnvironmentQuery | null;
   readonly minimumSampleHintM?: number;
 }
 
@@ -34,6 +43,7 @@ export class RiverMistOverlay {
   private readonly colors: Float32Array;
   private readonly pool: RiverMistParticlePool;
   private readonly readBiomeState: () => BiomeVisualState | null;
+  private readonly readEnvironmentQuery: () => EnvironmentQuery | null;
   private readonly halfGrid: number;
   private readonly gridSide: number;
   private readonly sampleHintM: number;
@@ -49,6 +59,9 @@ export class RiverMistOverlay {
   private lastSampledCells = 0;
   private lastEmitters = 0;
   private lastMaxSignal = 0;
+  private lastEnvironmentSamples = 0;
+  private lastFallbackSamples = 0;
+  private lastInvalidSamples = 0;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -80,6 +93,7 @@ export class RiverMistOverlay {
     this.points.frustumCulled = false;
     this.points.renderOrder = 3;
     this.readBiomeState = options.readBiomeState ?? readActiveBiomeVisualState;
+    this.readEnvironmentQuery = options.readEnvironmentQuery ?? readActiveEnvironmentQuery;
     this.halfGrid = Math.ceil(particles.spawnRadiusM / particles.spacingM);
     this.gridSide = this.halfGrid * 2 + 1;
     this.sampleHintM = Math.max(
@@ -106,6 +120,9 @@ export class RiverMistOverlay {
       lastSampledCells: this.lastSampledCells,
       lastEmitters: this.lastEmitters,
       lastMaxSignal: this.lastMaxSignal,
+      lastEnvironmentSamples: this.lastEnvironmentSamples,
+      lastFallbackSamples: this.lastFallbackSamples,
+      lastInvalidSamples: this.lastInvalidSamples,
     };
   }
 
@@ -152,6 +169,9 @@ export class RiverMistOverlay {
     this.lastSampledCells = 0;
     this.lastEmitters = 0;
     this.lastMaxSignal = 0;
+    this.lastEnvironmentSamples = 0;
+    this.lastFallbackSamples = 0;
+    this.lastInvalidSamples = 0;
   }
 
   private beginScan(cameraPosition: THREE.Vector3): void {
@@ -165,6 +185,9 @@ export class RiverMistOverlay {
     this.lastSampledCells = 0;
     this.lastEmitters = 0;
     this.lastMaxSignal = 0;
+    this.lastEnvironmentSamples = 0;
+    this.lastFallbackSamples = 0;
+    this.lastInvalidSamples = 0;
     this.scanActive = true;
   }
 
@@ -184,8 +207,9 @@ export class RiverMistOverlay {
       const z = (cellZ + 0.5 + jitterZ) * particles.spacingM;
       if (Math.hypot(x - this.scanCenterX, z - this.scanCenterZ) > particles.spawnRadiusM) continue;
 
-      const sample = this.field.sampleForCellSize(x, z, this.sampleHintM);
+      const sample = this.sampleMist(x, z);
       this.lastSampledCells += 1;
+      if (!sample) continue;
       const signal = riverMistSignal(sample, biome, this.options.settings);
       this.lastMaxSignal = Math.max(this.lastMaxSignal, signal);
       if (signal <= 0.01) continue;
@@ -199,26 +223,42 @@ export class RiverMistOverlay {
     }
   }
 
+  private sampleMist(x: number, z: number): RiverMistSample | null {
+    const query = this.readEnvironmentQuery();
+    if (query) {
+      this.lastEnvironmentSamples += 1;
+      const sample = riverMistSampleFromEnvironment(
+        query.water(x, z, this.sampleHintM),
+        query.river(x, z, this.sampleHintM),
+      );
+      if (!sample) this.lastInvalidSamples += 1;
+      return sample;
+    }
+
+    this.lastFallbackSamples += 1;
+    return riverMistSampleFromWaterField(this.field.sampleForCellSize(x, z, this.sampleHintM));
+  }
+
   private spawnParticle(
     x: number,
     z: number,
     cellX: number,
     cellZ: number,
-    sample: WaterFieldResult,
+    sample: RiverMistSample,
     signal: number,
   ): void {
     const particles = this.options.settings.mask.particles;
-    const flowLength = Math.hypot(sample.flow.x, sample.flow.z);
+    const flowLength = Math.hypot(sample.flowX, sample.flowZ);
     const fallbackAngle = hash01(cellX, cellZ, this.scanGeneration * 13 + 4) * Math.PI * 2;
-    const directionX = flowLength > 0.001 ? sample.flow.x / flowLength : Math.cos(fallbackAngle);
-    const directionZ = flowLength > 0.001 ? sample.flow.z / flowLength : Math.sin(fallbackAngle);
+    const directionX = flowLength > 0.001 ? sample.flowX / flowLength : Math.cos(fallbackAngle);
+    const directionZ = flowLength > 0.001 ? sample.flowZ / flowLength : Math.sin(fallbackAngle);
     const sideX = -directionZ;
     const sideZ = directionX;
     const side = hashSigned(cellX, cellZ, this.scanGeneration * 13 + 5);
     const forward = 0.55 + hash01(cellX, cellZ, this.scanGeneration * 13 + 6) * 0.55;
     const lifeT = hash01(cellX, cellZ, this.scanGeneration * 13 + 7);
     const heightT = hash01(cellX, cellZ, this.scanGeneration * 13 + 8);
-    const drift = particles.driftSpeedMps * (0.7 + Math.min(1, sample.flow.speed) * 0.45);
+    const drift = particles.driftSpeedMps * (0.7 + Math.min(1, sample.flowStrength) * 0.45);
 
     this.pool.spawn(
       x + sideX * side * particles.spacingM * 0.28,
