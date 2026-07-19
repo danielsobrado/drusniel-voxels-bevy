@@ -233,7 +233,7 @@ function terrainNodeColor(baseColor: TslNode, uniforms: BiomeNodeUniforms): TslN
   color = mix(color, color.mul(vec3(1.08, 0.78, 0.48)), uniforms.autumn.mul(0.28).mul(uniforms.enabled));
   color = mix(color, color.mul(vec3(0.82, 0.88, 0.86)), uniforms.dew.mul(0.12).mul(uniforms.enabled));
   color = mix(color, vec3(0.82, 0.9, 1), uniforms.frost.mul(0.18).mul(uniforms.enabled));
-  const upness = smoothstep(0.35, 0.72, normalWorld.y);
+  const upness = smoothstep(0.35, 0.72, clamp(normalWorld.y, 0, 1));
   const snow = smoothstep(
     uniforms.snowlineM.sub(TERRAIN_SNOW_FADE_M),
     uniforms.snowlineM.add(TERRAIN_SNOW_FADE_M),
