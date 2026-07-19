@@ -5,7 +5,7 @@ const PERF_SOURCE = readFileSync(new URL("./waterPerfNodeMaterial.ts", import.me
 const HQ_SOURCE = readFileSync(new URL("./waterNodeMaterial.ts", import.meta.url), "utf8");
 const FOAM_SOURCE = readFileSync(new URL("./water_foam_nodes.ts", import.meta.url), "utf8");
 
-describe("performance water foam shader contract", () => {
+ describe("performance water foam shader contract", () => {
   it("uses the same coherent foam authority as HQ water", () => {
     expect(PERF_SOURCE).toContain("buildWaterFoamNodes");
     expect(HQ_SOURCE).toContain("buildWaterFoamNodes");
@@ -36,8 +36,12 @@ describe("performance water foam shader contract", () => {
     expect(PERF_SOURCE).not.toContain("mix(lit, uFoam, foam)");
   });
 
-  it("retains a far-level detail fade without changing near coverage", () => {
-    expect(PERF_SOURCE).toContain("FAR_FOAM_DETAIL_START_LEVEL");
-    expect(PERF_SOURCE).toContain("foamNodes.coverage.mul(farDetailFade)");
+  it("uses the shared camera-distance fade instead of clipmap level", () => {
+    expect(PERF_SOURCE).toContain("detailFadeStartM: uFoamDetailFadeStartM");
+    expect(PERF_SOURCE).toContain("detailFadeEndM: uFoamDetailFadeEndM");
+    expect(PERF_SOURCE).toContain("const foam: TslNode = foamNodes.coverage");
+    expect(FOAM_SOURCE).toContain("buildWaterFoamDistanceFadeNode");
+    expect(PERF_SOURCE).not.toContain("FAR_FOAM_DETAIL_START_LEVEL");
+    expect(PERF_SOURCE).not.toContain("farDetailFade");
   });
 });
