@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BiomeVisualState } from "../environment/biome_visual_state.js";
+import type {
+  EnvironmentBatchInput,
+  EnvironmentBatchOutput,
+  EnvironmentBatchSampler,
+  ResolvedEnvironmentBatchOptions,
+} from "../environment_query/batch.js";
+import { ENVIRONMENT_QUERY_FIELD } from "../environment_query/constants.js";
 import type { EnvironmentQuery, EnvironmentQueryMeta } from "../environment_query/types.js";
 import { HYDROLOGY_BODY_RIVER } from "../water/hydrologyGrid.js";
 import {
@@ -52,21 +59,77 @@ describe("environmental mask batch", () => {
     });
   });
 
+  it("uses one authority batch and preserves scalar mask parity", () => {
+    const positions = new Float32Array([99, 10, 20, 7, 99, 30, 40, 7]);
+    const settings = cloneEnvironmentalMaskSettings();
+    const scalarQuery = makeQuery();
+    const batchQuery = makeBatchQuery();
+    const scalarOutput = createEnvironmentalMaskBatchBuffers(2);
+    const batchOutput = createEnvironmentalMaskBatchBuffers(2);
+
+    evaluateEnvironmentalMaskBatch({
+      query: scalarQuery,
+      settings,
+      biome,
+      positions,
+      count: 2,
+      positionStride: 4,
+      positionOffset: 1,
+      hintM: 32,
+      output: scalarOutput,
+    });
+    evaluateEnvironmentalMaskBatch({
+      query: batchQuery,
+      settings,
+      biome,
+      positions,
+      count: 2,
+      positionStride: 4,
+      positionOffset: 1,
+      hintM: 32,
+      output: batchOutput,
+    });
+
+    expect(batchQuery.sampleBatch).toHaveBeenCalledTimes(1);
+    expect(batchQuery.water).not.toHaveBeenCalled();
+    expect(batchQuery.river).not.toHaveBeenCalled();
+    expect(batchQuery.surfaceNormal).not.toHaveBeenCalled();
+    expect(batchQuery.visibility).not.toHaveBeenCalled();
+    const options = vi.mocked(batchQuery.sampleBatch).mock.calls[0]?.[2];
+    expect(options).toEqual({
+      fieldMask: ENVIRONMENT_QUERY_FIELD.water
+        | ENVIRONMENT_QUERY_FIELD.river
+        | ENVIRONMENT_QUERY_FIELD.normal
+        | ENVIRONMENT_QUERY_FIELD.visibility,
+      sampleHintM: 32,
+    });
+    expect(Array.from(batchOutput.riverCobble)).toEqual(Array.from(scalarOutput.riverCobble));
+    expect(Array.from(batchOutput.riverMist)).toEqual(Array.from(scalarOutput.riverMist));
+    expect(Array.from(batchOutput.rapidSplash)).toEqual(Array.from(scalarOutput.rapidSplash));
+    expect(Array.from(batchOutput.sunbeamMote)).toEqual(Array.from(scalarOutput.sunbeamMote));
+    expect(Array.from(batchOutput.calmPool)).toEqual(Array.from(scalarOutput.calmPool));
+    expect(Array.from(batchOutput.frost)).toEqual(Array.from(scalarOutput.frost));
+    expect(Array.from(batchOutput.dew)).toEqual(Array.from(scalarOutput.dew));
+    expect(Array.from(batchOutput.shoreDebris)).toEqual(Array.from(scalarOutput.shoreDebris));
+    expect(Array.from(batchOutput.validity)).toEqual(Array.from(scalarOutput.validity));
+  });
+
   it("writes deterministic zeros for non-finite positions without querying authorities", () => {
-    const query = makeQuery();
+    const query = makeBatchQuery();
     const output = createEnvironmentalMaskBatchBuffers(2);
     output.riverMist.fill(1);
     evaluateEnvironmentalMaskBatch({
       query,
       settings: cloneEnvironmentalMaskSettings(),
       biome,
-      positions: [Number.NaN, 0, 1, Number.POSITIVE_INFINITY],
+      positions: new Float32Array([Number.NaN, 0, 1, Number.POSITIVE_INFINITY]),
       count: 2,
       output,
     });
 
     expect(Array.from(output.riverMist)).toEqual([0, 0]);
     expect(Array.from(output.validity)).toEqual([0, 0]);
+    expect(query.sampleBatch).not.toHaveBeenCalled();
     expect(query.water).not.toHaveBeenCalled();
   });
 
@@ -127,4 +190,44 @@ function makeQuery(): EnvironmentQuery {
     })),
     visibility: vi.fn(() => ({ sunVisibility: 0.6, meta: valid("sun-visibility-cache") })),
   };
+}
+
+function makeBatchQuery(): EnvironmentQuery & EnvironmentBatchSampler {
+  const query = makeQuery() as EnvironmentQuery & EnvironmentBatchSampler;
+  query.sampleBatch = vi.fn((
+    input: EnvironmentBatchInput,
+    output: EnvironmentBatchOutput,
+    options: ResolvedEnvironmentBatchOptions,
+  ) => {
+    for (let index = 0; index < input.count; index += 1) {
+      output.waterY[index] = 2;
+      output.carvedBedY[index] = 1.5;
+      output.waterDepth[index] = 0.5;
+      output.wetMask[index] = 1;
+      output.shoreDistanceM[index] = 3;
+      output.bodyKind[index] = HYDROLOGY_BODY_RIVER;
+      output.bodyId[index] = 1;
+      output.flowXZ[index * 2] = 1;
+      output.flowXZ[index * 2 + 1] = 0;
+      output.flowStrength[index] = 0.4;
+      output.bedDrop[index] = 0.6;
+      output.rapidMask[index] = 0.2;
+      output.channelCenterWeight[index] = 0.8;
+      output.bankContactWeight[index] = 0.2;
+      output.gravelBarMask[index] = 0;
+      output.normalXYZ[index * 3] = 0;
+      output.normalXYZ[index * 3 + 1] = 0.9;
+      output.normalXYZ[index * 3 + 2] = 0;
+      output.sunVisibility[index] = 0.6;
+      output.meta.water.valid[index] = 1;
+      output.meta.river.valid[index] = 1;
+      output.meta.normal.valid[index] = 1;
+      output.meta.visibility.valid[index] = 1;
+      output.meta.water.cellSizeM[index] = options.sampleHintM;
+      output.meta.river.cellSizeM[index] = options.sampleHintM;
+      output.meta.normal.cellSizeM[index] = options.sampleHintM;
+      output.meta.visibility.cellSizeM[index] = options.sampleHintM;
+    }
+  });
+  return query;
 }
