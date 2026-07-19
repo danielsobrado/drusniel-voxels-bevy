@@ -1,6 +1,7 @@
 import type { BiomeVisualState } from "../environment/biome_visual_state.js";
 import { readEnvironmentalMaskSettings } from "../environment_masks/environment_mask_runtime.js";
 import type { RiverMistMaskSettings } from "../environment_masks/environment_mask_types.js";
+import type { RiverQueryResult, WaterQueryResult } from "../environment_query/types.js";
 import { HYDROLOGY_BODY_RIVER } from "./hydrologyGrid.js";
 import type { WaterFieldResult } from "./waterField.js";
 
@@ -13,6 +14,17 @@ export const RIVER_MIST_QUERY_KEYS = [
 export interface RiverMistRuntimeSettings {
   readonly enabled: boolean;
   readonly mask: RiverMistMaskSettings;
+}
+
+export interface RiverMistSample {
+  readonly waterY: number;
+  readonly depth: number;
+  readonly wetMask: number;
+  readonly bodyKind: number;
+  readonly shoreDistanceM: number;
+  readonly flowX: number;
+  readonly flowZ: number;
+  readonly flowStrength: number;
 }
 
 /** Resolved capability and budget settings. Live activation is owned by the lil-gui state. */
@@ -39,32 +51,65 @@ export function riverMistInitialEnabled(
   return queryFlag(searchParams, RIVER_MIST_QUERY_KEYS, false);
 }
 
+export function riverMistSampleFromEnvironment(
+  water: WaterQueryResult,
+  river: RiverQueryResult,
+): RiverMistSample | null {
+  if (!water.meta.valid || !river.meta.valid) return null;
+  const sample: RiverMistSample = {
+    waterY: water.waterY,
+    depth: water.depth,
+    wetMask: water.wetMask,
+    bodyKind: water.bodyKind,
+    shoreDistanceM: water.shoreDistanceM,
+    flowX: river.flowX,
+    flowZ: river.flowZ,
+    flowStrength: river.flowStrength,
+  };
+  return validRiverMistSample(sample) ? sample : null;
+}
+
+export function riverMistSampleFromWaterField(sample: WaterFieldResult): RiverMistSample {
+  return {
+    waterY: sample.waterY,
+    depth: sample.depth,
+    wetMask: sample.bodyMask,
+    bodyKind: sample.bodyKind,
+    shoreDistanceM: sample.shoreDistance,
+    flowX: sample.flow.x,
+    flowZ: sample.flow.z,
+    flowStrength: sample.flow.speed,
+  };
+}
+
 export function riverMistSignal(
-  sample: WaterFieldResult,
+  sample: RiverMistSample,
   biome: Pick<BiomeVisualState, "enabled" | "morningMist"> | null,
   settings: RiverMistRuntimeSettings,
 ): number {
   if (!settings.enabled || !biome?.enabled) return 0;
-  if (!validWaterSample(sample)) return 0;
-  if (sample.bodyKind !== HYDROLOGY_BODY_RIVER || sample.depth <= 0.03 || sample.bodyMask <= 0.08) return 0;
-  if (sample.shoreDistance < 0) return 0;
+  if (!validRiverMistSample(sample)) return 0;
+  if (sample.bodyKind !== HYDROLOGY_BODY_RIVER || sample.depth <= 0.03 || sample.wetMask <= 0.08) return 0;
+  if (sample.shoreDistanceM < 0) return 0;
 
   const mask = settings.mask;
-  const flow = smoothRamp(mask.minFlowStrength, mask.minFlowStrength * 3 + 0.001, sample.flow.speed);
-  const shore = 1 - smoothRamp(mask.maxShoreDistanceM * 0.55, mask.maxShoreDistanceM, sample.shoreDistance);
+  const flow = smoothRamp(mask.minFlowStrength, mask.minFlowStrength * 3 + 0.001, sample.flowStrength);
+  const shore = 1 - smoothRamp(mask.maxShoreDistanceM * 0.55, mask.maxShoreDistanceM, sample.shoreDistanceM);
   return clamp01(mask.strength)
-    * clamp01(sample.bodyMask)
+    * clamp01(sample.wetMask)
     * clamp01(biome.morningMist)
     * flow
     * shore;
 }
 
-function validWaterSample(sample: WaterFieldResult): boolean {
+function validRiverMistSample(sample: RiverMistSample): boolean {
   return Number.isFinite(sample.waterY)
     && Number.isFinite(sample.depth)
-    && Number.isFinite(sample.bodyMask)
-    && Number.isFinite(sample.shoreDistance)
-    && Number.isFinite(sample.flow.speed);
+    && Number.isFinite(sample.wetMask)
+    && Number.isFinite(sample.shoreDistanceM)
+    && Number.isFinite(sample.flowX)
+    && Number.isFinite(sample.flowZ)
+    && Number.isFinite(sample.flowStrength);
 }
 
 function currentSearchParams(): URLSearchParams {
