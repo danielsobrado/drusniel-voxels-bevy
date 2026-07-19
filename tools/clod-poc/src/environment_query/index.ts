@@ -5,7 +5,4 @@ export * from "./hydrology_adapter.js";
 export * from "./hydrology_adapter_mapping.js";
 export * from "./probe.js";
 export * from "./runtime.js";
-export * from "./sun_visibility_adapter.js";
-export * from "./terrain_adapter.js";
-export * from "./terrain_authority.js";
 export * from "./types.js";
