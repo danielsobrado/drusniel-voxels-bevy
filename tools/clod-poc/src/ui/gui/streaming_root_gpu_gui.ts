@@ -14,6 +14,14 @@ export interface StreamingRootGpuGuiDeps {
   resetControls(): StreamingRootGpuMesherRuntimeControls;
 }
 
+interface StreamingRootGpuGuiModel {
+  enabled: boolean;
+  fallback: boolean;
+  batchSize: number;
+  maxInflightBatches: number;
+  resetOverrides(): void;
+}
+
 const DEFAULT_DEPS: StreamingRootGpuGuiDeps = {
   readConfig: streamingRootGpuMesherConfigFromWindow,
   setControls: setStreamingRootGpuMesherRuntimeControls,
@@ -27,7 +35,7 @@ export function createStreamingRootGpuGui(
 ): void {
   const folder = gui.addFolder("CLOD GPU streaming");
   const config = deps.readConfig();
-  const model = {
+  const model: StreamingRootGpuGuiModel = {
     enabled: config.enabled,
     fallback: config.fallback,
     batchSize: config.batchSize,
