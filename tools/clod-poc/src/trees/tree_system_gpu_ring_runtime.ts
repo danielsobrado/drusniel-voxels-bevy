@@ -203,11 +203,12 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
 
 export function clearTreeGpuRing(input: TreeGpuRingRuntimeInput): void {
   input.state.generation++;
-  input.state.compute?.destroy();
+  const compute = input.state.compute;
   input.state.compute = null;
   input.state.init = null;
   input.state.key = "";
   input.state.failedKey = "";
+  destroyTreeGpuRingCompute(compute);
   clearTreeGpuRingDraw(input.state, input.root);
   input.state.stats = createTreeGpuRingStats(input.gpuDevice ? "idle" : "disabled");
   input.state.visibleCount = 0;
@@ -245,15 +246,15 @@ function ensureTreeGpuRingCompute(input: TreeGpuRingRuntimeInput, key: string): 
     const initGeneration = input.state.generation;
     const edits = resolveDigEdits(getDigEditsSnapshot());
     input.state.init = TreeGpuRingCompute.create(input.gpuDevice, edits, input.state.draw.outputBuffers, input.settings)
-      .then((compute) => {
+      .then((nextCompute) => {
         if (input.state.key !== initKey || input.state.generation !== initGeneration) {
-          compute.destroy();
+          destroyTreeGpuRingCompute(nextCompute);
           return;
         }
-        input.state.compute = compute;
+        input.state.compute = nextCompute;
         input.state.failedKey = "";
         input.state.loggedError = null;
-        input.state.stats = compute.stats(input.settings.enabled);
+        input.state.stats = nextCompute.stats(input.settings.enabled);
       })
       .catch((error) => {
         if (input.state.key !== initKey || input.state.generation !== initGeneration) return;
@@ -279,6 +280,15 @@ function failTreeGpuRing(input: TreeGpuRingRuntimeInput, key: string, error: unk
   input.state.status = input.settings.gpu.fallbackToCpu ? "fallback-cpu" : "error";
   const action = input.settings.gpu.fallbackToCpu ? "falling back to CPU" : "GPU ring disabled";
   console.warn(`[trees-gpu-ring] ${action}: ${reason}`);
+}
+
+function destroyTreeGpuRingCompute(compute: TreeGpuRingCompute | null): void {
+  if (!compute) return;
+  try {
+    compute.destroy();
+  } catch (error) {
+    console.warn("[trees-gpu-ring] compute disposal failed", error);
+  }
 }
 
 function validateTreeGpuRingAgainstCpu(
