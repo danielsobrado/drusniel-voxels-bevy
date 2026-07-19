@@ -9,7 +9,9 @@ export const WATER_FOAM_DISTANCE_ACCEPTANCE_LIMITS = Object.freeze({
   maxFarMeanCoverage: 0.003,
   maxFarNearRatio: 0.05,
   minMonotonicFraction: 0.95,
+  minNearActiveMonotonicFraction: 0.90,
   minLinearSamples: 100,
+  minLinearMonotonicFraction: 0.90,
   minLinearMidNearRatio: 0.35,
   maxLinearMidNearRatio: 0.65,
   maxLinearFarNearRatio: 0.05,
@@ -45,7 +47,19 @@ export function evaluateWaterFoamDistanceAcceptance(
     metrics.monotonicFraction,
     limits.minMonotonicFraction,
   );
+  requireMin(
+    failures,
+    "near-active monotonic fraction",
+    metrics.nearActiveMonotonicFraction,
+    limits.minNearActiveMonotonicFraction,
+  );
   requireMin(failures, "uncapped linear samples", metrics.linearSampleCount, limits.minLinearSamples);
+  requireMin(
+    failures,
+    "uncapped monotonic fraction",
+    metrics.linearMonotonicFraction,
+    limits.minLinearMonotonicFraction,
+  );
   requireRange(
     failures,
     "uncapped mid/near coverage ratio",
