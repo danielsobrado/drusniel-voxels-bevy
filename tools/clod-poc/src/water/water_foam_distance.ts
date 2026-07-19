@@ -7,6 +7,21 @@ export interface WaterFoamDistanceFade {
   readonly endM: number;
 }
 
+export interface WaterFoamDistanceFadeState extends WaterFoamDistanceFade {
+  readonly valid: boolean;
+  readonly version: number;
+}
+
+export type WaterFoamDistanceFadeListener = (state: WaterFoamDistanceFadeState) => void;
+
+let state: WaterFoamDistanceFadeState = {
+  startM: 0,
+  endM: MIN_FADE_WIDTH_M,
+  valid: false,
+  version: 0,
+};
+const listeners = new Set<WaterFoamDistanceFadeListener>();
+
 export function resolveWaterFoamDistanceFade(
   foam: Pick<WaterFoamVisualConfig, "detailFadeStartM" | "detailFadeEndM">,
 ): WaterFoamDistanceFade {
@@ -16,6 +31,30 @@ export function resolveWaterFoamDistanceFade(
     startM,
     endM: Math.max(startM + MIN_FADE_WIDTH_M, requestedEndM),
   };
+}
+
+export function publishWaterFoamDistanceFade(
+  foam: Pick<WaterFoamVisualConfig, "detailFadeStartM" | "detailFadeEndM">,
+): WaterFoamDistanceFadeState {
+  const resolved = resolveWaterFoamDistanceFade(foam);
+  if (state.valid && state.startM === resolved.startM && state.endM === resolved.endM) return state;
+  state = {
+    ...resolved,
+    valid: true,
+    version: state.version + 1,
+  };
+  for (const listener of listeners) listener(state);
+  return state;
+}
+
+export function getWaterFoamDistanceFadeState(): WaterFoamDistanceFadeState {
+  return state;
+}
+
+export function subscribeWaterFoamDistanceFade(listener: WaterFoamDistanceFadeListener): () => void {
+  listeners.add(listener);
+  listener(state);
+  return () => listeners.delete(listener);
 }
 
 export function evaluateWaterFoamDistanceFade(
