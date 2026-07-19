@@ -1,5 +1,8 @@
 import type { BiomeVisualSeason } from "./biome-visual-acceptance-profile.js";
-import { BIOME_VISUAL_SEASON_PROFILES } from "./biome-visual-acceptance-profile.js";
+import {
+  BIOME_VISUAL_SEASONS,
+  BIOME_VISUAL_SEASON_PROFILES,
+} from "./biome-visual-acceptance-profile.js";
 import type { ImageDeltaMetrics } from "./biome-visual-image-metrics.js";
 
 export interface BiomeVisualRuntimeState {
@@ -24,7 +27,7 @@ export interface BiomeVisualAcceptanceMetrics {
 export interface BiomeVisualAcceptanceInput {
   readonly runtimeStates: Readonly<Record<BiomeVisualSeason, BiomeVisualRuntimeState>>;
   readonly metrics: BiomeVisualAcceptanceMetrics;
-  readonly webGpuErrors: number;
+  readonly webGpuErrors: Readonly<Record<BiomeVisualSeason, number>>;
 }
 
 export interface BiomeVisualAcceptanceResult {
@@ -45,11 +48,9 @@ export function evaluateBiomeVisualAcceptance(
 ): BiomeVisualAcceptanceResult {
   const failures: string[] = [];
 
-  for (const [season, state] of Object.entries(input.runtimeStates) as Array<[
-    BiomeVisualSeason,
-    BiomeVisualRuntimeState,
-  ]>) {
-    evaluateRuntimeState(season, state, failures);
+  for (const season of BIOME_VISUAL_SEASONS) {
+    evaluateRuntimeState(season, input.runtimeStates[season], failures);
+    evaluateWebGpuErrors(season, input.webGpuErrors[season], failures);
   }
 
   evaluateTerrainDelta(input.metrics.terrainWinterSummer, failures);
@@ -57,10 +58,6 @@ export function evaluateBiomeVisualAcceptance(
   evaluateVegetationDelta("trees summer/autumn", input.metrics.treesSummerAutumn, failures);
   evaluateVegetationDelta("understory summer/autumn", input.metrics.understorySummerAutumn, failures);
   evaluateVegetationDelta("flower bloom spring/autumn", input.metrics.bloomSpringAutumn, failures);
-
-  if (!Number.isFinite(input.webGpuErrors) || input.webGpuErrors !== 0) {
-    failures.push(`expected zero WebGPU errors, got ${input.webGpuErrors}`);
-  }
 
   return { passed: failures.length === 0, failures };
 }
@@ -79,6 +76,16 @@ function evaluateRuntimeState(
   expectNear(failures, `${season}.snowlineM`, state.snowlineM, profile.expected.snowlineM);
   expectNear(failures, `${season}.frostAmount`, state.frostAmount, profile.expected.frostAmount);
   expectNear(failures, `${season}.wetness`, state.wetness, 0);
+}
+
+function evaluateWebGpuErrors(
+  season: BiomeVisualSeason,
+  errors: number,
+  failures: string[],
+): void {
+  if (!Number.isFinite(errors) || errors !== 0) {
+    failures.push(`${season}: expected zero WebGPU errors, got ${errors}`);
+  }
 }
 
 function evaluateTerrainDelta(metrics: ImageDeltaMetrics, failures: string[]): void {
