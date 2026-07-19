@@ -13,7 +13,9 @@ export interface WaterFoamDistanceVisualMetrics {
   readonly midNearRatio: number;
   readonly farNearRatio: number;
   readonly monotonicFraction: number;
+  readonly nearActiveMonotonicFraction: number;
   readonly linearSampleCount: number;
+  readonly linearMonotonicFraction: number;
   readonly linearMidNearRatio: number;
   readonly linearFarNearRatio: number;
 }
@@ -35,7 +37,9 @@ export function measureWaterFoamDistanceResponse(
   let midSum = 0;
   let farSum = 0;
   let monotonicCount = 0;
+  let nearActiveMonotonicCount = 0;
   let linearSampleCount = 0;
+  let linearMonotonicCount = 0;
   let linearNearSum = 0;
   let linearMidSum = 0;
   let linearFarSum = 0;
@@ -45,19 +49,20 @@ export function measureWaterFoamDistanceResponse(
     const nearValue = luminanceAt(near, pixel);
     const midValue = luminanceAt(mid, pixel);
     const farValue = luminanceAt(far, pixel);
+    const monotonic = nearValue + MONOTONIC_TOLERANCE >= midValue
+      && midValue + MONOTONIC_TOLERANCE >= farValue;
     waterPixelCount += 1;
     nearSum += nearValue;
     midSum += midValue;
     farSum += farValue;
-    if (nearValue >= LINEAR_NEAR_MIN) nearActivePixelCount += 1;
-    if (
-      nearValue + MONOTONIC_TOLERANCE >= midValue
-      && midValue + MONOTONIC_TOLERANCE >= farValue
-    ) {
-      monotonicCount += 1;
+    if (monotonic) monotonicCount += 1;
+    if (nearValue >= LINEAR_NEAR_MIN) {
+      nearActivePixelCount += 1;
+      if (monotonic) nearActiveMonotonicCount += 1;
     }
     if (nearValue < LINEAR_NEAR_MIN || nearValue > LINEAR_NEAR_MAX) continue;
     linearSampleCount += 1;
+    if (monotonic) linearMonotonicCount += 1;
     linearNearSum += nearValue;
     linearMidSum += midValue;
     linearFarSum += farValue;
@@ -75,7 +80,9 @@ export function measureWaterFoamDistanceResponse(
     midNearRatio: ratio(midMeanCoverage, nearMeanCoverage),
     farNearRatio: ratio(farMeanCoverage, nearMeanCoverage),
     monotonicFraction: divide(monotonicCount, waterPixelCount),
+    nearActiveMonotonicFraction: divide(nearActiveMonotonicCount, nearActivePixelCount),
     linearSampleCount,
+    linearMonotonicFraction: divide(linearMonotonicCount, linearSampleCount),
     linearMidNearRatio: ratio(linearMidSum, linearNearSum),
     linearFarNearRatio: ratio(linearFarSum, linearNearSum),
   };
