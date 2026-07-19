@@ -3,6 +3,8 @@ grass_contact:
   max_patches: 32
   inner_radius_scale: 0.90
   outer_radius_scale: 1.65
+  field_grid: 192
+  field_cell_m: 1.0
   min_height_scale: 0.08
   flatten_strength: 0.72
   splay_strength_m: 0.38
