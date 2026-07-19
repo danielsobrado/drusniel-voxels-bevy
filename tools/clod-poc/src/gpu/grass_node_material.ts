@@ -135,6 +135,7 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
     aTerrainNormal4 = attribute("aTerrainNormal", "vec4");
   }
   const aOffset: TslNode = aOffset4.xyz;
+  const aSunVisibility: TslNode = ring ? clamp(aOffset4.w, 0.0, 1.0) : float(1);
   let groundY: TslNode = aOffset.y;
   let hydroWaterY: TslNode | null = null;
   if (params.hydrologyWaterTexture) {
@@ -253,12 +254,12 @@ export function createGrassNodeMaterial(params: GrassNodeParams): GrassNodeMater
   let litColor: TslNode;
   if (isPatchV2) {
     const wrap: TslNode = clamp(dot(n, lightDir).mul(0.45).add(0.55), 0.0, 1.0);
-    const direct: TslNode = uSun.mul(sun.mul(0.58).add(wrap.mul(0.22)));
+    const direct: TslNode = uSun.mul(sun.mul(0.58).add(wrap.mul(0.22))).mul(aSunVisibility);
     const transmission: TslNode = vec3(0.32, 0.42, 0.10).mul(back).mul(uvY.mul(0.34).add(0.12));
     const ambientFloor: TslNode = grassColor.mul(0.22);
     litColor = ambientFloor.add(grassColor.mul(hemi.add(direct))).add(transmission.mul(grassColor));
   } else {
-    const direct: TslNode = uSun.mul(pow(sun, 1.25)).mul(0.82);
+    const direct: TslNode = uSun.mul(pow(sun, 1.25)).mul(0.82).mul(aSunVisibility);
     const transmission: TslNode = vec3(0.32, 0.42, 0.10).mul(back).mul(uvY.mul(0.34).add(0.12));
     const ambientFloor: TslNode = grassColor.mul(0.22);
     litColor = ambientFloor.add(grassColor.mul(hemi.add(direct))).add(transmission.mul(grassColor));
