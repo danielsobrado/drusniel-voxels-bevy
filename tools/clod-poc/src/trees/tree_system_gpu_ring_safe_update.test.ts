@@ -96,20 +96,63 @@ describe("tree GPU ring safe update", () => {
     );
   });
 
-  it("emits one console error for a previously silent CPU fallback", () => {
+  it("skips the runtime and logs once for a stable unavailable device", () => {
     const input = fixture(true);
     input.gpuDevice = null;
-    input.state.status = "fallback-cpu";
-    runtime.update.mockReturnValue(false);
 
     expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
+    expect(input.state.status).toBe("fallback-cpu");
+    expect(input.state.stats.reason).toBe("WebGPU device is unavailable");
     expect(input.state.loggedError).toBe("WebGPU device is unavailable");
+    expect(runtime.update).not.toHaveBeenCalled();
+    expect(runtime.clear).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(
       "[trees-gpu-ring] falling back to CPU: WebGPU device is unavailable",
     );
 
     expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
+    expect(runtime.update).not.toHaveBeenCalled();
+    expect(runtime.clear).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("tears down live resources once when GPU availability is lost", () => {
+    const input = fixture(true);
+    input.gpuDevice = null;
+    input.state.init = Promise.resolve();
+
+    expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
+    expect(runtime.clear).toHaveBeenCalledTimes(1);
+    expect(runtime.update).not.toHaveBeenCalled();
+
+    expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
+    expect(runtime.clear).toHaveBeenCalledTimes(1);
+    expect(runtime.update).not.toHaveBeenCalled();
+  });
+
+  it("retries immediately when GPU availability returns", () => {
+    const input = fixture(true);
+    input.gpuDevice = null;
+    runtime.update.mockReturnValue(true);
+
+    expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
+    expect(runtime.update).not.toHaveBeenCalled();
+
+    input.gpuDevice = {} as GPUDevice;
+    expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(true);
+    expect(runtime.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports unavailable GPU state without silently enabling CPU fallback", () => {
+    const input = fixture(false);
+    input.gpuBackend = null;
+
+    expect(updateTreeGpuRingTreesSafely(input, new THREE.Vector3())).toBe(false);
+    expect(input.state.status).toBe("unsupported");
+    expect(input.state.stats.reason).toBe("WebGPU tree backend is unavailable");
+    expect(console.error).toHaveBeenCalledWith(
+      "[trees-gpu-ring] GPU ring unavailable: WebGPU tree backend is unavailable",
+    );
   });
 
   it("does not duplicate an error already handled by the runtime", () => {
