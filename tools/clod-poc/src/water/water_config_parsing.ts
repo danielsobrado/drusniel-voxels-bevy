@@ -1,7 +1,7 @@
 import { load } from "js-yaml";
 import { DEFAULT_CAUSTICS_CONFIG } from "./causticsConfig.js";
 import { DEFAULT_HYDROLOGY_CONFIG } from "./hydrologyConfig.js";
-import { setGravelBarSettings } from "./gravel_bar_runtime.js";
+import { setGravelBarSettings, setGravelBedSettings } from "./gravel_bar_runtime.js";
 import { cloneWaterConfig } from "./water_config_clone.js";
 import { DEFAULT_WATER_CONFIG, DEFAULT_WATER_VISUAL } from "./water_config_defaults.js";
 import { readWaterDebugConfig } from "./water_config_debug_parsing.js";
@@ -45,13 +45,18 @@ function warnWater(message: string, warn?: ((message: string) => void) | null): 
   warn?.(`[water-config] ${message}`);
 }
 
+function publishGravelSettings(config: WaterConfig): void {
+  setGravelBarSettings(config.hydrology.gravelBars);
+  setGravelBedSettings(config.hydrology.gravelBed);
+}
+
 export function parseWaterConfig(
   text: string | null | undefined,
   warn: ((message: string) => void) | null = console.warn,
 ): WaterConfig {
   const fallback = applyRuntimeRiverOverrides(cloneWaterConfig(DEFAULT_WATER_CONFIG), WATER_RUNTIME_OVERRIDE_OPTIONS);
   if (!text || text.trim() === "") {
-    setGravelBarSettings(fallback.hydrology.gravelBars);
+    publishGravelSettings(fallback);
     return fallback;
   }
 
@@ -63,12 +68,12 @@ export function parseWaterConfig(
       `failed to parse config/water.yaml; using defaults: ${error instanceof Error ? error.message : String(error)}`,
       warn ?? undefined,
     );
-    setGravelBarSettings(fallback.hydrology.gravelBars);
+    publishGravelSettings(fallback);
     return fallback;
   }
 
   const validated = validateWaterConfig(config, DEFAULT_WATER_CONFIG.debug.mode, warn ?? null);
-  setGravelBarSettings(validated.hydrology.gravelBars);
+  publishGravelSettings(validated);
   return validated;
 }
 
