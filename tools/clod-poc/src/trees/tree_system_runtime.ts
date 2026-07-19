@@ -200,8 +200,11 @@ export class TreeSystem {
       this.clearGpuRing();
       this.gpuRing.status = treeCpuFallbackGpuStatus(this.settings);
     }
-    if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= this.settings.refreshDistanceM) this.refreshForCenter(center, cameraPosition);
-    this.updatePatchLods(center, cameraPosition);
+    if (this.patchesDirty || this.lastRefreshCenter.distanceTo(center) >= this.settings.refreshDistanceM) {
+      this.refreshForCenter(center, cameraPosition);
+    } else {
+      this.updatePatchLods(center, cameraPosition);
+    }
   }
 
   rebuild(): void {
@@ -251,7 +254,7 @@ export class TreeSystem {
     this.assets.dispose();
   }
 
-  getStats(): TreeStats { this.updateStats(); return { ...this.stats }; }
+  getStats(): TreeStats { return { ...this.stats }; }
 
   getLightingProxies(): TreeLightingProxy[] {
     if (!this.settings.enabled) return [];
