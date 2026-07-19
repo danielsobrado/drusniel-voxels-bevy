@@ -10,11 +10,17 @@ import {
   stringArg,
 } from "./water-harness.js";
 import { WATER_FOAM_ACCEPTANCE_QUALITIES } from "./water-foam-acceptance-profile.js";
+import {
+  assertWaterFoamAcceptancePosesMatch,
+  extractWaterFoamAcceptancePoses,
+  type WaterFoamAcceptancePoses,
+} from "./water-foam-pose-parity.js";
 
 interface TierReport {
   readonly quality: string;
   readonly reportPath: string;
   readonly passed: boolean;
+  readonly poseParity: boolean;
   readonly failures: readonly string[];
 }
 
@@ -28,6 +34,8 @@ function main(): void {
   const require = createRequire(import.meta.url);
   const tsxCli = require.resolve("tsx/cli");
   const reports: TierReport[] = [];
+  let canonicalReportPath: string | null = null;
+  let canonicalPoses: WaterFoamAcceptancePoses | null = null;
 
   for (const quality of WATER_FOAM_ACCEPTANCE_QUALITIES) {
     const tierOut = join(outRoot, quality);
@@ -40,6 +48,7 @@ function main(): void {
       `--out=${tierOut}`,
     ];
     if (sourceUrl) childArgs.push(`--url=${sourceUrl}`);
+    if (canonicalReportPath) childArgs.push(`--pose-report=${canonicalReportPath}`);
 
     const result = spawnSync(process.execPath, childArgs, {
       cwd: process.cwd(),
@@ -54,19 +63,42 @@ function main(): void {
     }
     const parsed = JSON.parse(readFileSync(reportPath, "utf8")) as {
       acceptance?: { passed?: boolean; failures?: unknown };
+      [key: string]: unknown;
     };
+    const poses = extractWaterFoamAcceptancePoses(parsed);
+    let poseParity = true;
+    if (!canonicalPoses) {
+      canonicalPoses = poses;
+      canonicalReportPath = reportPath;
+    } else {
+      try {
+        assertWaterFoamAcceptancePosesMatch(canonicalPoses, poses);
+      } catch (error) {
+        poseParity = false;
+        const message = error instanceof Error ? error.message : String(error);
+        const existing = Array.isArray(parsed.acceptance?.failures)
+          ? parsed.acceptance.failures.filter((entry): entry is string => typeof entry === "string")
+          : [];
+        parsed.acceptance = {
+          passed: false,
+          failures: [...existing, message],
+        };
+      }
+    }
+
     const failures = Array.isArray(parsed.acceptance?.failures)
       ? parsed.acceptance.failures.filter((entry): entry is string => typeof entry === "string")
       : [];
-    const passed = result.status === 0 && parsed.acceptance?.passed === true;
-    reports.push({ quality, reportPath, passed, failures });
+    const passed = result.status === 0 && parsed.acceptance?.passed === true && poseParity;
+    reports.push({ quality, reportPath, passed, poseParity, failures });
   }
 
-  const passed = reports.every((report) => report.passed);
+  const passed = reports.every((report) => report.passed && report.poseParity);
   const matrixReport = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     seed,
     world,
+    canonicalPoseReport: canonicalReportPath,
     passed,
     tiers: reports,
   };
