@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { BiomeVisualState } from "../environment/biome_visual_state.js";
 import { cloneEnvironmentalMaskSettings, DEFAULT_ENVIRONMENTAL_MASK_SETTINGS } from "../environment_masks/environment_mask_config.js";
+import {
+  createEnvironmentalMaskValues,
+  evaluateEnvironmentalMaskValues,
+} from "../environment_masks/environment_mask_math.js";
 import { setEnvironmentalMaskSettings } from "../environment_masks/environment_mask_runtime.js";
 import type { EnvironmentQueryMeta, RiverQueryResult, WaterQueryResult } from "../environment_query/types.js";
 import { HYDROLOGY_BODY_LAKE, HYDROLOGY_BODY_RIVER } from "./hydrologyGrid.js";
@@ -14,7 +18,19 @@ import {
   type RiverMistSample,
 } from "./riverMistRuntime.js";
 
-const biome = { enabled: true, morningMist: 1 } as Pick<BiomeVisualState, "enabled" | "morningMist">;
+const biome: BiomeVisualState = Object.freeze({
+  enabled: true,
+  seasonT: 0.25,
+  green: 0.8,
+  autumn: 0.1,
+  bloom: 0.4,
+  snowlineM: 80,
+  glacialMurkiness: 0.7,
+  morningMist: 1,
+  pollenAmount: 0.3,
+  frostAmount: 0.1,
+  wetness: 0.4,
+});
 const validMeta: EnvironmentQueryMeta = {
   source: "hydrology-cpu",
   revision: 3,
@@ -118,13 +134,41 @@ describe("river mist runtime", () => {
     expect(riverMistSampleFromWaterField(fieldSample)).toEqual(riverSample());
   });
 
+  it("uses the same shared mask result as the generic environmental evaluator", () => {
+    const sharedSettings = cloneEnvironmentalMaskSettings();
+    setEnvironmentalMaskSettings(sharedSettings);
+    const sample = riverSample();
+    const runtimeValue = riverMistSignal(sample, biome, readRiverMistRuntimeSettings());
+    const values = evaluateEnvironmentalMaskValues({
+      settings: sharedSettings,
+      biome,
+      waterValid: true,
+      riverValid: true,
+      normalValid: false,
+      visibilityValid: false,
+      wetMask: sample.wetMask,
+      bodyKind: sample.bodyKind,
+      waterDepth: sample.depth,
+      shoreDistanceM: sample.shoreDistanceM,
+      flowStrength: sample.flowStrength,
+      bedDrop: 0,
+      rapidMask: 0,
+      normalY: 0,
+      sunVisibility: 0,
+    }, createEnvironmentalMaskValues());
+
+    expect(runtimeValue).toBeCloseTo(values.riverMist, 10);
+  });
+
   it("requires a valid flowing river near its shoreline", () => {
     const settings = readRiverMistRuntimeSettings();
     expect(riverMistSignal(riverSample(), biome, settings)).toBeGreaterThan(0);
     expect(riverMistSignal(riverSample({ bodyKind: HYDROLOGY_BODY_LAKE }), biome, settings)).toBe(0);
     expect(riverMistSignal(riverSample({ shoreDistanceM: -1 }), biome, settings)).toBe(0);
+    expect(riverMistSignal(riverSample({ depth: 0.02 }), biome, settings)).toBe(0);
+    expect(riverMistSignal(riverSample({ wetMask: 0.05 }), biome, settings)).toBe(0);
     expect(riverMistSignal(riverSample({ depth: Number.NaN }), biome, settings)).toBe(0);
     expect(riverMistSignal(riverSample({ flowStrength: 0 }), biome, settings)).toBe(0);
-    expect(riverMistSignal(riverSample(), { enabled: true, morningMist: 0 }, settings)).toBe(0);
+    expect(riverMistSignal(riverSample(), { ...biome, morningMist: 0 }, settings)).toBe(0);
   });
 });
