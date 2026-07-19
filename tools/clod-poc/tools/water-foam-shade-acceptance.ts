@@ -77,6 +77,7 @@ async function main(): Promise<void> {
       };
       let litOverride: OverrideState | null = null;
       let shadedOverride: OverrideState | null = null;
+      let resetOverride: OverrideState | null = null;
       try {
         await setWaterDebugMode(page, "bodyMask");
         await page.screenshot(files.bodyMask);
@@ -97,7 +98,7 @@ async function main(): Promise<void> {
         await setWaterDebugMode(page, "final");
         await page.screenshot(files.finalShaded);
       } finally {
-        await setFoamSunVisibilityOverride(page, null).catch(() => undefined);
+        resetOverride = await setFoamSunVisibilityOverride(page, null);
       }
 
       if (!litOverride?.enabled || litOverride.visibility !== 1) {
@@ -105,6 +106,9 @@ async function main(): Promise<void> {
       }
       if (!shadedOverride?.enabled || shadedOverride.visibility !== 0) {
         throw new Error("foam shade acceptance failed to activate the fully shaded override");
+      }
+      if (resetOverride.enabled || resetOverride.visibility !== 1) {
+        throw new Error("foam shade acceptance failed to restore the real sun atlas");
       }
 
       const images = await loadImages(files);
@@ -138,7 +142,7 @@ async function main(): Promise<void> {
         overrideSequence: {
           lit: litOverride,
           shaded: shadedOverride,
-          reset: { enabled: false, visibility: 1 },
+          reset: resetOverride,
         },
         files,
         runtimeDiagnostics,
