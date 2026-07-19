@@ -98,11 +98,13 @@ async function main(): Promise<void> {
       const runtimeStates = Object.fromEntries(
         BIOME_VISUAL_SEASONS.map((season) => [season, captures[season].runtimeState]),
       ) as Record<BiomeVisualSeason, BiomeVisualRuntimeState>;
-      const webGpuErrors = Math.max(...BIOME_VISUAL_SEASONS.map((season) => captures[season].webGpuErrors));
+      const webGpuErrors = Object.fromEntries(
+        BIOME_VISUAL_SEASONS.map((season) => [season, captures[season].webGpuErrors]),
+      ) as Record<BiomeVisualSeason, number>;
       const acceptance = evaluateBiomeVisualAcceptance({ runtimeStates, metrics, webGpuErrors });
 
       return {
-        schemaVersion: 1 as const,
+        schemaVersion: 2 as const,
         seed,
         world,
         pose,
@@ -149,6 +151,7 @@ async function captureSeason(
     files[variant] = path;
   }
   await restoreVegetation(page);
+  await settleFrames(page, 2);
   const webGpuErrors = await readWebGpuErrorCount(page);
   return { season, targetUrl, runtimeState, webGpuErrors, files };
 }
@@ -167,11 +170,24 @@ async function navigateAndWait(page: CdpPage, url: string): Promise<void> {
   while (Date.now() < deadline) {
     const ready = await page.evaluate<boolean>(`(() => {
       const api = window.__drusnielBiomeVisualAcceptance;
-      if (typeof window.setCameraPose !== "function" || !api || window.__drusnielBiomeVisualState == null) {
+      const hooks = window.__drusnielClod;
+      if (
+        typeof window.setCameraPose !== "function"
+        || !api
+        || window.__drusnielBiomeVisualState == null
+        || hooks?.ready !== true
+        || hooks.stats == null
+        || !Number.isFinite(hooks.stats.counters?.webgpu_uncaptured_errors)
+      ) {
         return false;
       }
-      const roots = api.info().roots;
-      return roots.grass && roots.trees && roots.understory && document.querySelector("canvas") != null;
+      const info = api.info();
+      const roots = info.roots;
+      return roots.grass
+        && roots.trees
+        && roots.understory
+        && info.farCanopyMeshes > 0
+        && document.querySelector("canvas") != null;
     })()`).catch(() => false);
     if (ready) return;
     await delay(250);
