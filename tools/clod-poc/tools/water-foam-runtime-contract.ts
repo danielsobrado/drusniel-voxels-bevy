@@ -21,7 +21,7 @@ export function evaluateWaterFoamRuntimeContract(
 ): WaterFoamRuntimeContractResult {
   const failures: string[] = [];
   requireEqual(failures, "model revision", diagnostics.modelRevision, WATER_FOAM_MODEL_REVISION);
-  requireEqual(failures, "model name", diagnostics.modelName, "coherent-fbm-flow-sun-v3");
+  requireEqual(failures, "model name", diagnostics.modelName, "coherent-fbm-flow-sun-distance-v4");
   requireEqual(failures, "quality tier", diagnostics.qualityTier, expectedQuality);
   requireEqual(failures, "max coverage", diagnostics.maxCoverage, WATER_FOAM_MAX_COVERAGE);
   requireEqual(failures, "pattern start", diagnostics.patternStart, WATER_FOAM_PATTERN_START);
@@ -31,6 +31,15 @@ export function evaluateWaterFoamRuntimeContract(
   requireEqual(failures, "shade coverage floor", diagnostics.shadeCoverageFloor, WATER_FOAM_SHADE_COVERAGE_FLOOR);
   requireEqual(failures, "rapid eligibility", diagnostics.rapidEligibility, "speed-times-drop-times-river");
   requireEqual(failures, "CPU field samples", diagnostics.cpuFieldSamples, 0);
+  requireEqual(failures, "distance fade authority", diagnostics.distanceFade.authority, "camera-distance-shared");
+  requireEqual(failures, "distance fade valid", diagnostics.distanceFade.valid ? 1 : 0, 1);
+  requireMin(failures, "distance fade version", diagnostics.distanceFade.version, 1);
+  requireMin(failures, "distance fade start", diagnostics.distanceFade.startM, 0);
+  if (!(diagnostics.distanceFade.endM > diagnostics.distanceFade.startM)) {
+    failures.push(
+      `distance fade end ${String(diagnostics.distanceFade.endM)} did not exceed start ${String(diagnostics.distanceFade.startM)}`,
+    );
+  }
   requireEqual(failures, "sun atlas valid", diagnostics.sunAtlas.valid, 1);
   requireMin(failures, "sun atlas version", diagnostics.sunAtlas.version, 1);
   requireMin(failures, "sun atlas width", diagnostics.sunAtlas.width, 2);
