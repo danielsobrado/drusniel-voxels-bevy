@@ -18,6 +18,10 @@ export function planTreeSystemSettingsUpdate(
   Object.assign(next, patch);
   const nextGeometryKey = treeGeometryKey(next);
   const needsGeometry = nextGeometryKey !== currentGeometryKey;
+  const ecologyChanged = patch.ecology !== undefined;
+  const speciesChanged = patch.species !== undefined;
+  const windChanged = patch.wind !== undefined;
+  const impostorsChanged = patch.impostors !== undefined;
   const needsPatchRefresh = needsGeometry ||
     patch.enabled !== undefined ||
     patch.seed !== undefined ||
@@ -25,13 +29,23 @@ export function planTreeSystemSettingsUpdate(
     patch.refreshDistanceM !== undefined ||
     patch.maxInstances !== undefined ||
     patch.placement !== undefined ||
-    patch.lod !== undefined;
+    patch.lod !== undefined ||
+    ecologyChanged ||
+    speciesChanged;
   const renderChanged = patch.render !== undefined;
   const farMaterialChanged = patch.render?.farCheapMaterial !== undefined &&
     patch.render.farCheapMaterial !== current.render.farCheapMaterial;
   const shadowPolicyChanged = patch.lod?.shadowsMaxLod !== undefined &&
     patch.lod.shadowsMaxLod !== current.lod.shadowsMaxLod;
-  const clearGpuRing = patch.gpu !== undefined || farMaterialChanged || renderChanged || shadowPolicyChanged;
+  const clearGpuRing = needsGeometry ||
+    patch.gpu !== undefined ||
+    farMaterialChanged ||
+    renderChanged ||
+    shadowPolicyChanged ||
+    ecologyChanged ||
+    speciesChanged ||
+    windChanged ||
+    impostorsChanged;
   const nextGpuStatus = !patch.gpu
     ? null
     : !patch.gpu.enabled

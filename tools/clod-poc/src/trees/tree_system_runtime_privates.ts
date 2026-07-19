@@ -6,6 +6,7 @@ import {
   type TreeGpuRingDrawResourcesInput,
 } from "./tree_system_gpu_ring_resources.js";
 import { refreshTreeGpuRingImpostorsTransactionally } from "./tree_gpu_ring_impostor_refresh_transaction.js";
+import { treeGpuRingRequiresClear } from "./tree_gpu_ring_clear_policy.js";
 import { clearTreeGpuRing } from "./tree_system_gpu_ring_runtime.js";
 import { buildTreeRuntimeStats } from "./tree_system_runtime_stats.js";
 import type { TreeSystem } from "./tree_system_runtime.js";
@@ -68,6 +69,7 @@ export function treeRefreshGpuRingImpostors(self: TreeSystem): boolean {
 }
 
 export function treeClearGpuRing(self: TreeSystem): void {
+  if (!treeGpuRingRequiresClear(self.gpuRing)) return;
   clearTreeGpuRing(treeGpuRingInput(self));
 }
 

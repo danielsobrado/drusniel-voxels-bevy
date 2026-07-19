@@ -29,11 +29,7 @@ export function treeReportsGpuRingStats(
   hasGpuRingCompute: boolean,
   gpuRingStatsStatus: string,
 ): boolean {
-  if (!usesGpuRingDraw) return false;
-  if (gpuStatus === "fallback-cpu" || gpuStatus === "unsupported") return false;
-  return gpuStatus === "ring" ||
-    gpuStatus === "error" ||
-    hasGpuRingDraw ||
-    hasGpuRingCompute ||
-    (gpuRingStatsStatus !== "disabled" && gpuRingStatsStatus !== "idle");
+  if (!usesGpuRingDraw || gpuStatus !== "ring") return false;
+  if (!hasGpuRingDraw || !hasGpuRingCompute) return false;
+  return gpuRingStatsStatus === "ready" || gpuRingStatsStatus === "running";
 }
