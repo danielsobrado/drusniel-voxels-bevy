@@ -16,6 +16,11 @@ import {
 } from "./water-harness.js";
 import { findWaterShotPose } from "./water-shot-scenes.js";
 import {
+  buildWaterFoamAcceptanceUrl,
+  getWaterFoamAcceptanceProfile,
+  parseWaterFoamAcceptanceQuality,
+} from "./water-foam-acceptance-profile.js";
+import {
   deriveWaterPixelMask,
   measureFoamImage,
   measureFoamLighting,
@@ -48,13 +53,16 @@ async function main(): Promise<void> {
   const args = parseCliArgs(process.argv.slice(2));
   const world = Math.max(1, Math.floor(numberArg(args, "world", 16)));
   const seed = stringArg(args, "seed", "1");
+  const quality = parseWaterFoamAcceptanceQuality(stringArg(args, "quality", "high"));
+  const profile = getWaterFoamAcceptanceProfile(quality);
   const sourceUrl = typeof args.url === "string" ? args.url : undefined;
-  const outRoot = resolveOutputPath(stringArg(args, "out", "shots/water/foam-acceptance"));
+  const defaultOut = join("shots/water/foam-acceptance", profile.outputFolder);
+  const outRoot = resolveOutputPath(stringArg(args, "out", defaultOut));
   mkdirSync(outRoot, { recursive: true });
 
   let report: Record<string, unknown> | null = null;
   await withWaterHarness({ url: sourceUrl, world, width: 1280, height: 720 }, async ({ page, url: baseUrl }) => {
-    const targetUrl = foamAcceptanceUrl(baseUrl, seed, world);
+    const targetUrl = buildWaterFoamAcceptanceUrl(baseUrl, seed, world, quality);
     await navigateToFoamProfile(page, targetUrl);
     const info = await waterDebugInfo(page);
     assertRequiredDebugModes(info.debugModes);
@@ -91,10 +99,12 @@ async function main(): Promise<void> {
     };
     const acceptance = evaluateFoamVisualAcceptance(metrics);
     report = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       targetUrl,
       seed,
       world,
+      quality,
+      profileQuery: profile.query,
       captures: { rapid, smoothRiver, lakeShore },
       metrics,
       acceptance,
@@ -107,9 +117,9 @@ async function main(): Promise<void> {
   console.log(`foam visual report: ${reportPath}`);
   const acceptance = report.acceptance as { passed: boolean; failures: readonly string[] };
   if (!acceptance.passed) {
-    throw new Error(`water foam visual acceptance failed:\n- ${acceptance.failures.join("\n- ")}`);
+    throw new Error(`water foam visual acceptance failed for ${quality}:\n- ${acceptance.failures.join("\n- ")}`);
   }
-  console.log("water foam visual acceptance passed");
+  console.log(`water foam visual acceptance passed for ${quality}`);
 }
 
 async function captureScene<TPose extends CameraPoseArgs>(
@@ -228,21 +238,6 @@ async function findSmoothRiverPose(page: CdpPage, worldCells: number): Promise<S
   })()`);
   if (!pose) throw new Error("could not find a smooth fast river acceptance pose");
   return pose;
-}
-
-function foamAcceptanceUrl(baseUrl: string, seed: string, world: number): string {
-  const url = new URL(baseUrl);
-  url.searchParams.set("scene", "infinite-islands");
-  url.searchParams.set("seed", seed);
-  url.searchParams.set("world", String(world));
-  url.searchParams.set("startupWorld", "4");
-  url.searchParams.set("infiniteStartupWorld", "4");
-  url.searchParams.set("acceptance", "1");
-  url.searchParams.set("webgpuSelection", "1");
-  url.searchParams.set("farShell", "1");
-  url.searchParams.set("farClipmap", "1");
-  url.searchParams.set("waterDebug", "1");
-  return url.toString();
 }
 
 async function navigateToFoamProfile(page: CdpPage, url: string): Promise<void> {
