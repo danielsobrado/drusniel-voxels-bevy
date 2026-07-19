@@ -86,7 +86,7 @@
     "trees:wire-shadow-proxies": "npm run trees:wire-tree7-shadows && npm run trees:wire-tree8-proxies && npm run trees:repair-generated",
     "trees:wire-shadow-proxies:check": "npm run trees:wire-tree7-shadows:check && npm run trees:wire-tree8-proxies:check && npm run trees:repair-generated:check",
     "trees:wire-parity": "npm run trees:wire-shadow-proxies && npm run trees:wire-tree9-wgsl && npm run trees:wire-tree9-config",
-    "trees:wire-parity:check": "npm run trees:wire-shadow-proxies:check && npm run trees:wire-tree9-wgsl:check && npm run trees:wire-tree9-config:check",
+    "trees:wire-parity:check": "npm run trees:wire-shadow-proxies:check && npm run trees:wire-tree8-proxies:check && npm run trees:wire-tree9-wgsl:check && npm run trees:wire-tree9-config:check",
     "trees:check-parity-manifest": "tsx tools/verify-tree-parity-evidence.ts --check-manifest",
     "trees:preflight-parity": "npm run trees:wire-parity:check && npm run trees:check-parity-manifest",
     "trees:qa-parity": "npm run trees:preflight-parity && npm run typecheck && npm run test",
@@ -136,8 +136,11 @@
     "water:foam:accept:high": "tsx tools/water-foam-visual-acceptance.ts --quality=high",
     "water:foam:accept:low": "tsx tools/water-foam-visual-acceptance.ts --quality=low",
     "water:foam:accept:matrix": "tsx tools/water-foam-quality-matrix.ts",
+    "water:foam:accept:shade": "npm run water:foam:accept:shade:high && npm run water:foam:accept:shade:low",
+    "water:foam:accept:shade:high": "tsx tools/water-foam-shade-acceptance.ts --quality=high",
+    "water:foam:accept:shade:low": "tsx tools/water-foam-shade-acceptance.ts --quality=low",
     "water:verify": "npm run water:report && npm run water:find && npm run water:probe && npm run water:shot -- --scene all --out shots/water/verify",
-    "water:verify:full": "npm run water:verify && npm run water:foam:accept:matrix"
+    "water:verify:full": "npm run water:verify && npm run water:foam:accept:matrix && npm run water:foam:accept:shade"
   },
   "dependencies": {
     "fflate": "^0.8.3",
