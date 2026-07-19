@@ -99,6 +99,7 @@ export function installWaterDebugApi(
     return {
       worldCells: deps.worldCells,
       enabled: clipmap.isEnabled,
+      rendererBackend: deps.isWebGpu ? "webgpu" : "webgl",
       debugMode: uiState.waterDebugMode,
       clipmapTint: uiState.waterClipmapTint,
       wireframe: uiState.waterWireframe,
