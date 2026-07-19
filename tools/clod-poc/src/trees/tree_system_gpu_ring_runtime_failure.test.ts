@@ -43,7 +43,7 @@ describe("tree GPU ring runtime failure handling", () => {
     fixture.input.settings.seed++;
     expect(updateTreeGpuRingTrees(fixture.input, new THREE.Vector3())).toBe(false);
     expect(fixture.createDrawResources).toHaveBeenCalledTimes(2);
-    expect(console.error).toHaveBeenCalledTimes(2);
+    expect(console.error).toHaveBeenCalledTimes(1);
   });
 
   it("latches an asynchronous compute initialization failure", async () => {
