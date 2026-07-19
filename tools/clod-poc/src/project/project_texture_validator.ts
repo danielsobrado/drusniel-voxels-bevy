@@ -5,6 +5,7 @@ export const PROJECT_TEXTURE_MAX_DIMENSION = 8192;
 export const PROJECT_TEXTURE_MAX_PIXELS = 32 * 1024 * 1024;
 const PROJECT_TEXTURE_DECODE_TIMEOUT_MS = 5_000;
 const ALLOWED_PROJECT_TEXTURE_MIME_TYPES = new Set([
+  "application/octet-stream",
   "image/png",
   "image/jpeg",
   "image/webp",
@@ -18,8 +19,8 @@ interface ProjectTexturePayload {
 }
 
 function normalizedMimeType(value: string | undefined, label: string): string {
-  const mimeType = value ?? "application/octet-stream";
-  if (value !== undefined && !ALLOWED_PROJECT_TEXTURE_MIME_TYPES.has(value.toLowerCase())) {
+  const mimeType = (value ?? "application/octet-stream").toLowerCase();
+  if (!ALLOWED_PROJECT_TEXTURE_MIME_TYPES.has(mimeType)) {
     throw new Error(`${label} has unsupported MIME type ${value}`);
   }
   return mimeType;
