@@ -74,17 +74,21 @@ export function addRiverMaterialTuningFolder(parent: GUI): { refresh: () => void
 }
 
 export function addRiverCascadeParticleTuningFolder(parent: GUI): { refresh: () => void } {
-  const folder = parent.addFolder("cascade mist / splash");
+  const folder = parent.addFolder("cascade / rapid particles");
   const settings: RiverCascadeParticleSettings = readRiverCascadeParticleSettings();
 
   folder.add(settings, "enabled").name("enabled");
   folder.add(settings, "mistStrength", 0, 3, 0.05).name("mist strength");
-  folder.add(settings, "splashStrength", 0, 3, 0.05).name("splash strength");
+  folder.add(settings, "splashStrength", 0, 3, 0.05).name("cascade splash");
+  folder.add(settings, "rapidDropletStrength", 0, 3, 0.05).name("rapid droplets");
   folder.add(settings, "foamDriftStrength", 0, 3, 0.05).name("foam drift");
   folder.add(settings, "spawnRadiusM", 16, 180, 1).name("spawn radius");
   folder.add(settings, "maxEmittersPerTick", 4, 80, 1).name("max emitters");
   folder.add(settings, "rapidSpeedStart", 0.05, 8, 0.05).name("rapid start");
   folder.add(settings, "rapidSpeedEnd", 0.10, 12, 0.05).name("rapid end");
+  folder.add(settings, "rapidDropletThreshold", 0.05, 0.95, 0.01).name("droplet threshold");
+  folder.add(settings, "rapidDropletsPerEmitter", 1, 4, 1).name("droplets / emitter");
+  folder.add(settings, "rapidDropletGravity", 1, 12, 0.1).name("droplet gravity");
   folder.add(settings, "dropStart", 0, 12, 0.05).name("drop start");
   folder.add(settings, "dropEnd", 0.05, 24, 0.05).name("drop end");
   folder.add({ apply: () => reloadWithRiverCascadeParticleSettings(settings) }, "apply").name("apply + rebuild");
