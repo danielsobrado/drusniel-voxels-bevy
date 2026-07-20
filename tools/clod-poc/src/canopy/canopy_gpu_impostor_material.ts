@@ -14,7 +14,7 @@ import {
   smoothstep,
   uniform,
   uv,
-  vec3,
+  vec2,
 } from "three/tsl";
 import type { EnvironmentLighting } from "../environment/environment.js";
 
@@ -67,7 +67,12 @@ export function createCanopyGpuImpostorMaterial(
   const alphaCoverage: TslNode = float(1).sub(smoothstep(float(0.35), float(1), radial));
   const alphaKeep: TslNode = alphaCoverage.greaterThanEqual(uAlphaCoverage);
 
-  const distanceM: TslNode = vec3(positionWorld.x, float(0), positionWorld.z).sub(cameraPosition).length();
+  // Tree LOD ownership is radial in the XZ plane. Including camera height here makes an aerial
+  // camera reveal canopy inside the tree-owned band and breaks the complementary handoff.
+  const distanceM: TslNode = vec2(
+    positionWorld.x.sub(cameraPosition.x),
+    positionWorld.z.sub(cameraPosition.z),
+  ).length();
   const canopyVisibility: TslNode = smoothstep(uCanopyStart, uCanopyEnd, distanceM);
   const transitionKeep: TslNode = transitionNoise.lessThan(canopyVisibility);
   const shellKeep: TslNode = shellNoise.lessThan(uShellBlend);
