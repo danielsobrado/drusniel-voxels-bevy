@@ -2,11 +2,16 @@ import type { VegetationGpuBackend } from "../../runtime/vegetation/vegetation_g
 import type { DressingDiagnostics } from "./diagnostics.js";
 import type { DressingSystemOptions as DressingSystemBaseOptions } from "./dressing_system_base.js";
 import { CpuDressingSystem } from "./dressing_system_cpu.js";
+import {
+  dressingPersistenceBridge,
+  type DressingPersistenceBridge,
+} from "./persistence_bridge.js";
 import { GpuDressingSystem, type DressingSystemLike } from "./gpu/system.js";
 
 export interface DressingSystemOptions extends DressingSystemBaseOptions {
   readonly gpuDevice?: GPUDevice | null;
   readonly gpuBackend?: VegetationGpuBackend | null;
+  readonly persistenceBridge?: DressingPersistenceBridge;
 }
 
 export class DressingSystem implements DressingSystemLike {
@@ -14,6 +19,7 @@ export class DressingSystem implements DressingSystemLike {
   private disposed = false;
 
   constructor(private readonly options: DressingSystemOptions) {
+    const persistenceBridge = options.persistenceBridge ?? dressingPersistenceBridge;
     if (options.config.enabled && options.gpuDevice && options.gpuBackend) {
       try {
         let gpu: GpuDressingSystem;
@@ -26,6 +32,7 @@ export class DressingSystem implements DressingSystemLike {
           hydrologySystem: options.hydrologySystem,
           gpuDevice: options.gpuDevice,
           gpuBackend: options.gpuBackend,
+          persistenceBridge,
           unboundedWorld: options.unboundedWorld,
         }, (error) => {
           console.error("[dressing-gpu] initialization failed; falling back to CPU", error);
