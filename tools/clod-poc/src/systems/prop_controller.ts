@@ -10,6 +10,11 @@ import {
   emptyPropOccluderSnapshot,
   type PropOccluderSnapshot,
 } from "../props/prop_occluder_snapshot.js";
+import { LargePropOcclusionField } from "../props/large_prop_occlusion_field.js";
+import {
+  publishLargePropOcclusionCounters,
+  registerActiveLargePropOcclusionField,
+} from "../props/large_prop_occlusion_runtime.js";
 import { PropColliderSet } from "../props/prop_collider.js";
 import { PropSystem } from "../props/prop_system.js";
 import type { PropStats } from "../props/prop_stats.js";
@@ -53,6 +58,7 @@ export interface PropController {
   refreshStats(): void;
   getPlacementSceneSnapshot(): PropPlacementScene;
   getOccluderSnapshot(): PropOccluderSnapshot;
+  getOcclusionField(): LargePropOcclusionField;
   replacePlacementScene(scene: PropPlacementScene): void;
   resolveSnapPlacement(input: PropSnapPlacementInput): PropSnapPlacementResult | null;
   availablePrefabIds(): string[];
@@ -72,6 +78,8 @@ export function createPropController(deps: PropControllerDeps): PropController {
     gpuBackend: deps.gpuBackend,
   });
   const colliderSet = new PropColliderSet();
+  const occlusionField = new LargePropOcclusionField(deps.settings.occlusion);
+  const unregisterOcclusionField = registerActiveLargePropOcclusionField(occlusionField);
   let collidersEnabled = deps.settings.enabled;
   let forceColliderSync = true;
   let lastColliderSyncAt = Number.NEGATIVE_INFINITY;
@@ -96,6 +104,7 @@ export function createPropController(deps: PropControllerDeps): PropController {
       metadataByAssetId: access.metadataByAssetId,
       settings: deps.settings.occlusion,
     });
+    occlusionField.submit(occluderSnapshot);
   };
 
   const shouldSyncColliders = (playerPos: [number, number, number]): boolean => {
@@ -124,6 +133,8 @@ export function createPropController(deps: PropControllerDeps): PropController {
       refreshStats();
     },
     update(camera, ringCenter) {
+      occlusionField.step();
+      publishLargePropOcclusionCounters(occlusionField.stats());
       system.update(camera, ringCenter);
       refreshStats();
     },
@@ -157,6 +168,9 @@ export function createPropController(deps: PropControllerDeps): PropController {
     getOccluderSnapshot() {
       return occluderSnapshot;
     },
+    getOcclusionField() {
+      return occlusionField;
+    },
     replacePlacementScene(scene) {
       deps.placementScene = scene;
       system.replacePlacementScene(scene);
@@ -173,6 +187,7 @@ export function createPropController(deps: PropControllerDeps): PropController {
       return system.availablePrefabIds();
     },
     dispose() {
+      unregisterOcclusionField();
       colliderSet.dispose();
       system.dispose();
       occluderRevision += 1;
