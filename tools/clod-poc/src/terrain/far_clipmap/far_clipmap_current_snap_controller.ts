@@ -75,9 +75,12 @@ export function createCurrentSnapFarClipmapController(
   const updateReflection = (cameraPosition: THREE.Vector3, stats: FarClipmapStats): void => {
     if (!reflection || activeSource.isReady?.() === false) return;
     const propField = readActiveLargePropOcclusionField();
+    const sourceRevision = activeSource.revisionIsAuthoritative?.() === true
+      ? stats.sourceRevision
+      : stats.sourceRefreshesTotal;
     reflection.submit({
       source: activeSource,
-      sourceRevision: stats.sourceRevision,
+      sourceRevision,
       propGeneration: readActiveLargePropOcclusionFieldGeneration(),
       propPayload: propField?.giHeightPayload() ?? null,
       centerX: cameraPosition.x,
