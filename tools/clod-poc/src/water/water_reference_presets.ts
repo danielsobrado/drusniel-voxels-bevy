@@ -18,6 +18,7 @@ export function applyWaterReferencePreset(
   visual.fresnel.power = 5.0;
 
   if (preset === "fable5") {
+    visual.normalModel = "fable5";
     visual.rippleCycle = 0.45;
     visual.rippleAmp = 0.10;
     visual.rippleSpeed = 1.0;
@@ -35,6 +36,7 @@ export function applyWaterReferencePreset(
     return;
   }
 
+  visual.normalModel = "glacial";
   visual.rippleCycle = 0.18;
   visual.rippleAmp = 0.20;
   visual.rippleSpeed = 0.85;
