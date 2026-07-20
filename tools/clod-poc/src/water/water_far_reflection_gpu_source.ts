@@ -38,11 +38,12 @@ export function acquireWaterFarReflectionGpuSource(requestedResolution: number):
   const resolution = Math.max(2, Math.floor(Number.isFinite(requestedResolution) ? requestedResolution : 2));
   let shared = sharedByResolution.get(resolution);
   if (!shared) {
-    const data = new Float32Array(resolution * resolution * CELL_STRIDE);
+    const attribute = new StorageBufferAttribute(resolution * resolution, CELL_STRIDE);
+    const data = attribute.array as Float32Array;
     shared = {
       resolution,
       data,
-      attribute: new StorageBufferAttribute(data, CELL_STRIDE),
+      attribute,
       metadata: {
         origin: new THREE.Vector2(),
         resolution,
