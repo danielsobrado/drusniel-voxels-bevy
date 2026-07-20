@@ -126,15 +126,17 @@ water:
     deep_color: [0.00, 0.025, 0.12]
     foam_color: [0.90, 0.95, 0.96]
     alpha: 0.90
-    ripple_cycle: 0.07
-    ripple_amp: 0.32
-    ripple_speed: 0.58
-    ripple_scale_a: 0.16
-    ripple_scale_b: 0.105
-    ripple_strength_a: 0.26
-    ripple_strength_b: 0.18
-    ripple_loop_distance: 22.0
-    lake_breeze: [0.20, 0.07]
+    # Stable Fable5-inspired response. The previous high-amplitude analytic waves
+    # turned the narrow glitter lobes into repeated white contour lines.
+    ripple_cycle: 0.45
+    ripple_amp: 0.10
+    ripple_speed: 1.0
+    ripple_scale_a: 0.11
+    ripple_scale_b: 0.035
+    ripple_strength_a: 0.10
+    ripple_strength_b: 0.05
+    ripple_loop_distance: 12.0
+    lake_breeze: [0.045, 0.03]
     shore_foam_start: 0.03
     shore_foam_end: 0.18
     foam:
@@ -151,9 +153,9 @@ water:
       detail_fade_start_m: 120.0
       detail_fade_end_m: 320.0
     fresnel:
-      base: 0.045
-      power: 4.2
-      normal_flatten: 0.92
+      base: 0.02
+      power: 5.0
+      normal_flatten: 0.97
     color:
       depth_scale: 4.6
       turbidity: 0.12
@@ -196,14 +198,14 @@ water:
       scatter_extinction: 0.42
       scatter_strength: 0.85
       scatter_ambient: 0.72
-    # Two-lobe direct sun glitter. Defaults preserve the previous HQ constants.
+    # Broader, lower-energy lobes avoid one-pixel contour highlights at distance.
     glitter:
       enabled: true
-      tight_exponent: 384
-      tight_gain: 1.15
-      broad_exponent: 96
-      broad_gain: 0.28
-      low_sun_gain: 0.35
+      tight_exponent: 160
+      tight_gain: 0.28
+      broad_exponent: 48
+      broad_gain: 0.06
+      low_sun_gain: 0.20
     refraction:
       enabled: true
       strength: 0.055
