@@ -46,7 +46,10 @@ export interface PostRendererStartupInput {
 export async function runPostRendererStartup(input: PostRendererStartupInput) {
   const { info, searchParams, clodRuntime, cfg, stagedImport, queries, world, renderer } = input;
   const isLongView = queries.queryLongViewScene;
-  const enableAutomationHooks = isLongView || queries.queryBorderOceanScene || searchParams.get("customProps") === "1";
+  const enableAutomationHooks = isLongView
+    || queries.queryBorderOceanScene
+    || queries.queryTreePerfScene
+    || searchParams.get("customProps") === "1";
   const terrainEdit = createTerrainEditContext(world.maxTerrainLevel);
   const { longViewHooks, longViewSettleWaiters } = initLongViewDiagnostics({
     isLongView: enableAutomationHooks,
