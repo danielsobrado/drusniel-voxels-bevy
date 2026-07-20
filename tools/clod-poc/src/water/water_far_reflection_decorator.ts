@@ -33,6 +33,7 @@ export function decorateWaterFarReflection(
   const levelCellSizeM = waterMaterialLevelCellSize(params);
   const uTime = uniform(0) as TslNode;
   const uDebugMode = uniform(0) as TslNode;
+  const uFresnelPower = uniform(params.visual.fresnel.power) as TslNode;
   const uRippleSpeed = uniform(params.visual.rippleSpeed) as TslNode;
   const uRippleScaleA = uniform(params.visual.rippleScaleA) as TslNode;
   const uRippleScaleB = uniform(params.visual.rippleScaleB) as TslNode;
@@ -60,17 +61,10 @@ export function decorateWaterFarReflection(
 
   material.fragmentNode = Fn(() => {
     const base = baseFragment;
-    const fresnel = pow(
-      float(1).sub(clamp(dot(viewDir, marchNormal), 0, 1)),
-      float(params.visual.fresnel.power),
-    );
+    const fresnel = pow(float(1).sub(clamp(dot(viewDir, marchNormal), 0, 1)), uFresnelPower);
     const weight = far.hit.mul(clamp(fresnel.mul(0.72), 0, 0.72));
     const reflected = mix(base.rgb, far.color, weight);
-    const debug = vec3(
-      far.hit.mul(float(1).sub(far.propHit)),
-      far.hit.mul(0.18),
-      far.hit.mul(far.propHit),
-    );
+    const debug = vec3(far.hit, far.hit.mul(0.18), float(0));
     return uDebugMode.equal(16).select(vec4(debug, 1), vec4(reflected, base.a));
   })();
 
@@ -89,6 +83,7 @@ export function decorateWaterFarReflection(
   };
   handle.updateVisual = (visual) => {
     updateVisual(visual);
+    uFresnelPower.value = visual.fresnel.power;
     uRippleSpeed.value = visual.rippleSpeed;
     uRippleScaleA.value = visual.rippleScaleA;
     uRippleScaleB.value = visual.rippleScaleB;
