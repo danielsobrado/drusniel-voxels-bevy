@@ -4,6 +4,7 @@ const DRESSING_LOD_COUNT: u32 = 3u;
 const DRESSING_GROUP_COUNT: u32 = DRESSING_CLASS_COUNT * DRESSING_LOD_COUNT;
 const DRESSING_RECORD_VEC4S: u32 = 3u;
 const DRESSING_INDIRECT_WORDS: u32 = 5u;
+const DRESSING_PERSISTENT_OWNERSHIP: u32 = 0u;
 const DRESSING_PARENT_OWNERSHIP: u32 = 1u;
 const DRESSING_ATTACHMENT_ID_CHANNEL: u32 = 0x2101u;
 
@@ -13,6 +14,7 @@ struct DressingParams {
   hydro_atlas: vec4<f32>,
   canopy_meta: vec4<f32>,
   category_ranges: vec4<u32>,
+  exclusion_meta: vec4<u32>,
 };
 
 struct DressingClassParams {
@@ -55,6 +57,7 @@ struct DressingRecord {
 @group(0) @binding(9) var hydro_atlas_texture: texture_2d<f32>;
 @group(0) @binding(13) var canopy_aux_texture: texture_2d<f32>;
 @group(0) @binding(14) var canopy_detail_texture: texture_2d<f32>;
+@group(0) @binding(15) var<storage, read> persistent_exclusions: array<vec4<u32>>;
 
 fn placement_hydro_atlas_params() -> vec4<f32> {
   return params.hydro_atlas;
@@ -79,6 +82,33 @@ fn dressing_stable_identity(cell: vec2<i32>, class_id: u32) -> vec2<u32> {
     cell,
     class_id + 1u,
   );
+}
+
+fn dressing_exclusion_mix32(value: u32) -> u32 {
+  var mixed = value;
+  mixed = mixed ^ (mixed >> 16u);
+  mixed = mixed * 0x7feb352du;
+  mixed = mixed ^ (mixed >> 15u);
+  mixed = mixed * 0x846ca68bu;
+  return mixed ^ (mixed >> 16u);
+}
+
+fn dressing_exclusion_hash(identity: vec2<u32>) -> u32 {
+  return dressing_exclusion_mix32(identity.x ^ rotateLeft(identity.y, 16u) ^ 0x9e3779b9u);
+}
+
+fn dressing_identity_excluded(identity: vec2<u32>) -> bool {
+  if (params.exclusion_meta.y == 0u) { return false; }
+  let capacity_mask = params.exclusion_meta.x;
+  let capacity = capacity_mask + 1u;
+  var slot = dressing_exclusion_hash(identity) & capacity_mask;
+  for (var probe = 0u; probe < capacity; probe = probe + 1u) {
+    let entry = persistent_exclusions[slot];
+    if (entry.z == 0u) { return false; }
+    if (entry.x == identity.x && entry.y == identity.y) { return true; }
+    slot = (slot + 1u) & capacity_mask;
+  }
+  return false;
 }
 
 fn dressing_identity_roll(identity: vec2<u32>, salt: u32) -> vec2<f32> {
@@ -232,7 +262,7 @@ fn emit_paired_stump(
   let stump_identity = treePcg2dU32(bitcast<i32>(parent_identity.x), bitcast<i32>(parent_identity.y), 0x3201u);
   let pairing_roll = dressing_identity_roll(stump_identity, 0x4305u).x;
   let pairing_probability = class_params[parent_class].rules.w;
-  if (pairing_roll >= pairing_probability) { return; }
+  if (pairing_roll >= pairing_probability || dressing_identity_excluded(stump_identity)) { return; }
   let offset = vec2<f32>(cos(parent_yaw), sin(parent_yaw)) * 1.5;
   let stump_xz = parent_position.xz - offset;
   let stump_env = dressing_environment(stump_xz, max(0.5, class_params[stump_class].grid_density.y));
@@ -297,6 +327,7 @@ fn generate_and_compact(slot: u32) {
   if (class_data.class_meta.y == DRESSING_PARENT_OWNERSHIP || class_data.class_meta.w == 0u) { return; }
   let cell = dressing_candidate_cell(slot, class_index);
   let identity = dressing_stable_identity(cell, class_index);
+  if (class_data.class_meta.y == DRESSING_PERSISTENT_OWNERSHIP && dressing_identity_excluded(identity)) { return; }
   let acceptance_rolls = dressing_identity_roll(identity, 0x4100u + class_index + 1u);
   let spacing = max(0.5, class_data.grid_density.y);
   let jitter_x = acceptance_rolls.y;
@@ -326,7 +357,7 @@ fn generate_and_compact(slot: u32) {
   let scale = 0.75 + dressing_identity_roll_swapped(identity, 0x4203u).y * 0.65;
   let position = vec3<f32>(wpos.x, environment.height + class_data.grid_density.w * scale, wpos.y);
   emit_dressing_instance(class_index, position, scale, yaw, environment, identity);
-  if (class_data.class_meta.y == 0u) {
+  if (class_data.class_meta.y == DRESSING_PERSISTENT_OWNERSHIP) {
     emit_paired_stump(class_index, cell, position, scale, yaw, environment);
     emit_parent_attachments(class_index, cell, position, scale, yaw, identity, environment);
   }
