@@ -10,6 +10,7 @@ import {
   WATER_REFERENCE_PRESET_OPTIONS,
   type WaterReferencePreset,
 } from "../../water/water_reference_presets.js";
+import { WATER_NORMAL_MODEL_OPTIONS } from "../../water/water_normal_models.js";
 import type { WaterController } from "../../runtime/water_weather/water_controller.js";
 import { addWaterEffectsGui } from "./water_effects_gui.js";
 
@@ -105,6 +106,10 @@ function addDeepWaterLookFolder(
       rebuild();
       folder.controllersRecursive().forEach((controller) => controller.updateDisplay());
     });
+
+  folder.add(visual, "normalModel", WATER_NORMAL_MODEL_OPTIONS)
+    .name("normal algorithm")
+    .onChange(rebuild);
 
   addColorControl(folder, "deep color", visual.deepColor, (next) => {
     visual.deepColor = next;
