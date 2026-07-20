@@ -3,7 +3,7 @@ import configText from "../../../config/probe_gi.yaml?raw";
 import { parseProbeGiConfig } from "./config.js";
 import { ProbeGiPublication } from "./publication.js";
 
- describe("probe GI publication", () => {
+describe("probe GI publication", () => {
   it("double-buffers three SH textures per cascade below the storage budget", () => {
     const publication = new ProbeGiPublication(parseProbeGiConfig(configText).cascades);
     try {

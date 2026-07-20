@@ -38,4 +38,15 @@ describe("probe GI relocation", () => {
     expect(result.valid).toBe(false);
     expect(result.unknown).toBe(true);
   });
+
+  it("does not call an enclosure confirmed when an unsampled escape axis is unknown", () => {
+    const result = relocateProbeGiPosition(
+      [0, 0, 0],
+      4,
+      { densityAt: (x) => x < 0 ? null : 1 },
+      config,
+    );
+    expect(result.valid).toBe(false);
+    expect(result.unknown).toBe(true);
+  });
 });

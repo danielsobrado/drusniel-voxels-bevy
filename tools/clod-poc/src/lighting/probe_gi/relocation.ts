@@ -55,7 +55,7 @@ export function relocateProbeGiPosition(
   ];
   const movedDensity = provider.densityAt(moved[0], moved[1], moved[2], spacingM);
   if (movedDensity === null || !Number.isFinite(movedDensity)) return invalidResult(desired, failedAxes, true);
-  if (movedDensity > PROBE_GI_VALIDITY_EPSILON) return invalidResult(desired, failedAxes, false);
+  if (movedDensity > PROBE_GI_VALIDITY_EPSILON) return invalidResult(desired, failedAxes, failedAxes > 0);
 
   const confidence = clamp01(1 - Math.max(0, movedDensity) / Math.max(PROBE_GI_VALIDITY_EPSILON, centerDensity));
   return validResult(
