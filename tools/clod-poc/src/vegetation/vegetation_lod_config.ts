@@ -1,5 +1,6 @@
 import { load } from "js-yaml";
 import type { TreeSettings } from "../trees/tree_config.js";
+import { treeLodCrossfadeHalfBandM } from "../trees/tree_lod_transition.js";
 import type { CanopyShellConfig } from "../canopy/canopy_config.js";
 
 export interface VegetationLodConfig {
@@ -20,8 +21,8 @@ export function parseVegetationLodConfig(yamlText: string): VegetationLodConfig 
   } | null;
 
   const raw = root?.vegetation_lod?.canopy_handoff;
-  const startM = finiteNumber(raw?.start_m, 620);
-  const endM = finiteNumber(raw?.end_m, 760);
+  const startM = requiredFiniteNumber(raw?.start_m, "vegetation_lod.canopy_handoff.start_m");
+  const endM = requiredFiniteNumber(raw?.end_m, "vegetation_lod.canopy_handoff.end_m");
 
   if (startM < 0) {
     throw new Error("vegetation_lod.canopy_handoff.start_m must be >= 0");
@@ -43,12 +44,19 @@ export function validateVegetationLodContract(
   canopy: CanopyShellConfig,
 ): void {
   const farEndM = trees.distanceM * trees.lod.farFraction;
+  const farTransitionEndM = farEndM + treeLodCrossfadeHalfBandM(trees);
 
-  if (farEndM >= vegetation.canopyHandoff.startM) {
+  if (farTransitionEndM >= vegetation.canopyHandoff.startM) {
     throw new Error(
-      `tree far LOD end (${farEndM}) must be below canopy handoff start ` +
+      `tree far LOD transition end (${farTransitionEndM}) must be below canopy handoff start ` +
       `(${vegetation.canopyHandoff.startM})`,
     );
+  }
+
+  if (trees.lod.impostorEndM !== vegetation.canopyHandoff.endM
+    || trees.lod.canopyFadeStartM !== vegetation.canopyHandoff.startM
+    || trees.lod.canopyFadeEndM !== vegetation.canopyHandoff.endM) {
+    throw new Error("tree runtime settings must match the shared vegetation LOD handoff");
   }
 
   if (vegetation.canopyHandoff.endM > canopy.distances.shellEndM) {
@@ -59,7 +67,9 @@ export function validateVegetationLodContract(
   }
 }
 
-function finiteNumber(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+function requiredFiniteNumber(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${path} must be a finite number`);
+  }
+  return value;
 }
