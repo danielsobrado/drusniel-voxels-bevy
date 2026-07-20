@@ -22,3 +22,6 @@ export * from "./validation.js";
 export * from "./gpu/dispatch.js";
 export * from "./gpu/layouts.js";
 export * from "./gpu/resources.js";
+export * from "./gpu/compute.js";
+export * from "./gpu/render_resources.js";
+export * from "./gpu/system.js";
