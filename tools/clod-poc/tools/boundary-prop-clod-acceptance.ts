@@ -25,33 +25,6 @@ const PLACEMENTS = [
   { assetId: "rock_large_01", x: 7520, z: 64, rotationY: -1.1, scale: 1.2 },
 ] as const;
 
-interface PropSnapshot {
-  assetId: string;
-  position: [number, number, number];
-}
-
-interface BoundaryQaHooks {
-  ready?: boolean;
-  error?: string | null;
-  stats?: { counters?: Record<string, number> } | null;
-  probeStreamRootHeights?: (
-    points: readonly { x: number; z: number }[],
-    level?: number,
-  ) => Promise<readonly (number | null)[]>;
-  getCustomPropPlacementSnapshot?: () => { instances: PropSnapshot[] } | null;
-  replaceTerrainAnchoredCustomProps?: (
-    instances: readonly {
-      assetId: string;
-      x: number;
-      z: number;
-      rotationY?: number;
-      scale?: number;
-      seed?: number;
-      variationId?: number;
-    }[],
-  ) => { instances: PropSnapshot[] } | null;
-}
-
 function writeJson(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
@@ -59,21 +32,17 @@ function writeJson(path: string, value: unknown): void {
 
 async function waitReady(page: Page): Promise<void> {
   await page.waitForFunction(() => {
-    const hooks = (window as typeof window & { __drusnielClod?: BoundaryQaHooks }).__drusnielClod;
+    const hooks = window.__drusnielClod;
     return Boolean(hooks && (hooks.ready === true || hooks.error != null));
   }, undefined, { timeout: READY_TIMEOUT_MS, polling: 250 });
 
-  const error = await page.evaluate(() => {
-    const hooks = (window as typeof window & { __drusnielClod?: BoundaryQaHooks }).__drusnielClod;
-    return hooks?.error ?? null;
-  });
+  const error = await page.evaluate(() => window.__drusnielClod?.error ?? null);
   if (error) throw new Error(`CLOD-POC boot failed: ${error}`);
 }
 
 async function waitForConvergence(page: Page): Promise<void> {
   await page.waitForFunction(() => {
-    const counters = (window as typeof window & { __drusnielClod?: BoundaryQaHooks })
-      .__drusnielClod?.stats?.counters ?? {};
+    const counters = window.__drusnielClod?.stats?.counters ?? {};
     const required = counters["live_clod_stream_required_pages"] ?? 0;
     return required > 0
       && (counters["live_clod_stream_pending_pages"] ?? -1) === 0
@@ -81,6 +50,8 @@ async function waitForConvergence(page: Page): Promise<void> {
       && (counters["live_clod_stream_failed_pages"] ?? -1) === 0
       && (counters["live_clod_stream_safety_pending_pages"] ?? -1) === 0
       && (counters["live_clod_stream_safety_inflight_pages"] ?? -1) === 0
+      && (counters["live_clod_stream_refinement_pending_pages"] ?? -1) === 0
+      && (counters["live_clod_stream_refinement_inflight_pages"] ?? -1) === 0
       && (counters["live_clod_stream_parent_coverage_violations"] ?? -1) === 0
       && (counters["live_clod_stream_active_root_pages"] ?? 0) > 0
       && (counters["heightfield_tiles_pending"] ?? 0) === 0
@@ -89,18 +60,28 @@ async function waitForConvergence(page: Page): Promise<void> {
   await settlePage(page, 90, SETTLE_TIMEOUT_MS);
 }
 
-async function collectEvidence(page: Page): Promise<BoundaryPropClodEvidence> {
-  return page.evaluate(async ({ placements, offsetM }) => {
-    const hooks = (window as typeof window & { __drusnielClod?: BoundaryQaHooks }).__drusnielClod;
-    if (!hooks?.probeStreamRootHeights) throw new Error("probeStreamRootHeights hook is unavailable");
-    if (!hooks.replaceTerrainAnchoredCustomProps) throw new Error("replaceTerrainAnchoredCustomProps hook is unavailable");
-
-    const replaced = hooks.replaceTerrainAnchoredCustomProps(placements);
-    if (!replaced || replaced.instances.length !== placements.length) {
-      throw new Error(`expected ${placements.length} boundary props, got ${replaced?.instances.length ?? 0}`);
+async function installBoundaryProps(page: Page): Promise<void> {
+  await page.evaluate((placements) => {
+    const replace = window.__drusnielClod?.replaceTerrainAnchoredCustomProps;
+    if (!replace) throw new Error("replaceTerrainAnchoredCustomProps hook is unavailable");
+    const scene = replace(placements);
+    if (!scene || scene.instances.length !== placements.length) {
+      throw new Error(`expected ${placements.length} boundary props, got ${scene?.instances.length ?? 0}`);
     }
+  }, PLACEMENTS);
+  await settlePage(page, 30, SETTLE_TIMEOUT_MS);
+}
 
-    const points = replaced.instances.flatMap((instance) => {
+async function collectEvidence(page: Page): Promise<BoundaryPropClodEvidence> {
+  return page.evaluate(async (offsetM) => {
+    const hooks = window.__drusnielClod;
+    if (!hooks?.probeStreamRootHeights) throw new Error("probeStreamRootHeights hook is unavailable");
+    if (!hooks.getCustomPropPlacementSnapshot) throw new Error("getCustomPropPlacementSnapshot hook is unavailable");
+
+    const scene = hooks.getCustomPropPlacementSnapshot();
+    if (!scene || scene.instances.length === 0) throw new Error("boundary prop snapshot is empty");
+
+    const points = scene.instances.flatMap((instance) => {
       const [x, , z] = instance.position;
       return [
         { x, z },
@@ -111,7 +92,7 @@ async function collectEvidence(page: Page): Promise<BoundaryPropClodEvidence> {
       ];
     });
     const heights = await hooks.probeStreamRootHeights(points, 0);
-    const props: BoundaryPropProbe[] = replaced.instances.map((instance, index) => {
+    const props: BoundaryPropProbe[] = scene.instances.map((instance, index) => {
       const start = index * 5;
       const [x, propY, z] = instance.position;
       return {
@@ -135,10 +116,12 @@ async function collectEvidence(page: Page): Promise<BoundaryPropClodEvidence> {
         failed: counters["live_clod_stream_failed_pages"] ?? -1,
         safetyPending: counters["live_clod_stream_safety_pending_pages"] ?? -1,
         safetyInflight: counters["live_clod_stream_safety_inflight_pages"] ?? -1,
+        refinementPending: counters["live_clod_stream_refinement_pending_pages"] ?? -1,
+        refinementInflight: counters["live_clod_stream_refinement_inflight_pages"] ?? -1,
         activeRoots: counters["live_clod_stream_active_root_pages"] ?? 0,
       },
     };
-  }, { placements: PLACEMENTS, offsetM: COVERAGE_OFFSET_M });
+  }, COVERAGE_OFFSET_M);
 }
 
 async function main(): Promise<void> {
@@ -180,9 +163,9 @@ async function main(): Promise<void> {
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await waitReady(page);
     await waitForConvergence(page);
+    await installBoundaryProps(page);
 
     const evidence = await collectEvidence(page);
-    await settlePage(page, 60, SETTLE_TIMEOUT_MS);
     const evaluation = evaluateBoundaryPropClodEvidence(evidence);
     const report = { url, evidence, evaluation, pageErrors };
     writeJson(resolve(OUTPUT_DIR, "report.json"), report);
