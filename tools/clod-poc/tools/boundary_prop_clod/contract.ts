@@ -1,10 +1,13 @@
 export const BOUNDARY_PROP_MAX_VERTICAL_DELTA_M = 2;
 
 export const BOUNDARY_GAP_COUNTERS = [
+  "ring_boundary_holes",
   "live_clod_gap_holes",
   "clod_far_gap_holes",
   "far_clipmap_ownership_holes",
   "priority_unowned_cells",
+  "clod_parent_coverage_violations",
+  "missing_clod_pages_in_required_radius",
   "live_clod_stream_parent_coverage_violations",
 ] as const;
 
@@ -51,7 +54,6 @@ export function evaluateBoundaryPropClodEvidence(
   for (const prop of evidence.props) {
     if (prop.clodY === null || !Number.isFinite(prop.clodY)) {
       failures.push(`${prop.assetId}@${prop.x},${prop.z}: no rendered CLOD height`);
-      uncoveredProbeCount++;
     } else {
       const delta = Math.abs(prop.propY - prop.clodY);
       measuredMaxVerticalDeltaM = Math.max(measuredMaxVerticalDeltaM, delta);
