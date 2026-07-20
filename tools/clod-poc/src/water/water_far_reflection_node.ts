@@ -2,6 +2,7 @@ import * as THREE from "three";
 import {
   Break,
   float,
+  floor,
   Fn,
   If,
   Loop,
@@ -11,8 +12,8 @@ import {
   smoothstep,
   storage,
   uniform,
-  vec2,
   vec3,
+  vec4,
 } from "three/tsl";
 import type { WaterVisualConfig } from "./waterConfig.js";
 import { waterFarSummaryReflectionActive } from "./water_reflection_tiers.js";
@@ -24,7 +25,6 @@ type TslNode = any;
 export interface WaterFarReflectionNode {
   readonly color: TslNode;
   readonly hit: TslNode;
-  readonly propHit: TslNode;
   syncVisual(visual: WaterVisualConfig): void;
   syncSource(): void;
   dispose(): void;
@@ -55,10 +55,10 @@ export function buildWaterFarReflectionNode(input: {
   const uTerrainStrength = uniform(policy.terrainStrength) as TslNode;
   const uPropStrength = uniform(policy.propStrength) as TslNode;
 
-  const hit = float(0).toVar();
-  const propHit = float(0).toVar();
-  const hitDistance = uMaxDistance.toVar();
-  const color = Fn(() => {
+  const result = Fn(() => {
+    const hit = float(0).toVar();
+    const propHit = float(0).toVar();
+    const hitDistance = uMaxDistance.toVar();
     const incident = normalize(input.worldPos.sub(input.cameraPosition));
     const reflectionDirection = reflect(
       incident,
@@ -75,9 +75,8 @@ export function buildWaterFarReflectionNode(input: {
           .and(grid.y.greaterThanEqual(0))
           .and(grid.x.lessThan(uResolution.sub(1)))
           .and(grid.y.lessThan(uResolution.sub(1)));
-        If(inside.not(), () => { Break(); });
         If(inside, () => {
-          const cell = grid.floor();
+          const cell = floor(grid);
           const index = cell.y.mul(uResolution).add(cell.x);
           const sample = source.element(index);
           const verticalDelta = point.y.sub(sample.x);
@@ -95,12 +94,11 @@ export function buildWaterFarReflectionNode(input: {
       });
     });
 
-    const terrainColor = vec3(0.12, 0.14, 0.10);
-    const propColor = vec3(0.09, 0.10, 0.095);
-    const blockerColor = mix(terrainColor, propColor, propHit);
+    const blockerColor = mix(vec3(0.12, 0.14, 0.10), vec3(0.09, 0.10, 0.095), propHit);
     const strength = mix(uTerrainStrength, uPropStrength, propHit);
-    const distanceFade = smoothstep(uMaxDistance.mul(0.55), uMaxDistance, hitDistance).oneMinus();
-    return mix(input.skyReflection, blockerColor, hit.mul(strength).mul(distanceFade));
+    const distanceFade = float(1).sub(smoothstep(uMaxDistance.mul(0.55), uMaxDistance, hitDistance));
+    const color = mix(input.skyReflection, blockerColor, hit.mul(strength).mul(distanceFade));
+    return vec4(color, hit);
   })();
 
   const syncVisual = (visual: WaterVisualConfig): void => {
@@ -125,9 +123,8 @@ export function buildWaterFarReflectionNode(input: {
   syncSource();
 
   return {
-    color,
-    hit,
-    propHit,
+    color: result.rgb,
+    hit: result.a,
     syncVisual,
     syncSource,
     dispose: () => gpu.release(),
