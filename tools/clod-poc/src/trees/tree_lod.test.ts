@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_TREE_SETTINGS,
+  canopyVisibility,
   selectTreeLod,
+  treeImpostorVisibility,
   treeLodDistances,
   type TreeSettings,
 } from "./index.js";
@@ -14,7 +16,9 @@ const settings: TreeSettings = {
     nearFraction: 0.25,
     midFraction: 0.5,
     farFraction: 0.75,
-    impostorFraction: 1,
+    impostorEndM: 200,
+    canopyFadeStartM: 160,
+    canopyFadeEndM: 200,
     hysteresisM: 10,
     crossfadeEnabled: false,
     crossfadeBandM: 20,
@@ -102,5 +106,49 @@ describe("tree LOD selection", () => {
     expect(afterThreshold.secondaryLod).toBe("far");
     expect(afterThreshold.fade).toBeCloseTo(0.75);
     expect(afterThreshold.secondaryFade).toBeCloseTo(0.25);
+  });
+});
+
+describe("tree impostor canopy handoff", () => {
+  it("uses the configured impostor end distance for the impostor band", () => {
+    expect(treeLodDistances(DEFAULT_TREE_SETTINGS).impostor).toBe(760);
+  });
+
+  it("fades the impostor out across the configured handoff band", () => {
+    expect(treeImpostorVisibility(620, DEFAULT_TREE_SETTINGS)).toBeCloseTo(1);
+    expect(treeImpostorVisibility(690, DEFAULT_TREE_SETTINGS)).toBeCloseTo(0.5);
+    expect(treeImpostorVisibility(760, DEFAULT_TREE_SETTINGS)).toBeCloseTo(0);
+  });
+
+  it("keeps tree impostor and far-canopy visibility complementary", () => {
+    for (const distance of [620, 660, 690, 720, 760]) {
+      const tree = treeImpostorVisibility(distance, DEFAULT_TREE_SETTINGS);
+      const canopy = canopyVisibility(
+        distance,
+        DEFAULT_TREE_SETTINGS.lod.canopyFadeStartM,
+        DEFAULT_TREE_SETTINGS.lod.canopyFadeEndM,
+      );
+      expect(tree + canopy).toBeCloseTo(1);
+    }
+  });
+
+  it("scales the impostor selection fade by the remaining tree visibility", () => {
+    const handoffSettings: TreeSettings = {
+      ...DEFAULT_TREE_SETTINGS,
+      distanceM: 760,
+      lod: {
+        ...DEFAULT_TREE_SETTINGS.lod,
+        crossfadeEnabled: false,
+        ditherEnabled: false,
+        crossfadeBandM: 0,
+        impostorEndM: 760,
+        canopyFadeStartM: 620,
+        canopyFadeEndM: 760,
+      },
+    };
+
+    const midHandoff = selectTreeLod(690, null, handoffSettings);
+    expect(midHandoff.lod).toBe("impostor");
+    expect(midHandoff.fade).toBeCloseTo(0.5);
   });
 });
