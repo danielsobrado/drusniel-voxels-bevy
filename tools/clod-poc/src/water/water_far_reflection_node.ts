@@ -39,14 +39,15 @@ export function buildWaterFarReflectionNode(input: {
   readonly levelCellSizeM: number | null;
 }): WaterFarReflectionNode {
   const policy = input.visual.reflection.farSummary;
-  const gpu = acquireWaterFarReflectionGpuSource(policy.sourceResolution);
-  const maxCells = policy.sourceResolution * policy.sourceResolution;
+  const storageResolution = policy.sourceResolution;
+  const gpu = acquireWaterFarReflectionGpuSource(storageResolution);
+  const maxCells = storageResolution * storageResolution;
   const source = storage(gpu.attribute, "vec4", maxCells).toReadOnly();
   const uActive = uniform(waterFarSummaryReflectionActive(input.visual, input.levelCellSizeM) ? 1 : 0) as TslNode;
   const uSourceValid = uniform(0) as TslNode;
   const uOrigin = uniform(new THREE.Vector2()) as TslNode;
   const uCellSize = uniform(1) as TslNode;
-  const uResolution = uniform(policy.sourceResolution) as TslNode;
+  const uResolution = uniform(storageResolution) as TslNode;
   const uMaxSteps = uniform(policy.maxSteps) as TslNode;
   const uStartDistance = uniform(policy.startDistanceM) as TslNode;
   const uMaxDistance = uniform(policy.maxDistanceM) as TslNode;
@@ -77,7 +78,7 @@ export function buildWaterFarReflectionNode(input: {
           .and(grid.y.lessThan(uResolution.sub(1)));
         If(inside, () => {
           const cell = floor(grid);
-          const index = cell.y.mul(uResolution).add(cell.x);
+          const index = cell.y.mul(uResolution).add(cell.x).toUint();
           const sample = source.element(index);
           const verticalDelta = point.y.sub(sample.x);
           const intersects = sample.w.greaterThan(0.5)
@@ -103,7 +104,8 @@ export function buildWaterFarReflectionNode(input: {
 
   const syncVisual = (visual: WaterVisualConfig): void => {
     const next = visual.reflection.farSummary;
-    uActive.value = waterFarSummaryReflectionActive(visual, input.levelCellSizeM) ? 1 : 0;
+    const topologyMatches = next.sourceResolution === storageResolution;
+    uActive.value = topologyMatches && waterFarSummaryReflectionActive(visual, input.levelCellSizeM) ? 1 : 0;
     uMaxSteps.value = next.maxSteps;
     uStartDistance.value = next.startDistanceM;
     uMaxDistance.value = next.maxDistanceM;
