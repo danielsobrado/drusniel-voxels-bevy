@@ -5,6 +5,11 @@ import {
   type WaterDebugState,
   type WaterRiverDebugStats,
 } from "../../water/index.js";
+import {
+  applyWaterReferencePreset,
+  WATER_REFERENCE_PRESET_OPTIONS,
+  type WaterReferencePreset,
+} from "../../water/water_reference_presets.js";
 import type { WaterController } from "../../runtime/water_weather/water_controller.js";
 import { addWaterEffectsGui } from "./water_effects_gui.js";
 
@@ -91,6 +96,15 @@ function addDeepWaterLookFolder(
   rebuild: () => void,
 ): void {
   const folder = gui.addFolder("water / deep water look");
+  const reference = { preset: "custom" as WaterReferencePreset };
+
+  folder.add(reference, "preset", WATER_REFERENCE_PRESET_OPTIONS)
+    .name("reference look")
+    .onChange((preset: WaterReferencePreset) => {
+      applyWaterReferencePreset(visual, preset);
+      rebuild();
+      folder.controllersRecursive().forEach((controller) => controller.updateDisplay());
+    });
 
   addColorControl(folder, "deep color", visual.deepColor, (next) => {
     visual.deepColor = next;
@@ -121,6 +135,12 @@ function addDeepWaterLookFolder(
   folder.add(visual, "rippleScaleB", 0.02, 0.5, 0.005).name("wave scale B").onChange(rebuild);
   folder.add(visual, "rippleStrengthA", 0.0, 0.8, 0.01).name("normal str A").onChange(rebuild);
   folder.add(visual, "rippleStrengthB", 0.0, 0.8, 0.01).name("normal str B").onChange(rebuild);
+
+  folder.add(visual.glitter, "enabled").name("sun glitter").onChange(rebuild);
+  folder.add(visual.glitter, "tightExponent", 16, 512, 1).name("glitter tight exp").onChange(rebuild);
+  folder.add(visual.glitter, "tightGain", 0.0, 2.0, 0.01).name("glitter tight gain").onChange(rebuild);
+  folder.add(visual.glitter, "broadExponent", 4, 192, 1).name("glitter broad exp").onChange(rebuild);
+  folder.add(visual.glitter, "broadGain", 0.0, 1.0, 0.01).name("glitter broad gain").onChange(rebuild);
 
   folder.add(visual.reflection, "skyFallbackStrength", 0.0, 2.0, 0.01).name("sky reflect").onChange(rebuild);
   folder.add(visual.reflection, "terrainFallbackStrength", 0.0, 1.0, 0.01).name("terrain reflect").onChange(rebuild);
