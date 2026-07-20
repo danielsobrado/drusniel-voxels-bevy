@@ -1,4 +1,5 @@
 import type { BiomeVisualState } from "../environment/biome_visual_state.js";
+import { evaluateSunbeamMoteAirborneState } from "../environment_masks/sunbeam_mote_mask_state.js";
 import { readEnvironmentalMaskSettings } from "../environment_masks/environment_mask_runtime.js";
 import type { SunbeamMoteMaskSettings } from "../environment_masks/environment_mask_types.js";
 
@@ -71,15 +72,8 @@ export function sanitizeSunbeamMoteRuntimeSettings(
 export function resolveSunbeamMoteVisualState(
   biome: Pick<BiomeVisualState, "enabled" | "pollenAmount" | "frostAmount" | "morningMist"> | null,
 ): SunbeamMoteVisualState {
-  if (!biome?.enabled) return { amount: 0, coldBlend: 0, localMist: 0 };
-  const pollen = fraction(biome.pollenAmount, 0);
-  const frost = fraction(biome.frostAmount, 0);
-  const total = pollen + frost;
-  return {
-    amount: fraction(total, 0),
-    coldBlend: total > 0.0001 ? frost / total : 0,
-    localMist: fraction(biome.morningMist, 0),
-  };
+  if (!biome) return { amount: 0, coldBlend: 0, localMist: 0 };
+  return evaluateSunbeamMoteAirborneState(biome);
 }
 
 function fromMask(mask: SunbeamMoteMaskSettings, enabled: boolean): SunbeamMoteRuntimeSettings {

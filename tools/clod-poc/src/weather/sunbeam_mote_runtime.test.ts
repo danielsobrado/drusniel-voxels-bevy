@@ -3,6 +3,7 @@ import {
   cloneEnvironmentalMaskSettings,
   DEFAULT_ENVIRONMENTAL_MASK_SETTINGS,
 } from "../environment_masks/environment_mask_config.js";
+import { evaluateSunbeamMoteAirborneState } from "../environment_masks/sunbeam_mote_mask_state.js";
 import { setEnvironmentalMaskSettings } from "../environment_masks/environment_mask_runtime.js";
 import {
   readSunbeamMoteRuntimeSettings,
@@ -48,13 +49,30 @@ describe("sunbeam mote runtime", () => {
     expect(sanitized.opacity).toBe(1);
   });
 
-  it("blends pollen and frost without inventing visual state", () => {
+  it("uses the canonical airborne state for pollen, frost, and morning mist", () => {
     expect(resolveSunbeamMoteVisualState(null)).toEqual({ amount: 0, coldBlend: 0, localMist: 0 });
-    const warm = resolveSunbeamMoteVisualState({ enabled: true, pollenAmount: 0.8, frostAmount: 0, morningMist: 0.4 });
-    expect(warm).toEqual({ amount: 0.8, coldBlend: 0, localMist: 0.4 });
-    const mixed = resolveSunbeamMoteVisualState({ enabled: true, pollenAmount: 0.3, frostAmount: 0.7, morningMist: 0.2 });
-    expect(mixed.amount).toBe(1);
-    expect(mixed.coldBlend).toBeCloseTo(0.7);
-    expect(mixed.localMist).toBe(0.2);
+
+    const warm = { enabled: true, pollenAmount: 0.8, frostAmount: 0, morningMist: 0.4 };
+    expect(resolveSunbeamMoteVisualState(warm)).toEqual(evaluateSunbeamMoteAirborneState(warm));
+    expect(resolveSunbeamMoteVisualState(warm)).toEqual({ amount: 0.8, coldBlend: 0, localMist: 0.4 });
+
+    const mixed = { enabled: true, pollenAmount: 0.3, frostAmount: 0.7, morningMist: 0.2 };
+    expect(resolveSunbeamMoteVisualState(mixed)).toEqual(evaluateSunbeamMoteAirborneState(mixed));
+    expect(resolveSunbeamMoteVisualState(mixed).amount).toBe(1);
+    expect(resolveSunbeamMoteVisualState(mixed).coldBlend).toBeCloseTo(0.7);
+
+    expect(resolveSunbeamMoteVisualState({
+      enabled: true,
+      pollenAmount: 0,
+      frostAmount: 0,
+      morningMist: 0.65,
+    })).toEqual({ amount: 0.65, coldBlend: 0, localMist: 0.65 });
+
+    expect(resolveSunbeamMoteVisualState({
+      enabled: true,
+      pollenAmount: 0,
+      frostAmount: 0.6,
+      morningMist: 0,
+    })).toEqual({ amount: 0.6, coldBlend: 1, localMist: 0 });
   });
 });
