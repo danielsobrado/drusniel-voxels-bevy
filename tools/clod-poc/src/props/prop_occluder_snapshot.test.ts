@@ -13,7 +13,7 @@ import type {
 const settings: PropOcclusionSettings = {
   enabled: true,
   cellSizeM: 4,
-  buildOccludersPerFrame: 8,
+  buildCellsPerFrame: 256,
   footprintPaddingM: 0.5,
   minimumHeightM: 1.5,
   mistClipStrength: 0.85,
