@@ -89,16 +89,6 @@ async function waitForConvergence(page: Page): Promise<void> {
   await settlePage(page, 90, SETTLE_TIMEOUT_MS);
 }
 
-function coveragePoints(x: number, z: number): { x: number; z: number }[] {
-  return [
-    { x, z },
-    { x: x - COVERAGE_OFFSET_M, z },
-    { x: x + COVERAGE_OFFSET_M, z },
-    { x, z: z - COVERAGE_OFFSET_M },
-    { x, z: z + COVERAGE_OFFSET_M },
-  ];
-}
-
 async function collectEvidence(page: Page): Promise<BoundaryPropClodEvidence> {
   return page.evaluate(async ({ placements, offsetM }) => {
     const hooks = (window as typeof window & { __drusnielClod?: BoundaryQaHooks }).__drusnielClod;
