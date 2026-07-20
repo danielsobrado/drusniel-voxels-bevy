@@ -128,7 +128,7 @@ export interface PropShadowSettings {
 export interface PropOcclusionSettings {
   enabled: boolean;
   cellSizeM: number;
-  buildOccludersPerFrame: number;
+  buildCellsPerFrame: number;
   footprintPaddingM: number;
   minimumHeightM: number;
   mistClipStrength: number;
