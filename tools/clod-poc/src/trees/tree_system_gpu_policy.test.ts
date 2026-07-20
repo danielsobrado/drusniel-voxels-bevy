@@ -13,26 +13,24 @@ describe("tree GPU/CPU path policy", () => {
     expect(treeCpuPatchCrossfadeEnabled(settings)).toBe(true);
   });
 
-  it("disables CPU crossfade when CPU patches are a GPU fallback", () => {
+  it("keeps CPU crossfade for GPU fallback patches so transitions stay stable", () => {
     const settings = cloneTreeSettings();
     settings.gpu.enabled = true;
     settings.gpu.fallbackToCpu = true;
     settings.lod.crossfadeEnabled = true;
     settings.lod.ditherEnabled = true;
+    settings.lod.crossfadeBandM = 28;
 
     expect(treeCpuPatchesAreGpuFallback(settings)).toBe(true);
-    expect(treeCpuPatchCrossfadeEnabled(settings)).toBe(false);
+    expect(treeCpuPatchCrossfadeEnabled(settings)).toBe(true);
   });
 
-  it("disables CPU crossfade when force-CPU debug mode is active", () => {
+  it("disables CPU crossfade when the configured band is zero", () => {
     const settings = cloneTreeSettings();
-    settings.gpu.enabled = true;
-    settings.gpu.debugForceCpu = true;
-    settings.gpu.fallbackToCpu = false;
     settings.lod.crossfadeEnabled = true;
     settings.lod.ditherEnabled = true;
+    settings.lod.crossfadeBandM = 0;
 
-    expect(treeCpuPatchesAreGpuFallback(settings)).toBe(true);
     expect(treeCpuPatchCrossfadeEnabled(settings)).toBe(false);
   });
 });

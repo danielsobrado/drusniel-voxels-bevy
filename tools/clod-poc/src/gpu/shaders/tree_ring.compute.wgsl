@@ -453,6 +453,17 @@ fn tree_lod_ring(distance_m: f32, params: TreeLodParams) -> TreeLodRing {
   return TreeLodRing(lod_active, fade);
 }
 
+fn tree_hard_lod(distance_m: f32, params: TreeLodParams) -> u32 {
+  let dist = max(0.0, distance_m);
+  let near_m = max(0.0, params.near_m);
+  let mid_m = max(near_m, params.mid_m);
+  let far_m = max(mid_m, params.far_m);
+  if (dist <= near_m) { return TREE_LOD_NEAR; }
+  if (dist <= mid_m) { return TREE_LOD_MID; }
+  if (dist <= far_m) { return TREE_LOD_FAR; }
+  return TREE_LOD_IMPOSTOR;
+}
+
 fn group_index(species: u32, lod: u32) -> u32 { return species * TREE_LOD_COUNT + lod; }
 fn shadow_group_index(cascade: u32, species: u32, lod: u32) -> u32 { return cascade * TREE_GROUP_COUNT + group_index(species, lod); }
 
@@ -803,10 +814,8 @@ fn process_tree_slot(slot: u32) {
     record_tree_terrain_visibility(terrain_hidden);
   }
   if (terrain_hidden) { return; }
-  append_shadow_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, shadow_center, wc, height, scale);
-  append_shadow_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, shadow_center, wc, height, scale);
-  append_shadow_lod_if_active(species, TREE_LOD_FAR, ring.lod_active.z, shadow_center, wc, height, scale);
-  append_shadow_lod_if_active(species, TREE_LOD_IMPOSTOR, ring.lod_active.w, shadow_center, wc, height, scale);
+  let shadow_lod = tree_hard_lod(dist, TreeLodParams(params.lod.x, params.lod.y, params.lod.z, params.center_radius.z, params.lod.w));
+  append_shadow_lod_if_active(species, shadow_lod, 1u, shadow_center, wc, height, scale);
   if (!in_frustum(shadow_center, 8.0)) { return; }
   append_lod_if_active(species, TREE_LOD_NEAR, ring.lod_active.x, wc, height, scale);
   append_lod_if_active(species, TREE_LOD_MID, ring.lod_active.y, wc, height, scale);

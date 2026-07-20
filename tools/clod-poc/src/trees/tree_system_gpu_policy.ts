@@ -10,8 +10,7 @@ export function treeSystemUsesGpuRingDraw(settings: TreeSettings): boolean {
 }
 
 export function treeCpuPatchCrossfadeEnabled(settings: TreeSettings): boolean {
-  if (!settings.lod.crossfadeEnabled || !settings.lod.ditherEnabled) return false;
-  return !treeCpuPatchesAreGpuFallback(settings);
+  return settings.lod.crossfadeEnabled && settings.lod.ditherEnabled && settings.lod.crossfadeBandM > 0;
 }
 
 export function treeCpuPatchesAreGpuFallback(settings: TreeSettings): boolean {

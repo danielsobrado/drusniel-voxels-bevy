@@ -145,11 +145,11 @@ export function treeGpuRingGroupRegion(group: number, maxInstancesPerGroup: numb
   return { start, end: start + Math.max(0, Math.floor(maxInstancesPerGroup)), firstInstance: start };
 }
 
-export function treeGpuRingGrid(settings: Pick<TreeSettings, "distanceM">): number {
-  return Math.max(1, Math.ceil((settings.distanceM * 2) / TREE_GPU_RING_CELL));
+export function treeGpuRingGrid(settings: TreeSettings): number {
+  return Math.max(1, Math.ceil((treeRingLodParams(settings).radius * 2) / TREE_GPU_RING_CELL));
 }
 
-export function treeGpuRingSlotCount(settings: Pick<TreeSettings, "distanceM">): number {
+export function treeGpuRingSlotCount(settings: TreeSettings): number {
   const grid = treeGpuRingGrid(settings);
   return grid * grid;
 }
@@ -251,7 +251,7 @@ export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRin
   u32.fill(0);
   f32[0] = params.centerX;
   f32[1] = params.centerZ;
-  f32[2] = Math.min(settings.distanceM, lod.radius);
+  f32[2] = lod.radius;
   f32[3] = params.worldCells;
   f32[4] = lod.near;
   f32[5] = lod.mid;

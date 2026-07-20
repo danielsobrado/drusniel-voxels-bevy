@@ -111,6 +111,12 @@ export function withTreeTerrainVisibilityCull(source: string): string {
     .replace(shadowsBeforeTerrainOrder, targetOrder)
     .replace(terrainAndClusterBeforeShadowsOrder, targetOrder)
     .replace(terrainBeforeShadowsNoClusterOrder, targetOrder);
+  if (!next.includes(clusterRejectStmt)) {
+    next = next.replace(
+      `  ${shadowAppendFn}(species, shadow_lod, 1u, shadow_center, wc, height, scale);\n  if (!in_frustum(shadow_center, 8.0)) { return; }`,
+      `  ${shadowAppendFn}(species, shadow_lod, 1u, shadow_center, wc, height, scale);\n  ${clusterRejectStmt}\n  if (!in_frustum(shadow_center, 8.0)) { return; }`,
+    );
+  }
   if (!next.includes("terrain_ridge_filter(wpos, height, dist)")) {
     next = next.replace(
       `  let shadow_center = vec3<f32>(wpos.x, height + 4.0, wpos.y);

@@ -60,7 +60,7 @@ describe("WGSL module composition", () => {
     const visibleReject = source.indexOf("if (!tree_slot_visible_cluster_visible(slot)) { return; }");
     const speciesSelection = source.indexOf("let species = select_species");
     const scaleSelection = source.indexOf("let scale = tree_instance_scale");
-    const shadowAppend = source.indexOf("append_shadow_lod_if_active(species, TREE_LOD_NEAR");
+    const shadowAppend = source.indexOf("append_shadow_lod_if_active(species, shadow_lod");
     const visibleAppend = source.indexOf("append_lod_if_active(species, TREE_LOD_NEAR");
 
     expect(terrainReject).toBeGreaterThan(-1);

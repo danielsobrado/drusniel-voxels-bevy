@@ -108,19 +108,20 @@ export function refreshTreePatchesForCenter(
   cameraPosition: THREE.Vector3 = center,
 ): TreePatchRefreshResult {
   resetTreeEarlyTerrainRejectionStats(input.earlyTerrainRejectionStats ?? noopEarlyTerrainRejectionStats());
-  const retained = selectRetainedTreePatches(input.patches, center.x, center.z, input.settings.distanceM);
+  const renderRadiusM = treeLodDistances(input.settings).impostor;
+  const retained = selectRetainedTreePatches(input.patches, center.x, center.z, renderRadiusM);
   const retainedNodeIds = new Set(retained.map((patch) => patch.nodeId));
   for (const patch of input.patches) {
     if (!retainedNodeIds.has(patch.nodeId)) removeTreePatchResources(input.root, patch);
   }
 
   const existing = new Set(retained.map((patch) => patch.nodeId));
-  const finiteCandidates = selectTreePatchCandidates(input.nodes, existing, center.x, center.z, input.settings.distanceM);
+  const finiteCandidates = selectTreePatchCandidates(input.nodes, existing, center.x, center.z, renderRadiusM);
   const unboundedWorld = treeCpuUnboundedWorld();
   const candidates = finiteCandidates.length > 0
     ? finiteCandidates
     : unboundedWorld
-      ? unboundedTreePatchCandidates(center, input.settings.distanceM, treeFallbackPatchSize(input.nodes), existing)
+      ? unboundedTreePatchCandidates(center, renderRadiusM, treeFallbackPatchSize(input.nodes), existing)
       : [];
   let totalTrees = countTreePatchInstances(retained);
   let added = 0;

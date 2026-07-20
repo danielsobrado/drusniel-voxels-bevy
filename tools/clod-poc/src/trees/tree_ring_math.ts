@@ -1,5 +1,6 @@
 import { terrainWeights, WATER_LEVEL } from "../terrain/terrain.js";
 import { DEFAULT_TREE_SETTINGS, type TreeLod, type TreeSettings } from "./tree_config.js";
+import { treeLodCrossfadeHalfBandM } from "./tree_lod_transition.js";
 import { treeMaterialDensityVector } from "./tree_material_bias.js";
 import { clamp, clamp01, smoothstep } from "./tree_noise.js";
 import { treePcg2d01 } from "../vegetation/gpu_authority/pcg2d.js";
@@ -140,20 +141,13 @@ export function treeParentClumpMask(worldX: number, worldZ: number, params: Tree
 }
 
 export function treeRingLodParams(settings: TreeSettings = DEFAULT_TREE_SETTINGS): TreeRingLodParams {
-  const gpuRingEnabled = settings.gpu.enabled && settings.gpu.scatterEnabled && settings.gpu.cullEnabled && !settings.gpu.debugForceCpu;
+  const crossfadeActive = settings.lod.crossfadeEnabled && settings.lod.ditherEnabled;
   return {
     near: settings.distanceM * settings.lod.nearFraction,
     mid: settings.distanceM * settings.lod.midFraction,
     far: settings.distanceM * settings.lod.farFraction,
-    radius: settings.distanceM * settings.lod.impostorFraction,
-    band: gpuRingEnabled ? 0 : settings.lod.crossfadeEnabled ? settings.lod.crossfadeBandM : 0,
-  };
-}
-
-export function treeGpuRingLodParams(settings: TreeSettings = DEFAULT_TREE_SETTINGS): TreeRingLodParams {
-  return {
-    ...treeRingLodParams(settings),
-    band: 0,
+    radius: settings.lod.impostorEndM,
+    band: crossfadeActive ? treeLodCrossfadeHalfBandM(settings) : 0,
   };
 }
 

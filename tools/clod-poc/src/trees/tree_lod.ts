@@ -1,4 +1,5 @@
 import type { TreeLod, TreeSettings } from "./tree_config.js";
+import { treeImpostorVisibility } from "./tree_lod_transition.js";
 
 export interface TreeLodSelection {
   lod: TreeLod;
@@ -23,7 +24,7 @@ export function treeLodDistances(settings: TreeSettings): {
     near: settings.distanceM * settings.lod.nearFraction,
     mid: settings.distanceM * settings.lod.midFraction,
     far: settings.distanceM * settings.lod.farFraction,
-    impostor: settings.distanceM * settings.lod.impostorFraction,
+    impostor: settings.lod.impostorEndM,
   };
 }
 
@@ -41,12 +42,28 @@ export function selectTreeLod(
     && settings.lod.ditherEnabled
     && settings.lod.crossfadeBandM > 0;
 
-  if (crossfadeActive) return selectTreeLodWithCrossfade(distance, baseLod, settings);
+  if (crossfadeActive) {
+    return applyCanopyHandoff(selectTreeLodWithCrossfade(distance, baseLod, settings), distance, settings);
+  }
 
   const lod = previousLod
     ? lodWithHysteresis(distance, baseLod, previousLod, settings.lod.hysteresisM, distances)
     : baseLod;
-  return { lod, fade: 1, secondaryLod: null, secondaryFade: 0 };
+  return applyCanopyHandoff({ lod, fade: 1, secondaryLod: null, secondaryFade: 0 }, distance, settings);
+}
+
+function applyCanopyHandoff(
+  selection: TreeLodSelection,
+  distance: number,
+  settings: TreeSettings,
+): TreeLodSelection {
+  const visibility = treeImpostorVisibility(distance, settings);
+  if (visibility >= 1) return selection;
+  return {
+    ...selection,
+    fade: selection.lod === "impostor" ? selection.fade * visibility : selection.fade,
+    secondaryFade: selection.secondaryLod === "impostor" ? selection.secondaryFade * visibility : selection.secondaryFade,
+  };
 }
 
 function selectTreeLodWithCrossfade(

@@ -64,20 +64,23 @@ describe("tree GPU ring math", () => {
     expect(params.near).toBe(settings.distanceM * settings.lod.nearFraction);
     expect(params.mid).toBe(settings.distanceM * settings.lod.midFraction);
     expect(params.far).toBe(settings.distanceM * settings.lod.farFraction);
-    expect(params.radius).toBe(settings.distanceM * settings.lod.impostorFraction);
-    expect(params.band).toBe(settings.lod.crossfadeBandM);
+    expect(params.radius).toBe(settings.lod.impostorEndM);
+    expect(params.band).toBe(settings.lod.crossfadeBandM * 0.5);
   });
 
-  it("forces hard LOD selection for the GPU ring path", () => {
+  it("keeps the crossfade band for the GPU ring path", () => {
     const settings = cloneTreeSettings(DEFAULT_TREE_SETTINGS);
     settings.gpu.enabled = true;
     settings.gpu.scatterEnabled = true;
     settings.gpu.cullEnabled = true;
     settings.gpu.debugForceCpu = false;
     settings.lod.crossfadeEnabled = true;
+    settings.lod.ditherEnabled = true;
     settings.lod.crossfadeBandM = 24;
 
-    expect(treeRingLodParams(settings).band).toBe(0);
+    const params = treeRingLodParams(settings);
+    expect(params.band).toBe(12);
+    expect(params.radius).toBe(settings.lod.impostorEndM);
   });
 
   it("overlaps adjacent LOD rings with complementary fades", () => {

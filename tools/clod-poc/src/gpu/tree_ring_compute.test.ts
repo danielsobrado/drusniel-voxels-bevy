@@ -34,11 +34,11 @@ function withGpuReadbacks(search: string, run: () => void): void {
 }
 
 describe("tree GPU ring compute helpers", () => {
-  it("derives a stable slot grid from the tree bubble distance", () => {
+  it("derives a stable slot grid from the impostor radius", () => {
     const settings = { ...DEFAULT_TREE_SETTINGS, distanceM: 220 };
     const grid = treeGpuRingGrid(settings);
 
-    expect(grid).toBe(Math.ceil((settings.distanceM * 2) / TREE_GPU_RING_CELL));
+    expect(grid).toBe(Math.ceil((settings.lod.impostorEndM * 2) / TREE_GPU_RING_CELL));
     expect(treeGpuRingSlotCount(settings)).toBe(grid * grid);
     expect(TREE_GPU_RING_GROUP_COUNT).toBe(TREE_SPECIES.length * 4);
     expect(TREE_GPU_RING_SHADOW_GROUP_COUNT).toBe(TREE_SPECIES.length * 4 * 4);
@@ -65,7 +65,7 @@ describe("tree GPU ring compute helpers", () => {
         nearFraction: 0.25,
         midFraction: 0.5,
         farFraction: 0.75,
-        impostorFraction: 1,
+        impostorEndM: 200,
         crossfadeEnabled: true,
         crossfadeBandM: 24,
       },
@@ -92,11 +92,11 @@ describe("tree GPU ring compute helpers", () => {
     expect(packed.byteLength).toBe(layout.paramBytes);
     expect(f32[0]).toBe(12);
     expect(f32[1]).toBe(34);
-    expect(f32[2]).toBe(100);
+    expect(f32[2]).toBe(200);
     expect(f32[27]).toBe(56);
     expect(f32[4]).toBe(25);
     expect(f32[5]).toBe(50);
-    expect(f32[7]).toBe(0);
+    expect(f32[7]).toBe(12);
     expect(f32[8]).toBeCloseTo(TREE_GPU_RING_CELL, 6);
     expect(u32[layout.indexCountsOffset]).toBe(111);
     expect(u32[layout.indexCountsOffset + 1]).toBe(222);

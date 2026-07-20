@@ -14,6 +14,7 @@ import {
 } from "three/tsl";
 import type { PrepassNodes } from "../rendering/veg_prepass.js";
 import type { TreeLod, TreeSettings } from "./tree_config.js";
+import { treeLodCrossfadeHalfBandM } from "./tree_lod_transition.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import type { TreeRingInstanceBuffers } from "./tree_node_material.js";
 import {
@@ -43,6 +44,8 @@ interface CrossfadeUniforms {
   mid: TslNode;
   far: TslNode;
   halfBand: TslNode;
+  canopyStart: TslNode;
+  canopyEnd: TslNode;
 }
 
 const LOD_ORDER: readonly TreeLod[] = ["near", "mid", "far", "impostor"];
@@ -152,7 +155,17 @@ function createTreeRingCrossfadeKeepNode(
     const entryKeep: TslNode = noise.greaterThanEqual(float(1).sub(transition));
     keep = active.select(entryKeep, keep);
   }
-  return uniforms.enabled.greaterThan(0.5).select(keep, trueNode);
+  let result: TslNode = uniforms.enabled.greaterThan(0.5).select(keep, trueNode);
+  if (lod === "impostor") {
+    const canopySpan: TslNode = max(uniforms.canopyEnd.sub(uniforms.canopyStart), float(0.001));
+    const t: TslNode = clamp(distance.sub(uniforms.canopyStart).div(canopySpan), 0, 1);
+    const canopyFade: TslNode = t.mul(t).mul(float(3).sub(t.mul(2)));
+    const impostorVisibility: TslNode = float(1).sub(canopyFade);
+    const canopyActive: TslNode = distance.greaterThanEqual(uniforms.canopyStart);
+    const canopyKeep: TslNode = noise.lessThan(impostorVisibility);
+    result = canopyActive.select(result.and(canopyKeep), result);
+  }
+  return result;
 }
 
 function createCrossfadeUniforms(settings: TreeSettings): CrossfadeUniforms {
@@ -163,7 +176,9 @@ function createCrossfadeUniforms(settings: TreeSettings): CrossfadeUniforms {
     near: uniform(distances[0]),
     mid: uniform(distances[1]),
     far: uniform(distances[2]),
-    halfBand: uniform(Math.max(0, settings.lod.crossfadeBandM)),
+    halfBand: uniform(treeLodCrossfadeHalfBandM(settings)),
+    canopyStart: uniform(settings.lod.canopyFadeStartM),
+    canopyEnd: uniform(settings.lod.canopyFadeEndM),
   };
 }
 
@@ -174,7 +189,9 @@ function updateCrossfadeUniforms(uniforms: CrossfadeUniforms, settings: TreeSett
   uniforms.near.value = distances[0];
   uniforms.mid.value = distances[1];
   uniforms.far.value = distances[2];
-  uniforms.halfBand.value = Math.max(0, settings.lod.crossfadeBandM);
+  uniforms.halfBand.value = treeLodCrossfadeHalfBandM(settings);
+  uniforms.canopyStart.value = settings.lod.canopyFadeStartM;
+  uniforms.canopyEnd.value = settings.lod.canopyFadeEndM;
 }
 
 function treeRingThresholds(settings: TreeSettings): readonly [number, number, number] {
