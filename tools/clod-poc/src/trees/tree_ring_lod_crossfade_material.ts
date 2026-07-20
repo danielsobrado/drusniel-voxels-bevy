@@ -87,7 +87,7 @@ export function treeRingCrossfadeState(
   settings: TreeSettings,
 ): TreeRingCrossfadeState {
   if (!crossfadeEnabled(settings)) return { fade: 1, role: "primary" };
-  const halfBand = Math.max(0, settings.lod.crossfadeBandM);
+  const halfBand = treeLodCrossfadeHalfBandM(settings);
   const thresholds = treeRingThresholds(settings);
   const index = LOD_ORDER.indexOf(lod);
   const previousThreshold = index > 0 ? thresholds[index - 1] : null;
