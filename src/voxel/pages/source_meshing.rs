@@ -96,7 +96,7 @@ pub(crate) struct PageSourceMeshingStats {
 }
 
 #[derive(Default)]
-struct SourceMeshingSchedule {
+pub(crate) struct SourceMeshingSchedule {
     queue_rescan_in_frames: u32,
     complete_page_refresh_in_frames: u32,
 }
