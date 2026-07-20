@@ -6,6 +6,7 @@ export interface TreeSystemSettingsPlan {
   needsGeometry: boolean;
   needsPatchRefresh: boolean;
   clearGpuRing: boolean;
+  applyGpuRingDebugColor: boolean;
   nextGpuStatus: "disabled" | "fallback-cpu" | null;
 }
 
@@ -32,15 +33,15 @@ export function planTreeSystemSettingsUpdate(
     patch.lod !== undefined ||
     ecologyChanged ||
     speciesChanged;
-  const renderChanged = patch.render !== undefined;
   const farMaterialChanged = patch.render?.farCheapMaterial !== undefined &&
     patch.render.farCheapMaterial !== current.render.farCheapMaterial;
+  const debugColorChanged = patch.render?.debugColorByLod !== undefined &&
+    patch.render.debugColorByLod !== current.render.debugColorByLod;
   const shadowPolicyChanged = patch.lod?.shadowsMaxLod !== undefined &&
     patch.lod.shadowsMaxLod !== current.lod.shadowsMaxLod;
   const clearGpuRing = needsGeometry ||
     patch.gpu !== undefined ||
     farMaterialChanged ||
-    renderChanged ||
     shadowPolicyChanged ||
     ecologyChanged ||
     speciesChanged ||
@@ -58,6 +59,7 @@ export function planTreeSystemSettingsUpdate(
     needsGeometry,
     needsPatchRefresh,
     clearGpuRing,
+    applyGpuRingDebugColor: debugColorChanged && !clearGpuRing,
     nextGpuStatus,
   };
 }
