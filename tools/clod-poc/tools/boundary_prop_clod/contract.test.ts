@@ -39,12 +39,15 @@ describe("boundary prop CLOD contract", () => {
   });
 
   it("fails floating props and missing rendered triangles", () => {
-    const evidence = passingEvidence();
-    evidence.props[0] = {
-      ...evidence.props[0]!,
-      propY: 62,
-      clodY: 47,
-      coverageHeights: [47, null, 47, 47, 47],
+    const base = passingEvidence();
+    const evidence: BoundaryPropClodEvidence = {
+      ...base,
+      props: [{
+        ...base.props[0]!,
+        propY: 62,
+        clodY: 47,
+        coverageHeights: [47, null, 47, 47, 47],
+      }],
     };
 
     const result = evaluateBoundaryPropClodEvidence(evidence);
@@ -56,10 +59,12 @@ describe("boundary prop CLOD contract", () => {
   });
 
   it("fails ownership gaps and unfinished CLOD streaming", () => {
-    const evidence = passingEvidence();
-    evidence.counters["clod_far_gap_holes"] = 2;
-    evidence.stream.pending = 1;
-    evidence.stream.activeRoots = 0;
+    const base = passingEvidence();
+    const evidence: BoundaryPropClodEvidence = {
+      ...base,
+      counters: { ...base.counters, clod_far_gap_holes: 2 },
+      stream: { ...base.stream, pending: 1, activeRoots: 0 },
+    };
 
     const result = evaluateBoundaryPropClodEvidence(evidence);
 
