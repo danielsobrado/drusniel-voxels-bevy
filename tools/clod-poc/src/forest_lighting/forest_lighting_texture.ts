@@ -4,8 +4,10 @@ import type { ForestLightingField } from "./forest_lighting_fields.js";
 export interface ForestLightingTextureHandle {
   texture: THREE.DataTexture;
   auxTexture: THREE.DataTexture;
+  detailTexture: THREE.DataTexture;
   resolution: number;
   worldCells: number;
+  canopyHeightScaleM: number;
   update(field: ForestLightingField): void;
   dispose(): void;
 }
@@ -13,55 +15,67 @@ export interface ForestLightingTextureHandle {
 export interface ForestLightingGpuTextureSource {
   texture: GPUTexture;
   auxTexture: GPUTexture;
+  detailTexture: GPUTexture;
   resolution: number;
   worldCells: number;
+  canopyHeightScaleM: number;
 }
 
 export interface ForestCanopyEcologySample {
   canopyDensity: number;
   forestEdge: number;
   understoryDensity: number;
+  competition: number;
+  canopyHeightM: number;
+  broadleafCoverage: number;
+  coniferCoverage: number;
+  grassSuppression: number;
 }
 
 let registeredGpuDevice: GPUDevice | null = null;
 let activeHandle: ForestLightingTextureHandle | null = null;
 let activeGpuTexture: GPUTexture | null = null;
 let activeGpuAuxTexture: GPUTexture | null = null;
+let activeGpuDetailTexture: GPUTexture | null = null;
 let activeGpuResolution = 0;
 
 export function registerForestLightingGpuDevice(device: GPUDevice | null): void {
   if (registeredGpuDevice === device) return;
-  activeGpuTexture?.destroy();
-  activeGpuAuxTexture?.destroy();
-  activeGpuTexture = null;
-  activeGpuAuxTexture = null;
-  activeGpuResolution = 0;
+  destroyActiveGpuTextures();
   registeredGpuDevice = device;
   if (device && activeHandle) uploadActiveGpuTextures(activeHandle);
 }
 
 export function activeForestLightingGpuTexture(): ForestLightingGpuTextureSource | null {
-  if (!activeHandle || !activeGpuTexture || !activeGpuAuxTexture) return null;
+  if (!activeHandle || !activeGpuTexture || !activeGpuAuxTexture || !activeGpuDetailTexture) return null;
   return {
     texture: activeGpuTexture,
     auxTexture: activeGpuAuxTexture,
+    detailTexture: activeGpuDetailTexture,
     resolution: activeHandle.resolution,
     worldCells: activeHandle.worldCells,
+    canopyHeightScaleM: activeHandle.canopyHeightScaleM,
   };
 }
 
 export function sampleActiveForestCanopyEcology(x: number, z: number): ForestCanopyEcologySample | null {
   const handle = activeHandle;
   if (!handle || !Number.isFinite(x) || !Number.isFinite(z)) return null;
-  const data = handle.auxTexture.image.data as Uint8Array;
+  const auxData = handle.auxTexture.image.data as Uint8Array;
+  const detailData = handle.detailTexture.image.data as Uint8Array;
   const worldSize = Math.max(1, handle.worldCells);
   const resolution = Math.max(1, handle.resolution);
   const tx = clamp01(x / worldSize) * Math.max(0, resolution - 1);
   const tz = clamp01(z / worldSize) * Math.max(0, resolution - 1);
   return {
-    canopyDensity: sampleBilinearChannel(data, resolution, tx, tz, 0),
-    forestEdge: sampleBilinearChannel(data, resolution, tx, tz, 1),
-    understoryDensity: sampleBilinearChannel(data, resolution, tx, tz, 2),
+    canopyDensity: sampleBilinearChannel(auxData, resolution, tx, tz, 0),
+    forestEdge: sampleBilinearChannel(auxData, resolution, tx, tz, 1),
+    understoryDensity: sampleBilinearChannel(auxData, resolution, tx, tz, 2),
+    grassSuppression: sampleBilinearChannel(auxData, resolution, tx, tz, 3),
+    canopyHeightM: sampleBilinearChannel(detailData, resolution, tx, tz, 0) * handle.canopyHeightScaleM,
+    broadleafCoverage: sampleBilinearChannel(detailData, resolution, tx, tz, 1),
+    coniferCoverage: sampleBilinearChannel(detailData, resolution, tx, tz, 2),
+    competition: sampleBilinearChannel(detailData, resolution, tx, tz, 3),
   };
 }
 
@@ -71,34 +85,37 @@ export function createForestLightingTexture(
   const length = field.resolution * field.resolution * 4;
   const data = new Uint8Array(length);
   const auxData = new Uint8Array(length);
+  const detailData = new Uint8Array(length);
   const texture = createDataTexture(data, field.resolution);
   const auxTexture = createDataTexture(auxData, field.resolution);
+  const detailTexture = createDataTexture(detailData, field.resolution);
   let handle: ForestLightingTextureHandle;
   handle = {
     texture,
     auxTexture,
+    detailTexture,
     resolution: field.resolution,
     worldCells: field.worldCells,
+    canopyHeightScaleM: field.canopyHeightScaleM,
     update(nextField) {
       if (nextField.resolution !== handle.resolution) {
         throw new Error("forest lighting texture resolution changed without recreating the handle");
       }
       handle.worldCells = nextField.worldCells;
-      packField(nextField, data, auxData);
+      handle.canopyHeightScaleM = nextField.canopyHeightScaleM;
+      packField(nextField, data, auxData, detailData);
       texture.needsUpdate = true;
       auxTexture.needsUpdate = true;
+      detailTexture.needsUpdate = true;
       if (activeHandle === handle) uploadActiveGpuTextures(handle);
     },
     dispose() {
       texture.dispose();
       auxTexture.dispose();
+      detailTexture.dispose();
       if (activeHandle !== handle) return;
       activeHandle = null;
-      activeGpuTexture?.destroy();
-      activeGpuAuxTexture?.destroy();
-      activeGpuTexture = null;
-      activeGpuAuxTexture = null;
-      activeGpuResolution = 0;
+      destroyActiveGpuTextures();
     },
   };
   activeHandle = handle;
@@ -121,15 +138,31 @@ function createDataTexture(data: Uint8Array, resolution: number): THREE.DataText
 function uploadActiveGpuTextures(handle: ForestLightingTextureHandle): void {
   const device = registeredGpuDevice;
   if (!device) return;
-  if (!activeGpuTexture || !activeGpuAuxTexture || activeGpuResolution !== handle.resolution) {
-    activeGpuTexture?.destroy();
-    activeGpuAuxTexture?.destroy();
+  if (
+    !activeGpuTexture ||
+    !activeGpuAuxTexture ||
+    !activeGpuDetailTexture ||
+    activeGpuResolution !== handle.resolution
+  ) {
+    destroyActiveGpuTextures();
     activeGpuTexture = createGpuTexture(device, handle.resolution, "forest lighting canonical GPU texture");
     activeGpuAuxTexture = createGpuTexture(device, handle.resolution, "forest canopy ecology canonical GPU texture");
+    activeGpuDetailTexture = createGpuTexture(device, handle.resolution, "forest canopy detail canonical GPU texture");
     activeGpuResolution = handle.resolution;
   }
   uploadTextureBytes(device, activeGpuTexture, handle.texture.image.data as Uint8Array, handle.resolution);
   uploadTextureBytes(device, activeGpuAuxTexture, handle.auxTexture.image.data as Uint8Array, handle.resolution);
+  uploadTextureBytes(device, activeGpuDetailTexture, handle.detailTexture.image.data as Uint8Array, handle.resolution);
+}
+
+function destroyActiveGpuTextures(): void {
+  activeGpuTexture?.destroy();
+  activeGpuAuxTexture?.destroy();
+  activeGpuDetailTexture?.destroy();
+  activeGpuTexture = null;
+  activeGpuAuxTexture = null;
+  activeGpuDetailTexture = null;
+  activeGpuResolution = 0;
 }
 
 function createGpuTexture(device: GPUDevice, resolution: number, label: string): GPUTexture {
@@ -172,8 +205,14 @@ function alignTo(value: number, alignment: number): number {
   return Math.ceil(value / alignment) * alignment;
 }
 
-function packField(field: ForestLightingField, data: Uint8Array, auxData: Uint8Array): void {
+function packField(
+  field: ForestLightingField,
+  data: Uint8Array,
+  auxData: Uint8Array,
+  detailData: Uint8Array,
+): void {
   const cells = field.resolution * field.resolution;
+  const heightScale = Math.max(1, field.canopyHeightScaleM);
   for (let i = 0; i < cells; i++) {
     const offset = i * 4;
     data[offset] = byte(field.ambientOcclusion[i]);
@@ -183,7 +222,11 @@ function packField(field: ForestLightingField, data: Uint8Array, auxData: Uint8A
     auxData[offset] = byte(field.canopyDensity[i]);
     auxData[offset + 1] = byte(field.forestEdge[i]);
     auxData[offset + 2] = byte(field.understoryDensity[i]);
-    auxData[offset + 3] = 255;
+    auxData[offset + 3] = byte(field.grassSuppression[i]);
+    detailData[offset] = byte(field.canopyHeightM[i] / heightScale);
+    detailData[offset + 1] = byte(field.broadleafCoverage[i]);
+    detailData[offset + 2] = byte(field.coniferCoverage[i]);
+    detailData[offset + 3] = byte(field.competition[i]);
   }
 }
 
