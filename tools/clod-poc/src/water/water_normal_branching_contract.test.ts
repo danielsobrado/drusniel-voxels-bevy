@@ -20,4 +20,9 @@ describe("water normal model branching contract", () => {
     expect(SOURCE).toMatch(/ElseIf\(input\.model\.equal\(1\)[\s\S]*buildGlacialNormal\(input\)/);
     expect(SOURCE).toMatch(/Else\(\(\) =>[\s\S]*buildFable5InspiredNormal\(input\)/);
   });
+
+  it("uses the stable Glacial Valley value-noise hash", () => {
+    expect(SOURCE).toContain("base.yzx.add(33.33)");
+    expect(SOURCE).not.toContain("43758.5453123");
+  });
 });
