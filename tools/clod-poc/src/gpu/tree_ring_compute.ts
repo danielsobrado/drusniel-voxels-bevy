@@ -7,13 +7,15 @@ import {
   TREE_RING_SHADOW_PLANE_COUNT,
   TREE_RING_SHADOW_PLANE_WORDS,
 } from "../trees/tree_ring_shadow_casters.js";
+import { heightfieldTileGpuAtlasBindings } from "../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import { hydrologyAtlasGpuParams, hydrologyAtlasGpuTexture } from "./hydrology_atlas_gpu.js";
 import type { ResolvedDigEdit } from "./terrain_field_core.js";
+import { TreeCanopyCompetitionBinding } from "./tree_canopy_competition_binding.js";
+import { createTreeRingBindGroup, type TreeRingBindGroupResources } from "./tree_ring_bind_group.js";
 import { createTreeHydrologyTexture } from "./tree_ring_compute_resources.js";
 import { treeRingSpeciesGroupIndex, treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { composeTreeRingShader } from "./wgsl_modules.js";
-import { heightfieldTileGpuAtlasBindings } from "../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 
 const TREE_GPU_RING_LAYOUT = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
 
@@ -74,6 +76,9 @@ export interface TreeGpuRingStats {
   readbackMs: number | null;
   skippedDispatches: number;
   terrainVisibilityCounts: TreeGpuTerrainVisibilityCounts | null;
+  canopyCompetitionActive?: boolean;
+  canopyCompetitionRebinds?: number;
+  canopyCompetitionReadbacks?: number;
 }
 
 export interface TreeGpuTerrainVisibilityCounts {
@@ -103,6 +108,9 @@ export interface TreeGpuRingDispatchParams {
   /** Streaming hydrology atlas uniform (originX, originZ, cellSize, enabled);
    *  filled from hydrologyAtlasGpuParams() at dispatch time when omitted. */
   hydroAtlas?: [number, number, number, number];
+  /** Canonical canopy competition uniform (worldCells, resolution, enabled, reserved).
+   *  Filled from the active forest-lighting GPU texture at dispatch time when omitted. */
+  canopyCompetition?: [number, number, number, number];
 }
 
 interface ReadbackSlot {
@@ -318,6 +326,8 @@ export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRin
   }
   const atlas = params.hydroAtlas ?? [0, 0, 0, 0];
   for (let i = 0; i < 4; i++) f32[TREE_GPU_RING_LAYOUT.hydroAtlasOffset + i] = atlas[i] ?? 0;
+  const canopyCompetition = params.canopyCompetition ?? [1, 1, 0, 0];
+  for (let i = 0; i < 4; i++) f32[TREE_GPU_RING_LAYOUT.canopyCompetitionOffset + i] = canopyCompetition[i] ?? 0;
   return scratch;
 }
 
@@ -337,7 +347,10 @@ export class TreeGpuRingCompute {
   private readonly counterReadbacks: ReadbackSlot[];
   private readonly fieldParams: GPUBuffer;
   private digEdits: GPUBuffer;
-  private readonly bindGroup: GPUBindGroup;
+  private bindGroup: GPUBindGroup;
+  private readonly bindGroupLayout: GPUBindGroupLayout;
+  private readonly bindGroupResources: TreeRingBindGroupResources;
+  private readonly canopyCompetition: TreeCanopyCompetitionBinding;
   private readonly hydroTexture: GPUTexture;
   private readonly paramScratch = new ArrayBuffer(PARAM_BYTES);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
@@ -367,6 +380,7 @@ export class TreeGpuRingCompute {
     hydroData: TreeHydrologyData | null,
   ) {
     this.pipelines = pipelines;
+    this.bindGroupLayout = layout;
     this.shadowOutputsReady = !!outputBuffers.shadowCell && !!outputBuffers.shadowIndirectArgs;
     const slotCount = treeGpuRingSlotCount(settings);
     const workgroupSize = treeGpuRingWorkgroupSize(settings);
@@ -388,59 +402,59 @@ export class TreeGpuRingCompute {
     const packedFieldParams = packFieldParams(edits.length);
     device.queue.writeBuffer(this.fieldParams, 0, packedFieldParams.buffer as ArrayBuffer, packedFieldParams.byteOffset, packedFieldParams.byteLength);
     this.counterReadbacks = Array.from({ length: READBACK_SLOTS }, (_, index) => ({
-    buffer: device.createBuffer({ label: `tree ring counter readback ${index}`, size: READBACK_BYTES, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
-    busy: false,
-    destroyAfterMap: false,
-    visibleCpu: new Uint32Array(TREE_GPU_RING_GROUP_COUNT),
-    shadowCpu: new Uint32Array(TREE_GPU_RING_SHADOW_GROUP_COUNT),
-    terrainVisibilityCpu: new Uint32Array(TREE_TERRAIN_VISIBILITY_COUNTER_COUNT),
+      buffer: device.createBuffer({ label: `tree ring counter readback ${index}`, size: READBACK_BYTES, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
+      busy: false,
+      destroyAfterMap: false,
+      visibleCpu: new Uint32Array(TREE_GPU_RING_GROUP_COUNT),
+      shadowCpu: new Uint32Array(TREE_GPU_RING_SHADOW_GROUP_COUNT),
+      terrainVisibilityCpu: new Uint32Array(TREE_TERRAIN_VISIBILITY_COUNTER_COUNT),
     }));
     this.hydroTexture = createTreeHydrologyTexture(device, hydroData);
     const hydroSampler = device.createSampler({ label: "tree ring hydro sampler", magFilter: "nearest", minFilter: "nearest" });
     const canonicalHeight = heightfieldTileGpuAtlasBindings(device);
-    this.bindGroup = device.createBindGroup({
-      label: "tree ring bind group",
-      layout,
-      entries: [
-        { binding: 0, resource: { buffer: this.paramBuffer } },
-        { binding: 1, resource: { buffer: this.counterBuffer } },
-        { binding: 2, resource: { buffer: outputBuffers.indirectArgs } },
-        { binding: 3, resource: { buffer: outputBuffers.cell } },
-        { binding: 4, resource: { buffer: this.shadowCounterBuffer } },
-        { binding: 5, resource: { buffer: outputBuffers.shadowIndirectArgs ?? this.fallbackShadowIndirectBuffer! } },
-        { binding: 6, resource: { buffer: outputBuffers.shadowCell ?? this.fallbackShadowCellBuffer! } },
-        { binding: 7, resource: { buffer: this.digEdits } },
-        { binding: 8, resource: { buffer: this.fieldParams } },
-        { binding: 9, resource: this.hydroTexture.createView() },
-        { binding: 10, resource: hydroSampler },
-        { binding: 11, resource: { buffer: this.visibleClusterMaskBuffer } },
-        { binding: 12, resource: { buffer: this.activeSlotBuffer } },
-        { binding: 13, resource: hydrologyAtlasGpuTexture(device).createView() },
-        { binding: 14, resource: canonicalHeight.heightView },
-        { binding: 15, resource: canonicalHeight.residencyView },
-        { binding: 16, resource: { buffer: canonicalHeight.params } },
-      ],
-    });
+    this.canopyCompetition = new TreeCanopyCompetitionBinding(device);
+    this.bindGroupResources = {
+      paramBuffer: this.paramBuffer,
+      counterBuffer: this.counterBuffer,
+      indirectArgs: outputBuffers.indirectArgs,
+      shadowCounterBuffer: this.shadowCounterBuffer,
+      shadowIndirectArgs: outputBuffers.shadowIndirectArgs ?? this.fallbackShadowIndirectBuffer!,
+      shadowCell: outputBuffers.shadowCell ?? this.fallbackShadowCellBuffer!,
+      cell: outputBuffers.cell,
+      digEdits: this.digEdits,
+      fieldParams: this.fieldParams,
+      hydroTexture: this.hydroTexture,
+      hydroSampler,
+      visibleClusterMaskBuffer: this.visibleClusterMaskBuffer,
+      activeSlotBuffer: this.activeSlotBuffer,
+      hydroAtlasTexture: hydrologyAtlasGpuTexture(device),
+      canonicalHeightView: canonicalHeight.heightView,
+      canonicalResidencyView: canonicalHeight.residencyView,
+      canonicalHeightParams: canonicalHeight.params,
+      canopyCompetition: this.canopyCompetition,
+    };
+    this.bindGroup = createTreeRingBindGroup(device, layout, this.bindGroupResources);
   }
 
   static async create(device: GPUDevice, edits: readonly ResolvedDigEdit[], outputBuffers: TreeGpuRingOutputBuffers, settings: TreeSettings, hydroData: TreeHydrologyData | null = null): Promise<TreeGpuRingCompute> {
     const module = device.createShaderModule({ label: "tree ring compute shader", code: composeTreeRingShader(treeGpuRingWorkgroupSize(settings)) });
     const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
     const layout = device.createBindGroupLayout({
-    label: "tree ring compute layout",
-    entries: [
-    { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-    storage(1), storage(2), storage(3), storage(4), storage(5), storage(6), storage(7, "read-only-storage"),
-    { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-    { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
-    { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: { type: "non-filtering" } },
-    storage(11, "read-only-storage"),
-    storage(12, "read-only-storage"),
-    { binding: 13, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
-    { binding: 14, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
-    { binding: 15, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "sint" } },
-    { binding: 16, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-    ],
+      label: "tree ring compute layout",
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+        storage(1), storage(2), storage(3), storage(4), storage(5), storage(6), storage(7, "read-only-storage"),
+        { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+        { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+        { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: { type: "non-filtering" } },
+        storage(11, "read-only-storage"),
+        storage(12, "read-only-storage"),
+        { binding: 13, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+        { binding: 14, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+        { binding: 15, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "sint" } },
+        { binding: 16, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+        { binding: 17, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+      ],
     });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
     const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `tree ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
@@ -462,9 +476,22 @@ export class TreeGpuRingCompute {
     const activeSlots = this.prepareActiveSlotIndices(effectiveParams.activeSlotIndices);
     this.candidateCountBeforePrefilter = Math.max(0, Math.floor(effectiveParams.candidateCountBeforePrefilter ?? treeGpuRingSlotCount(this.settings)));
     this.candidateCountAfterPrefilter = Math.max(0, Math.floor(effectiveParams.candidateCountAfterPrefilter ?? activeSlots.count));
+    if (this.canopyCompetition.refresh()) {
+      this.bindGroup = createTreeRingBindGroup(this.device, this.bindGroupLayout, this.bindGroupResources);
+    }
+    const canopy = this.canopyCompetition.params();
     packTreeGpuRingParams(
       this.settings,
-      effectiveParams.hydroAtlas ? effectiveParams : { ...effectiveParams, hydroAtlas: hydrologyAtlasGpuParams() },
+      {
+        ...effectiveParams,
+        hydroAtlas: effectiveParams.hydroAtlas ?? hydrologyAtlasGpuParams(),
+        canopyCompetition: effectiveParams.canopyCompetition ?? [
+          canopy.worldCells,
+          canopy.resolution,
+          canopy.enabled ? 1 : 0,
+          0,
+        ],
+      },
       this.paramScratch,
     );
     const u32 = new Uint32Array(this.paramScratch);
@@ -544,6 +571,7 @@ export class TreeGpuRingCompute {
 
   stats(enabled: boolean): TreeGpuRingStats {
     const acceptedCandidates = this.counts.near + this.counts.mid + this.counts.far + this.counts.impostor;
+    const canopyCompetition = this.canopyCompetition.params();
     return {
       status: !enabled ? "disabled" : this.failedReason ? "failed" : this.runningReadbacks > 0 ? "running" : "ready",
       reason: this.failedReason ?? undefined,
@@ -560,6 +588,9 @@ export class TreeGpuRingCompute {
       readbackMs: this.readbackMs,
       skippedDispatches: this.skippedDispatches,
       terrainVisibilityCounts: this.terrainVisibilityCounts ? { ...this.terrainVisibilityCounts } : null,
+      canopyCompetitionActive: canopyCompetition.enabled,
+      canopyCompetitionRebinds: this.canopyCompetition.rebindCount(),
+      canopyCompetitionReadbacks: 0,
     };
   }
 
@@ -576,6 +607,7 @@ export class TreeGpuRingCompute {
     this.digEdits.destroy();
     this.fieldParams.destroy();
     this.hydroTexture.destroy();
+    this.canopyCompetition.destroy();
     for (const slot of this.counterReadbacks) {
       if (slot.busy) slot.destroyAfterMap = true;
       else slot.buffer.destroy();
