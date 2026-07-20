@@ -13,13 +13,18 @@ const impostorWrapperSource = readFileSync(
   new URL("../tree_ring_impostor_node_material.ts", import.meta.url),
   "utf8",
 );
+const morphologyFields = [
+  ["morphology0", 3],
+  ["morphology1", 4],
+  ["morphology2", 5],
+] as const;
 
 describe("tree LOD morphology authority", () => {
   it("writes one accepted morphology record to visible and shadow instance buffers", () => {
     expect(computeSource).toContain("derive_tree_instance_morphology(");
-    for (const field of ["morphology0", "morphology1", "morphology2"]) {
-      expect(computeSource).toContain(`out_cell[base + ${field === "morphology0" ? "3" : field === "morphology1" ? "4" : "5"}u] = record.${field}`);
-      expect(computeSource).toContain(`out_shadow_cell[base + ${field === "morphology0" ? "3" : field === "morphology1" ? "4" : "5"}u] = record.${field}`);
+    for (const [field, offset] of morphologyFields) {
+      expect(computeSource).toContain(`out_cell[base + ${offset}u] = record.${field}`);
+      expect(computeSource).toContain(`out_shadow_cell[base + ${offset}u] = record.${field}`);
     }
   });
 
