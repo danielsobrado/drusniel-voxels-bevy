@@ -268,6 +268,10 @@ describe("infinite far shell — GPU mode validation", () => {
     expect(water?.renderOrder).toBe(FAR_SHELL_WATER_RENDER_ORDER);
     expect(water!.renderOrder).toBeGreaterThan(shell.mesh.renderOrder);
     expect(water!.renderOrder).toBeLessThan(0);
+    const terrainMaterial = shell.mesh.material as import("three/webgpu").MeshBasicNodeMaterial;
+    expect(terrainMaterial.opacityNode).toBeDefined();
+    expect(terrainMaterial.transparent).toBe(true);
+    expect(terrainMaterial.depthWrite).toBe(false);
     shell.dispose();
     atlas.view.texture.dispose();
     atlas.view.materialTexture.dispose();

@@ -57,7 +57,40 @@ describe("understory dressing startup", () => {
     expect(mocks.createDressingIntegration).toHaveBeenCalledWith(expect.objectContaining({
       worldSeed: 0xf000_0001,
       unboundedWorld: true,
+      enabled: true,
     }));
     result.understorySystem.dispose();
+  });
+
+  it("keeps tree performance scenes free of dressing unless explicitly enabled", () => {
+    const common = {
+      scene: new THREE.Scene(),
+      state: {} as never,
+      lod0Nodes: [],
+      worldCells: 512,
+      worldSeed: 1,
+      unboundedWorld: false,
+      understoryConfig: cloneUnderstorySettings(),
+      isWebGpu: false,
+      hydrologySystem: null,
+      rendererWebGpuDevice: null,
+      gpuBackend: null,
+      currentLighting: () => ({}) as never,
+      statControllers: {} as never,
+    };
+
+    const isolated = runUnderstoryStartup({
+      ...common,
+      searchParams: new URLSearchParams("scene=trees-perf"),
+    });
+    expect(mocks.createDressingIntegration).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false }));
+    isolated.understorySystem.dispose();
+
+    const optedIn = runUnderstoryStartup({
+      ...common,
+      searchParams: new URLSearchParams("scene=trees-perf&dressing=1"),
+    });
+    expect(mocks.createDressingIntegration).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: true }));
+    optedIn.understorySystem.dispose();
   });
 });

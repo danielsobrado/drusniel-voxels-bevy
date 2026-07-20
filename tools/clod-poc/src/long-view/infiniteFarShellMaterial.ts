@@ -95,6 +95,7 @@ export function createInfiniteFarShellMaterial(
   const material = new MeshBasicNodeMaterial();
   material.side = THREE.DoubleSide;
   material.colorNode = mix(normalColor, debugOutput, uDebugFallback);
+  applyInfiniteFarShellRadialFade(material, options);
   material.userData.farShellMaterialUniforms = {
     uDebugFallback,
     uSunVisibilityOriginX,
@@ -104,6 +105,22 @@ export function createInfiniteFarShellMaterial(
   } satisfies FarShellMaterialUniformRefs;
 
   return material;
+}
+
+export function applyInfiniteFarShellRadialFade(
+  material: MeshBasicNodeMaterial,
+  options: Pick<InfiniteFarShellMaterialOptions, "innerMeters" | "outerMeters" | "nearBlendMeters" | "farFadeMeters">,
+): void {
+  const distXZ = vec2(positionGeometry.x, positionGeometry.z).length();
+  const inner = float(options.innerMeters);
+  const outer = float(options.outerMeters);
+  const nearBlend = float(Math.max(0.001, options.nearBlendMeters));
+  const farFade = float(Math.max(0.001, options.farFadeMeters));
+  const nearOpacity = smoothstep(inner, inner.add(nearBlend), distXZ);
+  const farOpacity = float(1).sub(smoothstep(outer.sub(farFade), outer, distXZ));
+  material.opacityNode = nearOpacity.mul(farOpacity);
+  material.transparent = true;
+  material.depthWrite = false;
 }
 
 export function updateFarShellMaterialSunVisibility(material: MeshBasicNodeMaterial): void {

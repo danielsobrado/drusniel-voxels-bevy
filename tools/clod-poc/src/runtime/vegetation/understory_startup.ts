@@ -13,6 +13,7 @@ import type { VegetationGpuBackend } from "./vegetation_gpu_backend.js";
 import type { VegetationStatControllerRefs } from "./vegetation_types.js";
 import { formatUnderstoryGpuSummary } from "./vegetation_stats_presenter.js";
 import { createDressingIntegration, type DressingSystem } from "../../ecology/dressing/index.js";
+import { isTreePerfScene, sceneFromSearchParams } from "../../scenes/scene_registry.js";
 
 export interface UnderstoryStartupInput {
   scene: THREE.Scene;
@@ -47,6 +48,10 @@ export function runUnderstoryStartup(input: UnderstoryStartupInput): UnderstoryS
   } = input;
 
   const understoryStats = { current: null as UnderstoryStats | null };
+  const treePerfScene = input.searchParams
+    ? isTreePerfScene(sceneFromSearchParams(input.searchParams))
+    : false;
+  const dressingExplicitlyEnabled = input.searchParams?.get("dressing") === "1";
   const dressingSystem = createDressingIntegration({
     scene,
     worldCells,
@@ -54,6 +59,7 @@ export function runUnderstoryStartup(input: UnderstoryStartupInput): UnderstoryS
     hydrologySystem,
     searchParams: input.searchParams,
     unboundedWorld,
+    enabled: dressingExplicitlyEnabled || !treePerfScene,
   });
 
   const understoryController = createUnderstoryController({

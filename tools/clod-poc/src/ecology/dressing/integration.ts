@@ -12,6 +12,7 @@ export interface DressingIntegrationOptions {
   readonly hydrologySystem?: HydrologySystem | null;
   readonly searchParams?: URLSearchParams;
   readonly unboundedWorld?: boolean;
+  readonly enabled?: boolean;
 }
 
 function qualityFromQuery(searchParams: URLSearchParams | undefined): DressingQuality {
@@ -21,7 +22,7 @@ function qualityFromQuery(searchParams: URLSearchParams | undefined): DressingQu
 
 export function createDressingIntegration(options: DressingIntegrationOptions): DressingSystem {
   const parsed = parseDressingConfig(dressingConfigText);
-  const disabledByQuery = options.searchParams?.get("dressing") === "0";
+  const disabledByQuery = options.enabled === false || options.searchParams?.get("dressing") === "0";
   const config = disabledByQuery ? { ...parsed, enabled: false } : parsed;
   validateDressingStartup(config);
   return new DressingSystem({

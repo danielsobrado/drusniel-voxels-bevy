@@ -12,7 +12,7 @@ import {
   type TreeGpuRingIndexCounts,
   type TreeGpuRingStats,
 } from "../gpu/tree_ring_compute.js";
-import { getTerrainFieldCoreConfig, resolveDigEdits } from "../gpu/terrain_field_core.js";
+import { resolveDigEdits } from "../gpu/terrain_field_core.js";
 import { getRealtimeSunShadowCascadeCameras } from "../rendering/realtime_sun_shadows.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings } from "./tree_config.js";
 import type { TreeTerrainSampler } from "./tree_instances.js";
@@ -145,6 +145,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
   let validationShadowCascadePlanes: ArrayLike<number> | undefined;
   let visibleClusterMask: TreeRingClusterVisibilityMask | null = null;
   if (input.state.compute && input.state.draw) {
+    const unboundedWorld = runtimeWorldUsesCameraRelativeCoordinates();
     const frustumPlanes = packTreeSystemGpuFrustumPlanes(camera, input.state.frustumPlaneScratch);
     const shadowCameras = getRealtimeSunShadowCascadeCameras();
     const shadowCascadePlanes = shadowCameras.length > 0 ? treeRingShadowCascadePlanesFromCameras(shadowCameras) : undefined;
@@ -157,7 +158,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
         centerZ: center.z,
         cameraY: camera?.position.y ?? center.y,
         worldCells: input.worldCells,
-        unbounded: runtimeWorldUsesCameraRelativeCoordinates() || getTerrainFieldCoreConfig().islandShape.enabled,
+        unbounded: unboundedWorld,
         settings: input.settings,
         sampler: input.sampler,
         terrainRevision,
@@ -171,6 +172,7 @@ export function updateTreeGpuRingTrees(input: TreeGpuRingRuntimeInput, center: T
       centerZ: center.z,
       cameraY: camera?.position.y ?? center.y,
       worldCells: input.worldCells,
+      unboundedWorld,
       maxInstancesPerGroup: treeGpuRingGroupCapacity(input.settings),
       maxShadowCastersPerGroup: shadowCapacity,
       indexCounts: treeGpuRingIndexCounts(input),

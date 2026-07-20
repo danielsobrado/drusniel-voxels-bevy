@@ -72,8 +72,8 @@ export interface CreateClodAppStateParams {
 }
 
 const TREE_RUNTIME_BUDGET = {
-  distance: 420,
-  maxInstances: 6000,
+  distance: 1200,
+  maxInstances: 12000,
   gpuMaxVisible: 128000,
   minSpacing: 6.8,
 } as const;
@@ -129,7 +129,7 @@ function treeDepthPrepassMaxLodFromQuery(searchParams: URLSearchParams): TreeDep
   return enabled ? parseTreeDepthPrepassMaxLod(searchParams.get("treePrepassMaxLod")) : "none";
 }
 
-function clampTreeRuntimeState(state: ClodAppState): void {
+export function clampTreeRuntimeState(state: ClodAppState): void {
   state.treeDistance = Math.min(Math.max(0, state.treeDistance), TREE_RUNTIME_BUDGET.distance);
   state.treeMaxInstances = Math.floor(Math.min(Math.max(0, state.treeMaxInstances), TREE_RUNTIME_BUDGET.maxInstances));
   state.treeGpuMaxVisible = Math.floor(Math.min(Math.max(0, state.treeGpuMaxVisible), TREE_RUNTIME_BUDGET.gpuMaxVisible));
@@ -178,7 +178,7 @@ function applyPopulatedPerfPreset(state: ClodAppState, params: CreateClodAppStat
   }
 }
 
-function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams): void {
+export function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams): void {
   const scene = sceneFromSearchParams(params.searchParams);
   const populatedPerf = populatedPerfEnabled(params.searchParams);
   if (params.isWebGpu) state.normalDivergence = false;
@@ -216,6 +216,7 @@ function applyScenePresets(state: ClodAppState, params: CreateClodAppStateParams
     state.stonesEnabled = false;
     state.treesEnabled = true;
     state.understoryEnabled = params.searchParams.get("understory") === "1";
+    state.waterEnabled = false;
     state.postProcessEnabled = false;
     state.postProcessDebugMode = "off";
     state.showBounds = false;

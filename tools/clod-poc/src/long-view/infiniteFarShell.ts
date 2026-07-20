@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { HeightNormalMaterial, FarSummarySamplerOptions, FarSummarySamplerScratch } from "./farSummarySampler.js";
 import { sampleBlendedHeightNormalMaterial } from "./farSummarySampler.js";
-import { createInfiniteFarShellMaterial, updateFarShellMaterialMaterial, updateFarShellMaterialSunVisibility, type InfiniteFarShellMaterialOptions } from "./infiniteFarShellMaterial.js";
+import { applyInfiniteFarShellRadialFade, createInfiniteFarShellMaterial, updateFarShellMaterialMaterial, updateFarShellMaterialSunVisibility, type InfiniteFarShellMaterialOptions } from "./infiniteFarShellMaterial.js";
 import type { FarShellMetrics } from "./farShellMetrics.js";
 import type { FarHeightProvider } from "../far-summary/clipmap-sampler.js";
 import { createFarTerrainMaterial, updateFarTerrainMaterialCenter, updateFarTerrainMaterialSummaryAtlas } from "../farTerrain/farTerrainMaterial.js";
@@ -107,6 +107,7 @@ export class InfiniteFarShell {
           summaryAtlas: this.heightSamplingMode === "gpu" ? this.farSummaryGpuAtlas : undefined,
         })
       : createInfiniteFarShellMaterial(this.materialOptions);
+    if (useParity) applyInfiniteFarShellRadialFade(material, this.materialOptions);
     applyFarShellDepthBias(material);
     if (options.debugShowWireframe && "wireframe" in material) {
       (material as unknown as { wireframe: boolean }).wireframe = true;

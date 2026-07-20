@@ -26,6 +26,15 @@ describe("infinite far shell material", () => {
     material.dispose();
   });
 
+  it("crossfades across the near ownership overlap", () => {
+    const material = makeMaterial();
+
+    expect(material.opacityNode).toBeDefined();
+    expect(material.transparent).toBe(true);
+    expect(material.depthWrite).toBe(false);
+    material.dispose();
+  });
+
   it("updates the missing-fallback debug uniform without rebuilding material", () => {
     const material = makeMaterial();
 

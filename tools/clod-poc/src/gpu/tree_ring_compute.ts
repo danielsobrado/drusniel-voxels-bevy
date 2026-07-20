@@ -86,6 +86,7 @@ export interface TreeGpuRingDispatchParams {
   centerZ: number;
   cameraY: number;
   worldCells: number;
+  unboundedWorld?: boolean;
   maxInstancesPerGroup: number;
   maxShadowCastersPerGroup?: number;
   indexCounts: TreeGpuRingIndexCounts;
@@ -246,6 +247,13 @@ export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRin
   const u32 = new Uint32Array(scratch);
   const lod = treeRingLodParams(settings);
   const accept = treeRingAcceptParams(settings);
+  (globalThis as typeof globalThis & { __treeRingLodProbe?: number[] }).__treeRingLodProbe = [
+    lod.near,
+    lod.mid,
+    lod.far,
+    lod.radius,
+    lod.band,
+  ];
   f32.fill(0);
   u32.fill(0);
   f32[0] = params.centerX;
@@ -281,6 +289,7 @@ export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRin
   f32[TREE_GPU_RING_LAYOUT.terrainVisibilityOffset + 2] = settings.gpu.terrainVisibility.heightMarginM;
   f32[TREE_GPU_RING_LAYOUT.terrainVisibilityOffset + 3] = settings.gpu.terrainVisibility.crownHeightM;
   u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset] = Math.max(1, Math.min(16, Math.floor(settings.gpu.terrainVisibility.sampleCount))) >>> 0;
+  u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 1] = params.unboundedWorld ? 2 : 0;
   u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 2] = Math.max(1, Math.floor(params.visibleClusterDimCells ?? 0)) >>> 0;
   u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 3] = Math.max(0, Math.floor(params.visibleClusterGrid ?? 0)) >>> 0;
   TREE_SPECIES.forEach((species, index) => {
@@ -466,7 +475,7 @@ export class TreeGpuRingCompute {
       this.paramScratch,
     );
     const u32 = new Uint32Array(this.paramScratch);
-    u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 1] = readbackSlot ? 1 : 0;
+    if (readbackSlot) u32[TREE_GPU_RING_LAYOUT.terrainVisibilityUOffset + 1] |= 1;
     if (effectiveParams.visibleClusterMaskWords && effectiveParams.visibleClusterMaskWords.length > 0) {
       const wordCount = Math.min(effectiveParams.visibleClusterMaskWords.length, this.visibleClusterMaskWordCapacity);
       this.device.queue.writeBuffer(

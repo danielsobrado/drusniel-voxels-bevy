@@ -79,6 +79,7 @@ describe("tree GPU ring compute helpers", () => {
       centerZ: 34,
       cameraY: 56,
       worldCells: 256,
+      unboundedWorld: true,
       maxInstancesPerGroup: 99,
       maxShadowCastersPerGroup: 77,
       indexCounts: testIndexCounts(),
@@ -105,6 +106,7 @@ describe("tree GPU ring compute helpers", () => {
     expect(f32[layout.terrainVisibilityOffset + 2]).toBe(2.5);
     expect(f32[layout.terrainVisibilityOffset + 3]).toBe(8);
     expect(u32[layout.terrainVisibilityUOffset]).toBe(9);
+    expect(u32[layout.terrainVisibilityUOffset + 1]).toBe(2);
     expect(u32[layout.settingsOffset - 1]).toBeGreaterThan(0);
     expect(u32[layout.settingsOffset]).toBe(99);
     expect(u32[layout.settingsOffset + 1]).toBe(treeGpuRingGrid(settings));
@@ -124,6 +126,13 @@ describe("tree GPU ring compute helpers", () => {
     expect(layout.groupCount).toBe(TREE_GPU_RING_GROUP_COUNT);
     expect(layout.shadowGroupCount).toBe(TREE_GPU_RING_SHADOW_GROUP_COUNT);
     expect(layout.speciesWeightsOffset).toBe(28);
+  });
+
+  it("uses independent flags for debug readback and unbounded terrain", () => {
+    expect(treeRingShader).toContain("(params.terrain_visibility_u.y & 1u) != 0u");
+    expect(treeRingShader).toContain("(params.terrain_visibility_u.y & 2u) != 0u");
+    expect(treeRingShader).toContain("if (!tree_unbounded_world()");
+    expect(treeRingShader).not.toContain("fieldParams.islandEnabled == 0u");
   });
 
   it("keys ring resources by settings that affect scatter and draw capacity", () => {
