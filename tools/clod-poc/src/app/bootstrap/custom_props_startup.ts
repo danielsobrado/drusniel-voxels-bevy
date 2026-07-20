@@ -31,23 +31,8 @@ export interface CustomPropsStartupResult {
   stopPropStoreSync: () => void;
 }
 
-interface TerrainAnchoredPropQaInput {
-  assetId: string;
-  x: number;
-  z: number;
-  rotationY?: number;
-  scale?: number;
-  seed?: number;
-  variationId?: number;
-}
-
-interface CustomPropQaHooks {
-  getCustomPropPlacementSnapshot: (() => PropPlacementScene | null) | null;
-  replaceTerrainAnchoredCustomProps: ((instances: readonly TerrainAnchoredPropQaInput[]) => PropPlacementScene | null) | null;
-}
-
 function installCustomPropQaHooks(input: CustomPropsStartupInput, propController: PropController): void {
-  const hooks = input.getHooks() as (ClodHooks & CustomPropQaHooks) | null;
+  const hooks = input.getHooks();
   if (!hooks) return;
 
   hooks.getCustomPropPlacementSnapshot = () => propController.getPlacementSceneSnapshot();
