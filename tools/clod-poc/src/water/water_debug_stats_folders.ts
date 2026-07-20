@@ -31,6 +31,7 @@ export function makeEmptyCascadeParticleStats(): RiverCascadeParticleStats {
   return {
     mist: 0,
     splash: 0,
+    rapidDroplets: 0,
     foam: 0,
     lastEmitters: 0,
     lastCascadeEmitters: 0,
@@ -84,7 +85,8 @@ export function addCascadeParticleStatsFolder(
   refresh();
 
   folder.add(stats, "mist").name("mist count").disable();
-  folder.add(stats, "splash").name("splash count").disable();
+  folder.add(stats, "splash").name("cascade splash").disable();
+  folder.add(stats, "rapidDroplets").name("rapid droplets").disable();
   folder.add(stats, "foam").name("foam drift count").disable();
   folder.add(stats, "lastEmitters").name("last emitters").disable();
   folder.add(stats, "lastCascadeEmitters").name("cascade emitters").disable();
