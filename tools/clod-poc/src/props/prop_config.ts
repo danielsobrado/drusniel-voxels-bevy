@@ -58,7 +58,7 @@ export const DEFAULT_CUSTOM_PROPS_SETTINGS: CustomPropsSettings = {
   occlusion: {
     enabled: true,
     cellSizeM: 4,
-    buildOccludersPerFrame: 8,
+    buildCellsPerFrame: 256,
     footprintPaddingM: 0.35,
     minimumHeightM: 1.5,
     mistClipStrength: 0.85,
@@ -291,9 +291,9 @@ function parseOcclusion(raw: YamlRecord | undefined, fallback: PropOcclusionSett
   return {
     enabled: bool(raw.enabled, fallback.enabled),
     cellSizeM: Math.max(0.25, num(raw.cell_size_m ?? raw.cellSizeM, fallback.cellSizeM)),
-    buildOccludersPerFrame: positiveInt(
-      raw.build_occluders_per_frame ?? raw.buildOccludersPerFrame,
-      fallback.buildOccludersPerFrame,
+    buildCellsPerFrame: positiveInt(
+      raw.build_cells_per_frame ?? raw.buildCellsPerFrame,
+      fallback.buildCellsPerFrame,
     ),
     footprintPaddingM: Math.max(
       0,
