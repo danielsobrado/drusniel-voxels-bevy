@@ -30,6 +30,8 @@ export interface BoundaryPropClodEvidence {
     failed: number;
     safetyPending: number;
     safetyInflight: number;
+    refinementPending: number;
+    refinementInflight: number;
     activeRoots: number;
   };
 }
@@ -84,6 +86,8 @@ export function evaluateBoundaryPropClodEvidence(
   if (evidence.stream.failed !== 0) failures.push(`stream failed=${evidence.stream.failed}`);
   if (evidence.stream.safetyPending !== 0) failures.push(`stream safety pending=${evidence.stream.safetyPending}`);
   if (evidence.stream.safetyInflight !== 0) failures.push(`stream safety inflight=${evidence.stream.safetyInflight}`);
+  if (evidence.stream.refinementPending !== 0) failures.push(`stream refinement pending=${evidence.stream.refinementPending}`);
+  if (evidence.stream.refinementInflight !== 0) failures.push(`stream refinement inflight=${evidence.stream.refinementInflight}`);
   if (evidence.stream.activeRoots <= 0) failures.push("no active streamed CLOD roots after convergence");
 
   return {
