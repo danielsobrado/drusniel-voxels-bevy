@@ -1,5 +1,6 @@
 import type { PropOccluder, PropOccluderSnapshot } from "./prop_occluder_snapshot.js";
 import type { PropOcclusionSettings } from "./prop_types.js";
+import type { LargePropOcclusionHeightPayload } from "./large_prop_occlusion_height.js";
 
 export interface LargePropOcclusionSample {
   valid: boolean;
@@ -81,6 +82,8 @@ export class LargePropOcclusionField {
   private submittedRevision = 0;
   private processedCellsLastStep = 0;
   private swaps = 0;
+  private cachedHeightRevision = -1;
+  private cachedHeightPayload: LargePropOcclusionHeightPayload | null = null;
 
   constructor(private readonly settings: PropOcclusionSettings) {}
 
@@ -95,6 +98,7 @@ export class LargePropOcclusionField {
       this.activeRows = new Map();
       this.activeCellCount = 0;
       this.processedCellsLastStep = 0;
+      this.invalidateHeightPayload();
       this.swaps += 1;
       return true;
     }
@@ -163,6 +167,13 @@ export class LargePropOcclusionField {
     return out;
   }
 
+  giHeightPayload(): LargePropOcclusionHeightPayload | null {
+    if (this.cachedHeightRevision === this.activeRevision) return this.cachedHeightPayload;
+    this.cachedHeightRevision = this.activeRevision;
+    this.cachedHeightPayload = this.buildHeightPayload();
+    return this.cachedHeightPayload;
+  }
+
   mistClipStrength(): number {
     return this.settings.mistClipStrength;
   }
@@ -176,6 +187,53 @@ export class LargePropOcclusionField {
       pending: this.pendingBuild !== null,
       processedCellsLastStep: this.processedCellsLastStep,
       swaps: this.swaps,
+    };
+  }
+
+  private buildHeightPayload(): LargePropOcclusionHeightPayload | null {
+    if (!this.activeEnabled || this.activeRevision <= 0 || this.activeCellCount === 0) return null;
+
+    let count = 0;
+    for (const row of this.activeRows.values()) {
+      for (const cell of row.values()) {
+        if (cell.giOccupancy > COVERAGE_EPSILON && Number.isFinite(cell.giTopY)) count += 1;
+      }
+    }
+    if (count === 0) return null;
+
+    const cellX = new Int32Array(count);
+    const cellZ = new Int32Array(count);
+    const topY = new Float32Array(count);
+    let minX = Number.POSITIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+    let index = 0;
+    const cellSize = this.settings.cellSizeM;
+    for (const [z, row] of this.activeRows) {
+      for (const [x, cell] of row) {
+        if (cell.giOccupancy <= COVERAGE_EPSILON || !Number.isFinite(cell.giTopY)) continue;
+        cellX[index] = x;
+        cellZ[index] = z;
+        topY[index] = cell.giTopY;
+        minX = Math.min(minX, x * cellSize);
+        minZ = Math.min(minZ, z * cellSize);
+        maxX = Math.max(maxX, (x + 1) * cellSize);
+        maxZ = Math.max(maxZ, (z + 1) * cellSize);
+        index += 1;
+      }
+    }
+
+    return {
+      revision: this.activeRevision,
+      cellSizeM: cellSize,
+      cellX,
+      cellZ,
+      topY,
+      minX,
+      minZ,
+      maxX,
+      maxZ,
     };
   }
 
@@ -237,7 +295,13 @@ export class LargePropOcclusionField {
     this.activeRows = pending.rows;
     this.activeCellCount = pending.cellCount;
     this.pendingBuild = null;
+    this.invalidateHeightPayload();
     this.swaps += 1;
+  }
+
+  private invalidateHeightPayload(): void {
+    this.cachedHeightRevision = -1;
+    this.cachedHeightPayload = null;
   }
 }
 
