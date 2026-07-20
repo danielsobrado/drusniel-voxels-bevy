@@ -17,6 +17,7 @@ import {
 } from "three/tsl";
 import type { WaterMaterialHandle, WaterMaterialParams } from "./water_material_types.js";
 import { waterMaterialLevelCellSize } from "./water_reflection_tier_clipmap.js";
+import { waterFarSummaryReflectionActive } from "./water_reflection_tiers.js";
 import { buildWaterFarReflectionNode } from "./water_far_reflection_node.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -31,6 +32,8 @@ export function decorateWaterFarReflection(
   if (!baseFragment) return handle;
 
   const levelCellSizeM = waterMaterialLevelCellSize(params);
+  if (!waterFarSummaryReflectionActive(params.visual, levelCellSizeM)) return handle;
+
   const uTime = uniform(0) as TslNode;
   const uDebugMode = uniform(0) as TslNode;
   const uFresnelPower = uniform(params.visual.fresnel.power) as TslNode;
