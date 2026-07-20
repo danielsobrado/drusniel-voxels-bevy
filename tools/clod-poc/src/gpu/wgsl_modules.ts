@@ -11,6 +11,8 @@ import treeBindings from "./shaders/terrain_field_bindings_tree.wgsl?raw";
 import treeRingEntry from "./shaders/tree_ring.compute.wgsl?raw";
 import understoryBindings from "./shaders/terrain_field_bindings_understory.wgsl?raw";
 import understoryRingEntry from "./shaders/understory_ring.compute.wgsl?raw";
+import dressingBindings from "./shaders/terrain_field_bindings_dressing.wgsl?raw";
+import dressingEntry from "../ecology/dressing/gpu/dressing.compute.wgsl?raw";
 import vegetationAuthorityPcg from "../vegetation/gpu_authority/pcg2d.wgsl?raw";
 import vegetationAuthorityHash from "../vegetation/gpu_authority/shaders/hash.wgsl?raw";
 import vegetationTerrainSampling from "../vegetation/gpu_authority/terrain_sampling.wgsl?raw";
@@ -104,4 +106,21 @@ export function composeUnderstoryRingShader(workgroupSize = 64): string {
     workgroupSize,
   );
   return composeShader("understory ring shader", [vegetationAuthorityPcg, vegetationAuthorityHash, understoryBindings, terrainCommon, vegetationTerrainSampling, placementHeight, entry]);
+}
+
+export function composeDressingGpuShader(workgroupSize = 64): string {
+  const entry = replaceConstU32(
+    withRiverEcologyConstants(dressingEntry),
+    "DRESSING_WORKGROUP_SIZE",
+    workgroupSize,
+  );
+  return composeShader("dressing GPU authority shader", [
+    vegetationAuthorityPcg,
+    vegetationAuthorityHash,
+    dressingBindings,
+    terrainCommon,
+    vegetationTerrainSampling,
+    placementHeight,
+    entry,
+  ]);
 }

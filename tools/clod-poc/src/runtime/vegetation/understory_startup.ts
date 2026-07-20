@@ -60,6 +60,8 @@ export function runUnderstoryStartup(input: UnderstoryStartupInput): UnderstoryS
     searchParams: input.searchParams,
     unboundedWorld,
     enabled: dressingExplicitlyEnabled || !treePerfScene,
+    gpuDevice: isWebGpu ? rendererWebGpuDevice : null,
+    gpuBackend: isWebGpu ? gpuBackend : null,
   });
 
   const understoryController = createUnderstoryController({
