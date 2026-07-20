@@ -13,9 +13,14 @@ import {
 } from "./tree_ecology.js";
 import { treeVariantIndex } from "./tree_variant_selection.js";
 import { vegetationStableIdentity, VEGETATION_CATEGORY, VEGETATION_SCHEMA_VERSION } from "../vegetation/gpu_authority/pcg2d.js";
+import { createAcceptedTreeCompetitionSampler } from "./morphology/accepted_competition.js";
 import { deriveTreeInstanceMorphology } from "./morphology/derive.js";
-import { sampleTreeCompetition } from "./morphology/competition.js";
-import type { TreeIdentity, TreeInstanceMorphology } from "./morphology/types.js";
+import type {
+  TreeEcologySample as TreeMorphologyEcologySample,
+  TreeIdentity,
+  TreeInstanceMorphology,
+  TreeTerrainSample,
+} from "./morphology/types.js";
 
 export const TREE_STRUCTURAL_VARIANTS = 4;
 
@@ -45,6 +50,17 @@ export interface TreeInstance {
   normalY: number;
   identity: TreeIdentity;
   morphology: TreeInstanceMorphology;
+}
+
+interface PendingTreeInstance extends Omit<TreeInstance, "morphology"> {
+  morphologyTerrain: TreeTerrainSample;
+  morphologyEcology: TreeMorphologyEcologySample;
+}
+
+interface RankedTreeCandidate {
+  priority: number;
+  instance: PendingTreeInstance;
+  suppressionRadius: number;
 }
 
 export interface TreeGenerationStats {
@@ -85,7 +101,7 @@ export function generateTreeInstances(
   const columns = Math.max(0, Math.floor((footprint.maxX - footprint.minX) / spacing));
   const rows = Math.max(0, Math.floor((footprint.maxZ - footprint.minZ) / spacing));
   const limit = Math.max(0, Math.floor(maxInstances));
-  const ranked: { priority: number; instance: TreeInstance; suppressionRadius: number }[] = [];
+  const ranked: RankedTreeCandidate[] = [];
   const minSpacingSq = settings.placement.minSpacingM * settings.placement.minSpacingM;
 
   for (let row = 0; row < rows; row++) {
@@ -160,24 +176,9 @@ export function generateTreeInstances(
         classId: TREE_SPECIES.indexOf(species),
       });
       const identity: TreeIdentity = { stableIdLo, stableIdHi };
-      const competition = sampleTreeCompetition({ worldSeed: settings.seed, positionXZ: [x, z], species });
       const slopeLength = Math.hypot(surfaceNormalSample[0], surfaceNormalSample[2]);
       const zone = settings.ecology.speciesZones[species];
       const moisture = ecology?.moisture ?? 0.5;
-      const morphology = deriveTreeInstanceMorphology(identity, species, {
-        slope01: Math.max(0, Math.min(1, slopeLength)),
-        downhillDirectionXZ: slopeLength > 1e-8
-          ? [surfaceNormalSample[0] / slopeLength, surfaceNormalSample[2] / slopeLength]
-          : [0, 0],
-        exposure01: Math.max(0, Math.min(1, 1 - normalY)),
-        exposedRootPotential: Math.max(0, Math.min(1, 1 - normalY)),
-      }, {
-        oldForestBias: zone.oldForestBias * (ecology?.forestDensity ?? 0.5),
-        moisture,
-        moistureSuitability: 1 - Math.min(1, Math.abs(moisture - zone.moisturePreference)),
-        temperatureSuitability: 1 - Math.min(1, Math.abs(height - 34) / 58),
-        stress: Math.max(0, Math.min(1, (1 - (ecology?.terrainSuitability ?? 0.75)) * 0.65 + (1 - normalY) * 0.35)),
-      }, competition, speciesSettings.morphologyRuntime);
       ranked.push({
         priority: treeInstancePriority(gridX, gridZ, settings.seed, ecology, species, height, normalY, settings, weights),
         suppressionRadius: speciesSettings.crownRadiusM * scale,
@@ -189,14 +190,28 @@ export function generateTreeInstances(
           rotationY,
           normalY,
           identity,
-          morphology,
+          morphologyTerrain: {
+            slope01: Math.max(0, Math.min(1, slopeLength)),
+            downhillDirectionXZ: slopeLength > 1e-8
+              ? [surfaceNormalSample[0] / slopeLength, surfaceNormalSample[2] / slopeLength]
+              : [0, 0],
+            exposure01: Math.max(0, Math.min(1, 1 - normalY)),
+            exposedRootPotential: Math.max(0, Math.min(1, 1 - normalY)),
+          },
+          morphologyEcology: {
+            oldForestBias: zone.oldForestBias * (ecology?.forestDensity ?? 0.5),
+            moisture,
+            moistureSuitability: 1 - Math.min(1, Math.abs(moisture - zone.moisturePreference)),
+            temperatureSuitability: 1 - Math.min(1, Math.abs(height - 34) / 58),
+            stress: Math.max(0, Math.min(1, (1 - (ecology?.terrainSuitability ?? 0.75)) * 0.65 + (1 - normalY) * 0.35)),
+          },
         },
       });
     }
   }
 
   ranked.sort((a, b) => a.priority - b.priority);
-  const accepted: TreeInstance[] = [];
+  const accepted: PendingTreeInstance[] = [];
   for (const candidate of ranked) {
     if (accepted.length >= limit) break;
     if (accepted.some((existing) => {
@@ -216,7 +231,26 @@ export function generateTreeInstances(
     );
     accepted.push(candidate.instance);
   }
-  return accepted;
+
+  const competition = createAcceptedTreeCompetitionSampler(accepted.map((instance) => ({
+    identity: instance.identity,
+    positionXZ: [instance.position[0], instance.position[2]],
+    crownRadiusM: settings.species[instance.species].crownRadiusM * instance.scale,
+  })));
+  return accepted.map((pending): TreeInstance => {
+    const { morphologyTerrain, morphologyEcology, ...instance } = pending;
+    return {
+      ...instance,
+      morphology: deriveTreeInstanceMorphology(
+        instance.identity,
+        instance.species,
+        morphologyTerrain,
+        morphologyEcology,
+        competition.sample(instance.identity),
+        settings.species[instance.species].morphologyRuntime,
+      ),
+    };
+  });
 }
 
 function recordPlacementDebugSample(
