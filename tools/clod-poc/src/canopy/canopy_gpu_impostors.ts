@@ -63,7 +63,8 @@ type NumericTextureArray =
 
 export function maxCanopyGpuImpostorInstances(maxShellTris: number): number {
   if (!Number.isFinite(maxShellTris) || maxShellTris <= 0) return DEFAULT_MIN_INSTANCES;
-  return Math.max(DEFAULT_MIN_INSTANCES, Math.min(DEFAULT_MAX_INSTANCES, Math.floor(maxShellTris / 2)));
+  const budgetedInstances = Math.floor(maxShellTris / CANOPY_CROWN_CLUSTER_TRIS);
+  return Math.max(1, Math.min(DEFAULT_MAX_INSTANCES, budgetedInstances));
 }
 
 export function canopyTextureFiniteCenter(set: CanopyTextureSet): { x: number; z: number } {
