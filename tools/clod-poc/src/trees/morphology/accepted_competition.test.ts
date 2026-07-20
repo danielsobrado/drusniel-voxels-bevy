@@ -59,6 +59,18 @@ describe("accepted tree competition", () => {
     expect(sampler.sample(identity(1)).crownPressure).toBe(0);
   });
 
+  it("normalizes incomplete and non-finite fallback records", () => {
+    const sampler = createAcceptedTreeCompetitionSampler([
+      { identity: identity(1), positionXZ: [], crownRadiusM: Number.NaN },
+      { identity: identity(2), positionXZ: [Number.POSITIVE_INFINITY, 4], crownRadiusM: 3 },
+    ]);
+
+    const sample = sampler.sample(identity(1));
+    expect(Number.isFinite(sample.crownPressure)).toBe(true);
+    expect(Number.isFinite(sample.directionalPressure)).toBe(true);
+    expect(sample.openLightDirectionXZ.every(Number.isFinite)).toBe(true);
+  });
+
   it("fails fast on duplicate stable identities", () => {
     expect(() => createAcceptedTreeCompetitionSampler([
       record(1, 0, 0),
