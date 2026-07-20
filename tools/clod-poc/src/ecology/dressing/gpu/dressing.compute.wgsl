@@ -16,7 +16,7 @@ struct DressingParams {
 };
 
 struct DressingClassParams {
-  meta: vec4<u32>,
+  class_meta: vec4<u32>,
   grid_density: vec4<f32>,
   lod: vec4<f32>,
   rules: vec4<f32>,
@@ -66,7 +66,7 @@ fn dressing_hash01(cell: vec2<i32>, class_id: u32, channel: u32) -> f32 {
     VEGETATION_DRESSING_CATEGORY,
     params.settings.w,
     cell,
-    channel ^ class_id * 0x9e3779b9u,
+    channel ^ (class_id * 0x9e3779b9u),
   );
   return f32(value.x & 0xffffffu) / 16777216.0;
 }
@@ -91,17 +91,17 @@ fn dressing_identity_roll_swapped(identity: vec2<u32>, salt: u32) -> vec2<f32> {
 
 fn dressing_class_for_slot(slot: u32) -> u32 {
   for (var class_index = 0u; class_index < DRESSING_CLASS_COUNT; class_index = class_index + 1u) {
-    let meta = class_params[class_index].meta;
-    if (slot >= meta.z && slot < meta.z + meta.w) { return class_index; }
+    let class_meta = class_params[class_index].class_meta;
+    if (slot >= class_meta.z && slot < class_meta.z + class_meta.w) { return class_index; }
   }
   return 0xffffffffu;
 }
 
 fn dressing_candidate_cell(slot: u32, class_index: u32) -> vec2<i32> {
-  let class = class_params[class_index];
-  let local = slot - class.meta.z;
-  let grid = max(1u, u32(class.grid_density.x));
-  let spacing = max(0.5, class.grid_density.y);
+  let class_data = class_params[class_index];
+  let local = slot - class_data.class_meta.z;
+  let grid = max(1u, u32(class_data.grid_density.x));
+  let spacing = max(0.5, class_data.grid_density.y);
   let slot_x = local % grid;
   let slot_z = local / grid;
   let center_cell = vec2<i32>(floor(params.center_radius.xy / spacing));
@@ -207,9 +207,9 @@ fn emit_dressing_instance(
   identity: vec2<u32>,
 ) {
   let distance_m = distance(position.xz, params.center_radius.xy);
-  let class = class_params[class_id];
-  if (distance_m > min(params.center_radius.z, class.lod.w)) { return; }
-  let lod = dressing_lod(distance_m, class.lod);
+  let class_data = class_params[class_id];
+  if (distance_m > min(params.center_radius.z, class_data.lod.w)) { return; }
+  let lod = dressing_lod(distance_m, class_data.lod);
   let record = DressingRecord(
     vec4<f32>(position, scale),
     vec4<f32>(yaw, env.normal.y, max(env.wet_mask, clamp(1.0 - abs(env.shore_distance) / 4.0, 0.0, 1.0)), dressing_hash01(vec2<i32>(floor(position.xz)), class_id, VEGETATION_AGE_CHANNEL)),
@@ -293,12 +293,12 @@ fn generate_and_compact(slot: u32) {
   if (slot >= params.settings.y) { return; }
   let class_index = dressing_class_for_slot(slot);
   if (class_index >= DRESSING_CLASS_COUNT) { return; }
-  let class = class_params[class_index];
-  if (class.meta.y == DRESSING_PARENT_OWNERSHIP || class.meta.w == 0u) { return; }
+  let class_data = class_params[class_index];
+  if (class_data.class_meta.y == DRESSING_PARENT_OWNERSHIP || class_data.class_meta.w == 0u) { return; }
   let cell = dressing_candidate_cell(slot, class_index);
   let identity = dressing_stable_identity(cell, class_index);
   let acceptance_rolls = dressing_identity_roll(identity, 0x4100u + class_index + 1u);
-  let spacing = max(0.5, class.grid_density.y);
+  let spacing = max(0.5, class_data.grid_density.y);
   let jitter_x = acceptance_rolls.y;
   let jitter_z = dressing_identity_roll_swapped(identity, 0x4201u).x;
   let jitter = vec2<f32>(jitter_x, jitter_z);
@@ -308,7 +308,7 @@ fn generate_and_compact(slot: u32) {
   if (finite_world && (wpos.x < 0.0 || wpos.y < 0.0 || wpos.x > params.center_radius.w || wpos.y > params.center_radius.w)) { return; }
   let environment = dressing_environment(wpos, spacing);
   if (placement_ground_height_is_excluded(environment.height)) { return; }
-  let probability = class.grid_density.z * dressing_environment_acceptance(class_index, environment);
+  let probability = class_data.grid_density.z * dressing_environment_acceptance(class_index, environment);
   if (acceptance_rolls.x >= probability) { return; }
   let random_yaw = dressing_identity_roll(identity, 0x4202u).x * 6.28318530718;
   let downhill_yaw = atan2(-environment.normal.z, -environment.normal.x);
@@ -324,9 +324,9 @@ fn generate_and_compact(slot: u32) {
     if (abs(endpoint_a - environment.height) > 0.35 || abs(endpoint_b - environment.height) > 0.35) { return; }
   }
   let scale = 0.75 + dressing_identity_roll_swapped(identity, 0x4203u).y * 0.65;
-  let position = vec3<f32>(wpos.x, environment.height + class.grid_density.w * scale, wpos.y);
+  let position = vec3<f32>(wpos.x, environment.height + class_data.grid_density.w * scale, wpos.y);
   emit_dressing_instance(class_index, position, scale, yaw, environment, identity);
-  if (class.meta.y == 0u) {
+  if (class_data.class_meta.y == 0u) {
     emit_paired_stump(class_index, cell, position, scale, yaw, environment);
     emit_parent_attachments(class_index, cell, position, scale, yaw, identity, environment);
   }
