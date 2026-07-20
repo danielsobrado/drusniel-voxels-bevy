@@ -52,20 +52,12 @@ competition = bilinear(detailTexture.a)
 
 When the canonical texture is unavailable, disabled, invalid, or outside its world bounds, morphology uses the previous deterministic synthetic scalar pressure. Placement remains fail-open.
 
-## Diagnostics
-
-```text
-tree_gpu_canopy_competition_active
-tree_gpu_canopy_competition_rebinds
-tree_gpu_canopy_competition_readbacks = 0
-```
-
-The current runtime fields are exposed as:
+## Runtime diagnostics
 
 ```text
 TreeGpuRingStats.canopyCompetitionActive
 TreeGpuRingStats.canopyCompetitionRebinds
-TreeGpuRingStats.canopyCompetitionReadbacks
+TreeGpuRingStats.canopyCompetitionReadbacks = 0
 ```
 
 ## Required verification
