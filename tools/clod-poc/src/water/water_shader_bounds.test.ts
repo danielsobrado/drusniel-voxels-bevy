@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import waterNodeMaterialSource from "./waterNodeMaterial.ts?raw";
+import waterNodeMaterialSource from "./waterNodeMaterial_base.ts?raw";
 import waterPerfNodeMaterialSource from "./waterPerfNodeMaterial.ts?raw";
 import waterFoamNodesSource from "./water_foam_nodes.ts?raw";
 import { WATER_FRAG } from "./water_material_uniforms.js";

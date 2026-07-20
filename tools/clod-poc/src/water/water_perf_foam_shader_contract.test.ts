@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const PERF_SOURCE = readFileSync(new URL("./waterPerfNodeMaterial.ts", import.meta.url), "utf8");
-const HQ_SOURCE = readFileSync(new URL("./waterNodeMaterial.ts", import.meta.url), "utf8");
+const HQ_SOURCE = readFileSync(new URL("./waterNodeMaterial_base.ts", import.meta.url), "utf8");
 const FOAM_SOURCE = readFileSync(new URL("./water_foam_nodes.ts", import.meta.url), "utf8");
 
 describe("performance water foam shader contract", () => {

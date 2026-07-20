@@ -67,7 +67,7 @@ function waterVisual(): WaterVisualConfig {
     bodies: {} as WaterVisualConfig["bodies"],
     glacialMurkiness: {} as WaterVisualConfig["glacialMurkiness"],
     rockFlour: {} as WaterVisualConfig["rockFlour"],
-    glitter: {} as WaterVisualConfil["glitter"],
+    glitter: {} as WaterVisualConfig["glitter"],
     refraction: {
       enabled: true,
       strength: 0.2,

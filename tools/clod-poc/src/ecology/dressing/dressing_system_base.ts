@@ -343,7 +343,7 @@ export class DressingSystem {
     return this.options.unboundedWorld || (x >= 0 && z >= 0 && x <= this.options.worldCells && z <= this.options.worldCells);
   }
 
-  private sampleEnvironment(x: number, z: number): DressingEnvironmentSample {
+  protected sampleEnvironment(x: number, z: number): DressingEnvironmentSample {
     const hydrology = this.options.hydrologySystem?.sample(x, z, 4);
     const height = hydrology?.terrainY ?? this.surfaceHeightAt(x, z);
     const normal = this.surfaceNormalAt(x, z);

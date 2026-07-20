@@ -2,7 +2,6 @@ import type { HydrologySystem } from "../../water/index.js";
 import { surfaceNormal, terrainWeights } from "../../terrain/terrain.js";
 import { sampleActiveForestCanopyEcology } from "../../forest_lighting/forest_lighting_texture.js";
 import { treePcg2d01 } from "../../vegetation/gpu_authority/pcg2d.js";
-import type { DressingDiagnostics } from "./diagnostics.js";
 import {
   DressingSystem as DressingSystemBase,
   type DressingSystemOptions,
@@ -11,13 +10,6 @@ import { resolveDressingCanopyEcology } from "./dressing_canopy_environment.js";
 import type { DressingEnvironmentSample } from "./types.js";
 
 export type { DressingSystemOptions } from "./dressing_system_base.js";
-
-interface DressingSystemPublic {
-  update(center: { readonly x: number; readonly z: number }): void;
-  getStats(): DressingDiagnostics;
-  readonly enabled: boolean;
-  dispose(): void;
-}
 
 interface DressingSystemInternals {
   rebuild(centerX: number, centerZ: number): void;
@@ -30,17 +22,7 @@ interface DressingSystemInternals {
   ): readonly [number, number] | undefined;
 }
 
-interface LegacyEnvironmentSampler {
-  sampleEnvironment(x: number, z: number): DressingEnvironmentSample;
-}
-
-const ExtensibleDressingSystemBase = DressingSystemBase as unknown as new (
-  options: DressingSystemOptions,
-) => DressingSystemPublic;
-
-const legacyEnvironmentSampler = DressingSystemBase.prototype as unknown as LegacyEnvironmentSampler;
-
-export class DressingSystem extends ExtensibleDressingSystemBase {
+export class DressingSystem extends DressingSystemBase {
   private canonicalOptions: DressingSystemOptions | null = null;
 
   constructor(options: DressingSystemOptions) {
@@ -57,9 +39,9 @@ export class DressingSystem extends ExtensibleDressingSystemBase {
     }
   }
 
-  private sampleEnvironment(x: number, z: number): DressingEnvironmentSample {
+  protected override sampleEnvironment(x: number, z: number): DressingEnvironmentSample {
     const options = this.canonicalOptions;
-    if (!options) return legacyEnvironmentSampler.sampleEnvironment.call(this, x, z);
+    if (!options) return super.sampleEnvironment(x, z);
 
     const helpers = this as unknown as DressingSystemInternals;
     const hydrology = options.hydrologySystem?.sample(x, z, 4);

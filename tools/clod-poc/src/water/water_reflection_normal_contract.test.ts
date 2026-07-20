@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import waterNodeSource from "./waterNodeMaterial.ts?raw";
+import waterNodeSource from "./waterNodeMaterial_base.ts?raw";
 
 describe("water reflection normal contract", () => {
   it("uses the stabilized fresnel normal for the fake sky reflection", () => {

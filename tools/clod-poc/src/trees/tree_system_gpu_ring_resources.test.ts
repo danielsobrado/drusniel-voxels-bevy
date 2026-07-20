@@ -208,18 +208,22 @@ function fakeHandle(name: string): TreeMaterialHandle {
 function forestState(): ForestLightingMaterialState {
   const texture = new THREE.DataTexture(new Uint8Array([1, 2, 3, 4]), 1, 1);
   const auxTexture = new THREE.DataTexture(new Uint8Array([5, 6, 7, 8]), 1, 1);
+  const detailTexture = new THREE.DataTexture(new Uint8Array([9, 10, 11, 12]), 1, 1);
   return {
     worldCells: 64,
     settings: cloneForestLightingSettings(),
     textureHandle: {
       texture,
       auxTexture,
+      detailTexture,
       resolution: 1,
       worldCells: 64,
+      canopyHeightScaleM: 20,
       update() {},
       dispose() {
         texture.dispose();
         auxTexture.dispose();
+        detailTexture.dispose();
       },
     },
   };

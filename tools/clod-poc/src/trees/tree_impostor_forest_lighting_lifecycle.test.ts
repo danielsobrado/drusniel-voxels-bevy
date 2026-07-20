@@ -61,18 +61,22 @@ function forestState(): ForestLightingMaterialState {
   settings.materialIntegration.debugMode = "combined";
   const texture = dataTexture([32, 64, 96, 128]);
   const auxTexture = dataTexture([160, 192, 224, 255]);
+  const detailTexture = dataTexture([48, 80, 112, 144]);
   return {
     settings,
     worldCells: 4096,
     textureHandle: {
       texture,
       auxTexture,
+      detailTexture,
       resolution: 1,
       worldCells: 2048,
+      canopyHeightScaleM: 20,
       update() {},
       dispose() {
         texture.dispose();
         auxTexture.dispose();
+        detailTexture.dispose();
       },
     },
   };

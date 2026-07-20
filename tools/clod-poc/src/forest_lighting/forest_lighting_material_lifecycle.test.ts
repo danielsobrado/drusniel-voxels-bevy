@@ -91,18 +91,22 @@ function forestState(): ForestLightingMaterialState {
   settings.atmosphere.aerialTintStrength = 0.55;
   const texture = dataTexture([16, 32, 48, 64]);
   const auxTexture = dataTexture([80, 96, 112, 128]);
+  const detailTexture = dataTexture([100, 116, 132, 148]);
   return {
     settings,
     worldCells: 2048,
     textureHandle: {
       texture,
       auxTexture,
+      detailTexture,
       resolution: 1,
       worldCells: 2048,
+      canopyHeightScaleM: 20,
       update() {},
       dispose() {
         texture.dispose();
         auxTexture.dispose();
+        detailTexture.dispose();
       },
     },
   };
