@@ -20,6 +20,7 @@ river_ambience:
     strength: 0.55
     spawn_radius_m: 64
     scan_interval_s: 0.45
+    scan_grid: 19
     cell_spacing_m: 7
     cells_per_frame: 8
     max_emitters_per_scan: 6
