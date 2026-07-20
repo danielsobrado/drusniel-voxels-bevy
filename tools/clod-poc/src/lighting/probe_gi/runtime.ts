@@ -57,6 +57,7 @@ export function createProbeGiRuntime(
   cameraZ: number,
   options: ProbeGiRuntimeOptions = {},
 ): ProbeGiRuntime {
+  if (!config.enabled) throw new Error("cannot allocate disabled probe GI runtime");
   const clock = options.clock ?? (() => performance.now());
   const positioningBudgetMs = options.positioningBudgetMs ?? config.positioning.maxMsPerFrame;
   const maximumColumnsPerFrame = options.maximumColumnsPerFrame ?? config.positioning.maxColumnsPerFrame;

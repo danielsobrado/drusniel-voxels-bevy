@@ -25,6 +25,10 @@ const drainOptions = {
 } as const;
 
 describe("probe GI PGI-1/2 runtime", () => {
+  it("does not allocate when the default-off configuration is passed directly", () => {
+    expect(() => createProbeGiRuntime(parseProbeGiConfig(configText), providers, 0, 0)).toThrow(/disabled probe GI/);
+  });
+
   it("starts empty, incrementally positions all layers, and publishes N-1 textures", () => {
     const runtime = createProbeGiRuntime(enabledConfig(), providers, 0, 0, drainOptions);
     try {
