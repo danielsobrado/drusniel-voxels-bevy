@@ -1,3 +1,6 @@
+import { load } from "js-yaml";
+import riverAmbienceConfigText from "../../config/river_ambience.yaml?raw";
+
 export interface RiverCascadeParticleSettings {
   enabled: boolean;
   mistStrength: number;
@@ -15,7 +18,7 @@ export interface RiverCascadeParticleSettings {
   dropEnd: number;
 }
 
-export const DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS: RiverCascadeParticleSettings = {
+const FALLBACK_RIVER_CASCADE_PARTICLE_SETTINGS: Readonly<RiverCascadeParticleSettings> = Object.freeze({
   enabled: true,
   mistStrength: 0.58,
   splashStrength: 0.95,
@@ -30,7 +33,7 @@ export const DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS: RiverCascadeParticleSettin
   rapidDropletGravity: 5.4,
   dropStart: 0.78,
   dropEnd: 4.4,
-};
+});
 
 const PARAM_KEYS: Record<keyof RiverCascadeParticleSettings, string> = {
   enabled: "riverCascadeParticles",
@@ -82,10 +85,25 @@ function clampInteger(value: number, min: number, max: number, fallback: number)
   return Math.floor(clampFinite(value, min, max, fallback));
 }
 
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function numberAt(
+  source: Record<string, unknown> | null,
+  key: string,
+  fallback: number,
+): number {
+  const value = Number(source?.[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
 export function sanitizeRiverCascadeParticleSettings(
   settings: RiverCascadeParticleSettings,
 ): RiverCascadeParticleSettings {
-  const d = DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS;
+  const d = FALLBACK_RIVER_CASCADE_PARTICLE_SETTINGS;
   const rapidSpeedStart = clampFinite(settings.rapidSpeedStart, 0.05, 8, d.rapidSpeedStart);
   const rapidSpeedEnd = Math.max(
     rapidSpeedStart + 0.05,
@@ -113,6 +131,40 @@ export function sanitizeRiverCascadeParticleSettings(
     dropEnd,
   };
 }
+
+export function parseRiverCascadeParticleSettings(
+  text: string = riverAmbienceConfigText,
+): RiverCascadeParticleSettings {
+  const fallback = FALLBACK_RIVER_CASCADE_PARTICLE_SETTINGS;
+  try {
+    const document = record(load(text));
+    const ambience = record(document?.river_ambience);
+    const source = record(ambience?.cascade_particles);
+    return sanitizeRiverCascadeParticleSettings({
+      enabled: typeof source?.enabled === "boolean" ? source.enabled : fallback.enabled,
+      mistStrength: numberAt(source, "mist_strength", fallback.mistStrength),
+      splashStrength: numberAt(source, "cascade_splash_strength", fallback.splashStrength),
+      rapidDropletStrength: numberAt(source, "rapid_droplet_strength", fallback.rapidDropletStrength),
+      foamDriftStrength: numberAt(source, "foam_drift_strength", fallback.foamDriftStrength),
+      spawnRadiusM: numberAt(source, "spawn_radius_m", fallback.spawnRadiusM),
+      maxEmittersPerTick: numberAt(source, "max_emitters_per_tick", fallback.maxEmittersPerTick),
+      rapidSpeedStart: numberAt(source, "rapid_speed_start", fallback.rapidSpeedStart),
+      rapidSpeedEnd: numberAt(source, "rapid_speed_end", fallback.rapidSpeedEnd),
+      rapidDropletThreshold: numberAt(source, "rapid_droplet_threshold", fallback.rapidDropletThreshold),
+      rapidDropletsPerEmitter: numberAt(source, "rapid_droplets_per_emitter", fallback.rapidDropletsPerEmitter),
+      rapidDropletGravity: numberAt(source, "rapid_droplet_gravity", fallback.rapidDropletGravity),
+      dropStart: numberAt(source, "drop_start", fallback.dropStart),
+      dropEnd: numberAt(source, "drop_end", fallback.dropEnd),
+    });
+  } catch (error) {
+    console.warn("[water] failed to parse river ambience config; using fallback", error);
+    return { ...fallback };
+  }
+}
+
+export const DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS: Readonly<RiverCascadeParticleSettings> = Object.freeze(
+  parseRiverCascadeParticleSettings(),
+);
 
 export function readRiverCascadeParticleSettings(): RiverCascadeParticleSettings {
   const params = runtimeParams();
