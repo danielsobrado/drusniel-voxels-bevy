@@ -13,6 +13,7 @@ describe("tree system settings update planner", () => {
       needsGeometry: false,
       needsPatchRefresh: false,
       clearGpuRing: false,
+      applyGpuRingDebugColor: false,
       nextGpuStatus: null,
     });
   });
@@ -122,6 +123,39 @@ describe("tree system settings update planner", () => {
 
     expect(plan.needsPatchRefresh).toBe(true);
     expect(plan.clearGpuRing).toBe(false);
+  });
+
+  it("swaps debug LOD materials without rebuilding the GPU ring", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const plan = planTreeSystemSettingsUpdate(settings, {
+      render: { ...settings.render, debugColorByLod: !settings.render.debugColorByLod },
+    }, key);
+
+    expect(plan.clearGpuRing).toBe(false);
+    expect(plan.applyGpuRingDebugColor).toBe(true);
+  });
+
+  it("does not rebuild the GPU ring for placement debug", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const plan = planTreeSystemSettingsUpdate(settings, {
+      render: { ...settings.render, placementDebug: !settings.render.placementDebug },
+    }, key);
+
+    expect(plan.clearGpuRing).toBe(false);
+    expect(plan.applyGpuRingDebugColor).toBe(false);
+  });
+
+  it("still rebuilds the GPU ring when the far material implementation changes", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const plan = planTreeSystemSettingsUpdate(settings, {
+      render: { ...settings.render, farCheapMaterial: !settings.render.farCheapMaterial },
+    }, key);
+
+    expect(plan.clearGpuRing).toBe(true);
+    expect(plan.applyGpuRingDebugColor).toBe(false);
   });
 
   it("plans GPU ring clear and disabled status", () => {
