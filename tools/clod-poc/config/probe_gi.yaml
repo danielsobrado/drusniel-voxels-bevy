@@ -1,0 +1,53 @@
+probe_gi:
+  schema_version: 1
+  # PGI-8 owns the default flip. Enable the foundation with ?probeGi=1.
+  enabled: false
+  quality_presets:
+    ultra: { rays_per_probe: 16, probes_per_frame: 384, boosted_probes_per_frame: 1536 }
+    balanced: { rays_per_probe: 16, probes_per_frame: 256, boosted_probes_per_frame: 1024 }
+    perf: { rays_per_probe: 8, probes_per_frame: 192, boosted_probes_per_frame: 768 }
+    potato: { rays_per_probe: 8, probes_per_frame: 128, boosted_probes_per_frame: 512 }
+  lighting_change_boost_frames: 16
+  history_blend: 0.18
+  boosted_history_blend: 0.55
+  ray_spread: 0.08
+  hemisphere_floor_strength: 0.08
+  screen_space_bounce_max_fraction: 0.25
+  cascades:
+    - id: near
+      dimensions: [32, 8, 32]
+      spacing_m: 4
+      layer_heights_m: [1, 2.5, 5, 9, 15, 24, 38, 60]
+      maximum_trace_distance_m: 96
+      purpose_bias: -0.25
+    - id: mid
+      dimensions: [32, 8, 32]
+      spacing_m: 16
+      layer_heights_m: [2, 5, 10, 18, 30, 48, 76, 120]
+      maximum_trace_distance_m: 384
+      purpose_bias: 0.25
+    - id: far
+      dimensions: [32, 8, 32]
+      spacing_m: 64
+      layer_heights_m: [4, 10, 20, 36, 60, 96, 152, 240]
+      maximum_trace_distance_m: 1536
+      purpose_bias: 0.75
+  canopy:
+    sigma_rgb: [0.128, 0.087, 0.134]
+    transmitted_rgb: [0.10, 0.22, 0.08]
+    transmitted_energy_cap: 0.20
+  relocation:
+    enabled: true
+    maximum_spacing_fraction: 0.45
+    invalid_after_failed_axes: 6
+  positioning:
+    max_ms_per_frame: 0.35
+    max_columns_per_frame: 16
+    unknown_retry_frames: 30
+  dynamic_proxies:
+    update_hz: 10
+    near_cascade_only: true
+  debug:
+    enabled: false
+    mode: irradiance
+    freeze_updates: false
