@@ -98,61 +98,65 @@ function addDeepWaterLookFolder(
 ): void {
   const folder = gui.addFolder("water / deep water look");
   const reference = { preset: "custom" as WaterReferencePreset };
-
-  folder.add(reference, "preset", WATER_REFERENCE_PRESET_OPTIONS)
+  const referenceController = folder.add(reference, "preset", WATER_REFERENCE_PRESET_OPTIONS)
     .name("reference look")
     .onChange((preset: WaterReferencePreset) => {
       applyWaterReferencePreset(visual, preset);
       rebuild();
       folder.controllersRecursive().forEach((controller) => controller.updateDisplay());
     });
+  const rebuildCustom = () => {
+    reference.preset = "custom";
+    referenceController.updateDisplay();
+    rebuild();
+  };
 
   folder.add(visual, "normalModel", WATER_NORMAL_MODEL_OPTIONS)
     .name("normal algorithm")
-    .onChange(rebuild);
+    .onChange(rebuildCustom);
 
   addColorControl(folder, "deep color", visual.deepColor, (next) => {
     visual.deepColor = next;
-    rebuild();
+    rebuildCustom();
   });
 
   addColorControl(folder, "shallow teal", visual.shallowColor, (next) => {
     visual.shallowColor = next;
-    rebuild();
+    rebuildCustom();
   });
 
   addColorControl(folder, "foam color", visual.foamColor, (next) => {
     visual.foamColor = next;
-    rebuild();
+    rebuildCustom();
   });
 
-  folder.add(visual, "alpha", 0.35, 1.0, 0.01).name("alpha").onChange(rebuild);
-  folder.add(visual.color, "depthScale", 0.5, 16.0, 0.1).name("depth scale").onChange(rebuild);
-  folder.add(visual.color, "turbidity", 0.0, 0.8, 0.01).name("turbidity").onChange(rebuild);
+  folder.add(visual, "alpha", 0.35, 1.0, 0.01).name("alpha").onChange(rebuildCustom);
+  folder.add(visual.color, "depthScale", 0.5, 16.0, 0.1).name("depth scale").onChange(rebuildCustom);
+  folder.add(visual.color, "turbidity", 0.0, 0.8, 0.01).name("turbidity").onChange(rebuildCustom);
 
-  folder.add(visual.fresnel, "base", 0.0, 0.35, 0.005).name("fresnel base").onChange(rebuild);
-  folder.add(visual.fresnel, "power", 1.0, 9.0, 0.1).name("fresnel power").onChange(rebuild);
-  folder.add(visual.fresnel, "normalFlatten", 0.0, 1.0, 0.01).name("normal flatten").onChange(rebuild);
+  folder.add(visual.fresnel, "base", 0.0, 0.35, 0.005).name("fresnel base").onChange(rebuildCustom);
+  folder.add(visual.fresnel, "power", 1.0, 9.0, 0.1).name("fresnel power").onChange(rebuildCustom);
+  folder.add(visual.fresnel, "normalFlatten", 0.0, 1.0, 0.01).name("normal flatten").onChange(rebuildCustom);
 
-  folder.add(visual, "rippleAmp", 0.0, 3.0, 0.01).name("wave normal amp").onChange(rebuild);
-  folder.add(visual, "rippleSpeed", 0.0, 2.0, 0.01).name("wave speed").onChange(rebuild);
-  folder.add(visual, "rippleScaleA", 0.02, 0.5, 0.005).name("wave scale A").onChange(rebuild);
-  folder.add(visual, "rippleScaleB", 0.02, 0.5, 0.005).name("wave scale B").onChange(rebuild);
-  folder.add(visual, "rippleStrengthA", 0.0, 0.8, 0.01).name("normal str A").onChange(rebuild);
-  folder.add(visual, "rippleStrengthB", 0.0, 0.8, 0.01).name("normal str B").onChange(rebuild);
+  folder.add(visual, "rippleAmp", 0.0, 3.0, 0.01).name("wave normal amp").onChange(rebuildCustom);
+  folder.add(visual, "rippleSpeed", 0.0, 2.0, 0.01).name("wave speed").onChange(rebuildCustom);
+  folder.add(visual, "rippleScaleA", 0.02, 0.5, 0.005).name("wave scale A").onChange(rebuildCustom);
+  folder.add(visual, "rippleScaleB", 0.02, 0.5, 0.005).name("wave scale B").onChange(rebuildCustom);
+  folder.add(visual, "rippleStrengthA", 0.0, 0.8, 0.01).name("normal str A").onChange(rebuildCustom);
+  folder.add(visual, "rippleStrengthB", 0.0, 0.8, 0.01).name("normal str B").onChange(rebuildCustom);
 
-  folder.add(visual.glitter, "enabled").name("sun glitter").onChange(rebuild);
-  folder.add(visual.glitter, "tightExponent", 16, 512, 1).name("glitter tight exp").onChange(rebuild);
-  folder.add(visual.glitter, "tightGain", 0.0, 2.0, 0.01).name("glitter tight gain").onChange(rebuild);
-  folder.add(visual.glitter, "broadExponent", 4, 192, 1).name("glitter broad exp").onChange(rebuild);
-  folder.add(visual.glitter, "broadGain", 0.0, 1.0, 0.01).name("glitter broad gain").onChange(rebuild);
+  folder.add(visual.glitter, "enabled").name("sun glitter").onChange(rebuildCustom);
+  folder.add(visual.glitter, "tightExponent", 16, 512, 1).name("glitter tight exp").onChange(rebuildCustom);
+  folder.add(visual.glitter, "tightGain", 0.0, 2.0, 0.01).name("glitter tight gain").onChange(rebuildCustom);
+  folder.add(visual.glitter, "broadExponent", 4, 192, 1).name("glitter broad exp").onChange(rebuildCustom);
+  folder.add(visual.glitter, "broadGain", 0.0, 1.0, 0.01).name("glitter broad gain").onChange(rebuildCustom);
 
-  folder.add(visual.reflection, "skyFallbackStrength", 0.0, 2.0, 0.01).name("sky reflect").onChange(rebuild);
-  folder.add(visual.reflection, "terrainFallbackStrength", 0.0, 1.0, 0.01).name("terrain reflect").onChange(rebuild);
+  folder.add(visual.reflection, "skyFallbackStrength", 0.0, 2.0, 0.01).name("sky reflect").onChange(rebuildCustom);
+  folder.add(visual.reflection, "terrainFallbackStrength", 0.0, 1.0, 0.01).name("terrain reflect").onChange(rebuildCustom);
 
-  folder.add(visual.foam, "noiseScale", 0.01, 0.25, 0.005).name("foam noise").onChange(rebuild);
-  folder.add(visual.foam, "shoreStrength", 0.0, 2.0, 0.01).name("shore foam").onChange(rebuild);
-  folder.add(visual.foam, "riverStrength", 0.0, 2.0, 0.01).name("river foam").onChange(rebuild);
+  folder.add(visual.foam, "noiseScale", 0.01, 0.25, 0.005).name("foam noise").onChange(rebuildCustom);
+  folder.add(visual.foam, "shoreStrength", 0.0, 2.0, 0.01).name("shore foam").onChange(rebuildCustom);
+  folder.add(visual.foam, "riverStrength", 0.0, 2.0, 0.01).name("river foam").onChange(rebuildCustom);
 }
 
 function addWaterRefractionFolder(
