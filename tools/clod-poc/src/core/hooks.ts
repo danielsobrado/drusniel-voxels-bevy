@@ -67,6 +67,8 @@ export function initHooks(): ClodHooks {
     placeConstructionPiece: null,
     breakConstructionPiece: null,
     listPlacedConstructionPieces: null,
+    getCustomPropPlacementSnapshot: null,
+    replaceTerrainAnchoredCustomProps: null,
     queryEnvironmentalPropExclusion: null,
     flushSaveRuntime: null,
     getPlayableSliceSnapshot: null,
