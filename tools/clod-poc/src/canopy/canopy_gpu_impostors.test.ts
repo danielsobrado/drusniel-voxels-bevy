@@ -167,8 +167,10 @@ describe("canopy GPU impostors", () => {
     expect(canopyTextureFiniteCenter(textureSet({ originZ: Number.POSITIVE_INFINITY })).z).toBe(0);
   });
 
-  it("derives a safe instance budget from the existing shell triangle budget", () => {
-    expect(maxCanopyGpuImpostorInstances(1000)).toBe(500);
+  it("derives an instance cap that never exceeds the crown-cluster triangle budget", () => {
+    expect(maxCanopyGpuImpostorInstances(1000)).toBe(166);
+    expect(maxCanopyGpuImpostorInstances(6)).toBe(1);
+    expect(maxCanopyGpuImpostorInstances(5)).toBe(1);
     expect(maxCanopyGpuImpostorInstances(-1)).toBeGreaterThan(0);
   });
 });
