@@ -39,7 +39,7 @@ category_budgets:
   vegetation:
     max_triangles: 12000
     max_materials: 4
-    max_drawParts: 8
+    max_draw_parts: 8
     max_texture_px: 2048
   interactive:
     max_triangles: 16000
