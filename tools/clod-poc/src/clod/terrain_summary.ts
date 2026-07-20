@@ -183,13 +183,16 @@ export function summaryBaseLevel(field: TerrainSummaryField): number {
 
 export function sampleSkirtHeight(field: TerrainSummaryField, x: number, z: number, farRadius: number, baseLevel: number, bias: number): number {
   const worldSize = field.worldSize;
-  const baked = sampleHeightBlend(field, x, z, bias);
+  const edgeX = Math.max(0, Math.min(worldSize, x));
+  const edgeZ = Math.max(0, Math.min(worldSize, z));
+  const baked = sampleHeightBlend(field, edgeX, edgeZ, bias);
   const analytic = field.analyticHeightSampler?.(x, z) ?? surfaceHeightCore(x, z);
   const inner = Math.min(Math.min(x, worldSize - x), Math.min(z, worldSize - z));
   const edgeBand = worldSize * 0.1;
-  const blend = clamp01(inner / edgeBand);
-  let h = analytic + (baked - analytic) * blend;
   const outside = Math.max(0, -inner);
+  const edgeT = clamp01(outside / edgeBand);
+  const blend = edgeT * edgeT * (3 - 2 * edgeT);
+  let h = baked + (analytic - baked) * blend;
   const farFactor = clamp01(outside / (farRadius * 0.9));
   h += (baseLevel - h) * farFactor * 0.6;
   return h;

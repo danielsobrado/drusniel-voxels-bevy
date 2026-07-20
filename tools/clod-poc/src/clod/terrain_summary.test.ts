@@ -93,6 +93,18 @@ describe("terrain summary field", () => {
     expect(sampleSkirtHeight(summary, -4, -4, 100, summaryBaseLevel(summary), 1)).toBe(77);
   });
 
+  it("keeps the finite far skirt continuous with the baked terrain at the world edge", () => {
+    const worldSource = {
+      sampleHeight: (x: number) => 100 + x,
+      sampleBiome: () => BIOME_IDS.plains,
+    };
+    const summary = buildTerrainSummary([pageNode("L0:0,0", 0, 0, 16, 16, 1, 2)], 16, 1, { worldSource });
+    const edgeHeight = sampleHeightBlend(summary, 0, 8, 1);
+
+    expect(sampleSkirtHeight(summary, 0, 8, 100, 0, 1)).toBeCloseTo(edgeHeight, 6);
+    expect(sampleSkirtHeight(summary, -0.001, 8, 100, 0, 1)).toBeCloseTo(edgeHeight, 2);
+  });
+
   it("samples WorldSource height, normal, coverage, and biome beyond the finite summary footprint", () => {
     const worldSource = {
       sampleHeight: (x: number, z: number) => 100 + x * 0.5 + z * 0.25,

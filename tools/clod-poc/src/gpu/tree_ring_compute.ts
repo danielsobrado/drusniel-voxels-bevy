@@ -247,13 +247,6 @@ export function packTreeGpuRingParams(settings: TreeSettings, params: TreeGpuRin
   const u32 = new Uint32Array(scratch);
   const lod = treeRingLodParams(settings);
   const accept = treeRingAcceptParams(settings);
-  (globalThis as typeof globalThis & { __treeRingLodProbe?: number[] }).__treeRingLodProbe = [
-    lod.near,
-    lod.mid,
-    lod.far,
-    lod.radius,
-    lod.band,
-  ];
   f32.fill(0);
   u32.fill(0);
   f32[0] = params.centerX;
