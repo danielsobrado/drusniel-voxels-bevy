@@ -33,6 +33,7 @@ import { treeGpuCpuPatchHandoffAction } from "./tree_system_gpu_cpu_handoff.js";
 import { TreeSystemAssets } from "./tree_system_assets_runtime.js";
 import { TreeGpuLightingProxyCache } from "./tree_system_gpu_lighting_proxy_cache.js";
 import { TreePlacementDebugOverlay } from "./tree_placement_debug_overlay.js";
+import { applyTreeGpuRingDebugColorMaterials } from "./tree_gpu_ring_debug_material.js";
 import type { FallingTree, TreeLightingProxy, TreePatch, TreeStats, TreeSystemOptions, TreeWebGpuBackendAccess } from "./tree_system_types.js";
 import type { TreeIsolatedRenderer } from "./tree_system_runtime_types.js";
 import {
@@ -171,6 +172,9 @@ export class TreeSystem {
     }
     if (plan.needsGeometry) { this.assets.rebuildGeometries(); this.clearPatches(); }
     this.assets.refreshMaterials(this.patches);
+    if (plan.applyGpuRingDebugColor) {
+      applyTreeGpuRingDebugColorMaterials(this.gpuRing.draw, this.settings.render.debugColorByLod);
+    }
     if (plan.needsPatchRefresh) this.patchesDirty = true;
     this.setEnabled(this.settings.enabled);
     this.updatePlacementDebugOverlay();
