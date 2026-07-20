@@ -41,7 +41,6 @@ export interface CanopyGpuImpostorShell {
 }
 
 const DEFAULT_COVERAGE_THRESHOLD = 0.12;
-const DEFAULT_MIN_INSTANCES = 64;
 const DEFAULT_MAX_INSTANCES = 8192;
 const DEFAULT_SAMPLE_STRIDE = 1;
 const CANOPY_IMPOSTOR_MAX_COLOR_CHANNEL = 0.42;
@@ -63,9 +62,9 @@ type NumericTextureArray =
   | Int32Array;
 
 export function maxCanopyGpuImpostorInstances(maxShellTris: number): number {
-  if (!Number.isFinite(maxShellTris) || maxShellTris <= 0) return DEFAULT_MIN_INSTANCES;
+  if (!Number.isFinite(maxShellTris) || maxShellTris <= 0) return 0;
   const budgetedInstances = Math.floor(maxShellTris / CANOPY_CROWN_CLUSTER_TRIS);
-  return Math.max(1, Math.min(DEFAULT_MAX_INSTANCES, budgetedInstances));
+  return Math.max(0, Math.min(DEFAULT_MAX_INSTANCES, budgetedInstances));
 }
 
 export function canopyTextureFiniteCenter(set: CanopyTextureSet): { x: number; z: number } {
@@ -105,7 +104,7 @@ export function buildCanopyGpuImpostorsFromTextureSet(
   lighting: EnvironmentLighting,
   options: Partial<CanopyGpuImpostorOptions> = {},
 ): CanopyGpuImpostorShell {
-  const maxInstances = sanitizePositiveInteger(options.maxInstances, maxCanopyGpuImpostorInstances(config.budgets.maxShellTris));
+  const maxInstances = sanitizeNonNegativeInteger(options.maxInstances, maxCanopyGpuImpostorInstances(config.budgets.maxShellTris));
   const coverageThreshold = sanitizeCoverage(options.coverageThreshold ?? DEFAULT_COVERAGE_THRESHOLD);
   const sampleStride = sanitizePositiveInteger(options.sampleStride, DEFAULT_SAMPLE_STRIDE);
   const samples = selectCanopyGpuImpostorSamples(set, maxInstances, coverageThreshold, sampleStride);
@@ -222,6 +221,7 @@ export function selectCanopyGpuImpostorSamples(
   coverageThreshold: number,
   sampleStride = 1,
 ): CanopyGpuImpostorSample[] {
+  if (maxInstances <= 0) return [];
   const resolution = Math.max(1, Math.floor(set.resolution));
   const heightData = textureFloatData(set.heightTexture);
   const coverageData = textureFloatData(set.coverageTexture);
@@ -329,6 +329,11 @@ function desaturateColor(color: THREE.Color, amount: number): THREE.Color {
     THREE.MathUtils.lerp(color.g, luma, t),
     THREE.MathUtils.lerp(color.b, luma, t),
   );
+}
+
+function sanitizeNonNegativeInteger(value: number | undefined, fallback: number): number {
+  const parsed = Number.isFinite(value) ? Math.floor(value as number) : fallback;
+  return Math.max(0, parsed);
 }
 
 function sanitizePositiveInteger(value: number | undefined, fallback: number): number {
