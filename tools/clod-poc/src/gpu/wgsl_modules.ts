@@ -32,6 +32,7 @@ import { withUnderwaterRiverCobbles } from "./stone_river_cobble_wgsl_transform.
 import { withGravelBarStones } from "./stone_bar_field_transform.js";
 import { withGravelBarFieldSampling } from "./stone_bar_field_gate_transform.js";
 import { withStoneGrassContactPatches } from "./stone_contact_patch_wgsl_transform.js";
+import { withTreeCanopyCompetition } from "./tree_canopy_competition_wgsl_transform.js";
 import { withRiverEcologyConstants } from "./wgsl_river_ecology_transforms.js";
 import {
   withTreeCrownProxyShadowIndexCount,
@@ -73,12 +74,14 @@ export function composeStoneScatterShader(): string {
 
 export function composeTreeRingShader(workgroupSize = 64): string {
   const treeLayout = treeRingSpeciesLayout(TREE_SPECIES.length, TREE_RING_SHADOW_CASCADE_COUNT);
-  const baseTreeEntry = withTreeTerrainVisibilityCull(
-    withTreeShadowLodGate(
-      withTreeSharedPcgModule(
-        withTreePcgHash(
-          withTreeFinalPlacementHeight(
-            withRiverEcologyConstants(treeRingEntry),
+  const baseTreeEntry = withTreeCanopyCompetition(
+    withTreeTerrainVisibilityCull(
+      withTreeShadowLodGate(
+        withTreeSharedPcgModule(
+          withTreePcgHash(
+            withTreeFinalPlacementHeight(
+              withRiverEcologyConstants(treeRingEntry),
+            ),
           ),
         ),
       ),
