@@ -53,13 +53,13 @@ Production values live in `config/custom_props.yaml`:
 ```text
 large_prop_occlusion.enabled
 large_prop_occlusion.cell_size_m
-large_prop_occlusion.build_occluders_per_frame
+large_prop_occlusion.build_cells_per_frame
 large_prop_occlusion.footprint_padding_m
 large_prop_occlusion.minimum_height_m
 large_prop_occlusion.mist_clip_strength
 ```
 
-The field-oriented values are introduced here so the next PR can consume the same authority without hardcoded constants.
+The build budget is expressed in raster cells, not occluders. A single very large bound therefore cannot bypass the per-frame limit in the follow-up field builder.
 
 ## Validation required
 
