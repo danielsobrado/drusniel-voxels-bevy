@@ -1,572 +1,68 @@
-import * as THREE from "three";
-import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import playerEditingConfigText from "../../../../config/player/player_editing.yaml?raw";
-import type { ClodPageNode } from "../../../types.js";
-import { parseGrassConfig } from "../../../grass.js";
-import { parseStoneConfig } from "../../../stones/stone_config.js";
-import { parseTreeConfig } from "../../../trees/index.js";
-import type { TreeTerrainOcclusionSampler } from "../../../trees/tree_terrain_occlusion.js";
-import { parseUnderstoryConfig } from "../../../understory/index.js";
-import type { BorderCoastOceanConfig } from "../../../terrain/border_coast_config.js";
-import { surfaceHeight } from "../../../terrain/terrain.js";
-import type { WaterConfig } from "../../../water/waterConfig.js";
 import {
-  buildRiverTerrainWetnessMask,
-  parseRiverTerrainWetnessMaskResolution,
-  type HydrologySystem,
-} from "../../../water/index.js";
-import type { EnvironmentLighting } from "../../../environment/environment.js";
-import { drainVegetationDirty, type VegetationDirtyQueue } from "../../../systems/vegetation_dirty.js";
-import type { ClodHooks } from "../../../core/hooks.js";
-import type { ClodRuntimeBindings } from "../../clod_runtime_bindings.js";
-import type { AppRenderer } from "../renderer_startup.js";
-import type { createTerrainMaterialController } from "../../../terrain/material/terrain_material_controller.js";
-import type { AppSky } from "../../../scene/app_sky.js";
-import { runWaterWeatherStartup, type WaterWeatherStartupResult } from "../../../runtime/water_weather/water_weather_startup.js";
+  createCanonicalProbeGiProviders,
+  createProbeGiIntegration,
+  disposeActiveProbeGiIntegration,
+  type ProbeGiIntegration,
+} from "../../../lighting/probe_gi/index.js";
 import {
-  runVegetationStartup,
-  type VegetationStartupResult,
-} from "../../../runtime/vegetation/vegetation_startup.js";
-import { resolveVegetationGpuBackend } from "../../../runtime/vegetation/vegetation_gpu_backend.js";
-import type {
+  runRuntimeSystemsStartup as runRuntimeSystemsStartupBase,
+  type RuntimeSystemsStartupInput,
+  type RuntimeSystemsStartupResult as RuntimeSystemsStartupBaseResult,
+} from "./runtime_systems_startup_base.js";
+
+export type {
+  RuntimeSystemsStartupInput,
   VegetationStatControllerRefs,
-} from "../../../runtime/vegetation/vegetation_types.js";
-import {
-  runForestLightingStartup,
-  type ForestLightingStartupResult,
-} from "./forest_lighting_startup.js";
-import {
-  runCustomPropsStartup,
-  resolveCustomPropsEnabled,
-  type CustomPropsStartupResult,
-} from "../custom_props_startup.js";
-import { resolvePropPlacementScene } from "../../../props/prop_placements.js";
-import type { CustomPropsSettings, PropPlacementScene } from "../../../props/prop_types.js";
-import { createConstructionController, defaultConstructionConfig, type ConstructionController } from "../../../construction/index.js";
-import { installConstructionCommitGuard } from "../../../construction/construction_commit_guard.js";
-import { authorizeConstructionRemoval } from "../../../construction/construction_remove_authority.js";
-import { resolvePlayerEditAuthorityConfig } from "../../../player/player_edit_authority.js";
-import {
-  cellReadinessAt,
-  createAppCellReadinessFeeds,
-} from "../../../player/cell_readiness.js";
-import type { EditCommandDenialReason } from "../../../player/edit_commands.js";
-import { getDigEditRevision } from "../../../terrain/terrain_edits.js";
-import type { TerrainColliderSet } from "../../../terrain/terrain_collider.js";
-import type { VoxelProjectArchiveContents } from "../../../project/voxel_project_archive.js";
-import { propPlacementSceneToProjectProps } from "../../../project/project_props.js";
-import { projectPropEditStore } from "../../../project/prop_edit_store.js";
-import { hasLoadedSavePropAuthority } from "../../../save/save_runtime.js";
-import { shouldRestoreDefaultCustomProps } from "./custom_props_authority.js";
-import {
-  buildRpgDensityComposition,
-  publishRpgDensityCompositionCounters,
-  type RpgDensityComposition,
-} from "../../../qa/rpg_density_scene_composition.js";
-import { createAgentEnvelopeRuntime, type AgentEnvelopeRuntime } from "../../../agents/agent_envelope_runtime.js";
-import { isRpgDensityScene } from "../../../scenes/rpg_density_scenes.js";
-import { usesStreamingRuntimeWorld } from "../../../world/runtime_world_policy.js";
+} from "./runtime_systems_startup_base.js";
 
-export type { VegetationStatControllerRefs } from "../../../runtime/vegetation/vegetation_types.js";
-
-export interface RuntimeSystemsStartupInput {
-  app: AppRenderer;
-  scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
-  controls: OrbitControls;
-  state: import("../../clod_app_state.js").ClodAppState;
-  bindings: ClodRuntimeBindings;
-  lod0Nodes: ClodPageNode[];
-  worldCells: number;
-  worldSeed: number;
-  unboundedWorld: boolean;
-  grassConfig: ReturnType<typeof parseGrassConfig>;
-  stoneConfig: ReturnType<typeof parseStoneConfig>;
-  treeConfig: ReturnType<typeof parseTreeConfig>;
-  understoryConfig: ReturnType<typeof parseUnderstoryConfig>;
-  forestLightingConfig: ReturnType<typeof import("../../../forest_lighting/index.js").parseForestLightingConfig>;
-  waterConfig: WaterConfig;
-  borderCoastOceanConfig: BorderCoastOceanConfig;
-  customPropsConfig: CustomPropsSettings;
-  propPlacementScenes: Record<string, PropPlacementScene>;
-  stagedImport: VoxelProjectArchiveContents | null;
-  queryGrassRingGrid: number | null;
-  queryGrassRingCell: number | null;
-  isWebGpu: boolean;
-  rendererWebGpuDevice: GPUDevice | null;
-  hydrologySystem: HydrologySystem | null;
-  terrainOcclusionSampler?: TreeTerrainOcclusionSampler;
-  searchParams: URLSearchParams;
-  materialController: ReturnType<typeof createTerrainMaterialController>;
-  skyEnvironment: AppSky;
-  currentLighting: () => EnvironmentLighting;
-  vegetationDirtyQueue: VegetationDirtyQueue;
-  statControllers: VegetationStatControllerRefs;
-  getHooks: () => ClodHooks | null;
-  shadowProxyController?: import("../../../shadows/shadowProxyController.js").ShadowProxyController | null;
-  terrainColliders?: TerrainColliderSet;
-  /** Real player interaction mode (`orbit` | `choosingSpawn` | `playing`). */
-  getInteractionMode?: () => string;
-}
-
-export interface RuntimeSystemsStartupResult extends VegetationStartupResult, WaterWeatherStartupResult,
-  ForestLightingStartupResult {
-  hydrologySystem: HydrologySystem | null;
-  updateLighting: () => void;
-  drainVegetationDirtyQueue: () => void;
-  customProps: CustomPropsStartupResult | null;
-  constructionController: ConstructionController | null;
-  agentEnvelopeRuntime: AgentEnvelopeRuntime | null;
-}
-
-function resolveBreakTarget(
-  controller: ConstructionController,
-  input: Parameters<ConstructionController["breakPiece"]>[0],
-): ReturnType<ConstructionController["listPlacedPieces"]>[number] | null {
-  const pieces = controller.listPlacedPieces(Number.MAX_SAFE_INTEGER);
-  if (input.pieceId) return pieces.find((piece) => piece.id === input.pieceId) ?? null;
-  if (!input.position) return null;
-  const maxDistanceM = Math.max(0.5, input.maxDistanceM ?? 4);
-  const maxDistance2 = maxDistanceM * maxDistanceM;
-  let best = null as ReturnType<ConstructionController["listPlacedPieces"]>[number] | null;
-  let bestDistance2 = maxDistance2;
-  for (const piece of pieces) {
-    const dx = piece.position[0] - input.position[0];
-    const dy = piece.position[1] - input.position[1];
-    const dz = piece.position[2] - input.position[2];
-    const distance2 = dx * dx + dy * dy + dz * dz;
-    if (distance2 <= bestDistance2) {
-      best = piece;
-      bestDistance2 = distance2;
-    }
-  }
-  return best;
-}
-
-function withConstructionGuardDispose(
-  controller: ConstructionController,
-  disposeGuard: () => void,
-): ConstructionController {
-  return {
-    colliderSet: controller.colliderSet,
-    update: () => controller.update(),
-    stats: () => controller.stats(),
-    setTerrainConformHandler: (handler) => controller.setTerrainConformHandler(handler),
-    reevaluateSupportForTerrainEdit: (aabb) => controller.reevaluateSupportForTerrainEdit(aabb),
-    placePieceAt: (input) => controller.placePieceAt(input),
-    breakPiece: (input) => {
-      const target = resolveBreakTarget(controller, input);
-      if (!target) return controller.breakPiece(input);
-      const verdict = authorizeConstructionRemoval(target);
-      if (!verdict.allowed) {
-        return {
-          ok: false,
-          pieceId: target.id,
-          reason: `edit command denied: ${verdict.reason}`,
-        };
-      }
-      return controller.breakPiece({ ...input, pieceId: target.id });
-    },
-    listPlacedPieces: (limit) => controller.listPlacedPieces(limit),
-    dispose: () => {
-      disposeGuard();
-      controller.dispose();
-    },
-  };
-}
-
-function persistenceSafeDensityComposition(composition: RpgDensityComposition): RpgDensityComposition {
-  const wallGroups = new Map<string, Array<{ id: string; index: number }>>();
-  const wallPattern = /^(.*:wall:\d+:(?:west|east)):(\d+)$/;
-  for (const placed of composition.pieces) {
-    const match = wallPattern.exec(placed.id);
-    if (!match) continue;
-    const group = wallGroups.get(match[1]!) ?? [];
-    group.push({ id: placed.id, index: Number(match[2]) });
-    wallGroups.set(match[1]!, group);
-  }
-  const omittedIds = new Set(
-    composition.pieces
-      .filter((placed) => placed.id.includes(":pillar:"))
-      .map((placed) => placed.id),
-  );
-  for (const group of wallGroups.values()) {
-    group.sort((a, b) => a.index - b.index);
-    if (group.length > 0) omittedIds.add(group[0]!.id);
-    if (group.length > 1) omittedIds.add(group[group.length - 1]!.id);
-  }
-
-  const pieces = composition.pieces.filter((placed) => !omittedIds.has(placed.id));
-  const buildings = composition.buildings.map((building) => ({
-    ...building,
-    pieceCount: pieces.filter((placed) => placed.id.startsWith(`${building.id}:`)).length,
-  }));
-  const maxPiecesPerBuilding = buildings.reduce((max, building) => Math.max(max, building.pieceCount), 0);
-  return {
-    ...composition,
-    pieces,
-    buildings,
-    summary: {
-      ...composition.summary,
-      constructionPiecesTotal: pieces.length,
-      averagePiecesPerBuilding: buildings.length === 0 ? 0 : pieces.length / buildings.length,
-      maxPiecesPerBuilding,
-    },
-  };
-}
-
-function prepareRpgDensityComposition(input: RuntimeSystemsStartupInput): RpgDensityComposition | null {
-  const sceneId = input.searchParams.get("rpgDensityScene");
-  if (!isRpgDensityScene(sceneId)) return null;
-  const composition = persistenceSafeDensityComposition(buildRpgDensityComposition({
-    sceneId,
-    seed: input.worldSeed,
-    surfaceHeightAt: surfaceHeight,
-  }));
-  input.propPlacementScenes[sceneId] = composition.propScene;
-  input.searchParams.set("customPropScene", sceneId);
-  if (!input.searchParams.has("customProps")) input.searchParams.set("customProps", "1");
-  if (!input.searchParams.has("construction")) input.searchParams.set("construction", "1");
-  publishRpgDensityCompositionCounters(input.getHooks()?.stats?.counters, composition);
-  return composition;
-}
-
-function benchmarkConstructionStorageKey(composition: RpgDensityComposition): string {
-  return `drusniel.clod-poc.benchmark.${composition.sceneId}.${composition.seed}.v1`;
+export interface RuntimeSystemsStartupResult extends RuntimeSystemsStartupBaseResult {
+  probeGiIntegration: ProbeGiIntegration | null;
 }
 
 export async function runRuntimeSystemsStartup(
   input: RuntimeSystemsStartupInput,
 ): Promise<RuntimeSystemsStartupResult> {
-  const {
-    app,
-    scene,
-    camera,
-    controls,
-    state,
-    bindings,
-    lod0Nodes,
-    worldCells,
-    worldSeed,
-    unboundedWorld,
-    grassConfig,
-    stoneConfig,
-    treeConfig,
-    understoryConfig,
-    forestLightingConfig,
-    waterConfig,
-    borderCoastOceanConfig,
-    customPropsConfig,
-    propPlacementScenes,
-    stagedImport,
-    queryGrassRingGrid,
-    queryGrassRingCell,
-    isWebGpu,
-    rendererWebGpuDevice,
-    hydrologySystem,
-    terrainOcclusionSampler,
-    searchParams,
-    materialController,
-    skyEnvironment,
-    currentLighting,
-    vegetationDirtyQueue,
-    statControllers,
-    getHooks,
-    terrainColliders,
-  } = input;
-  const getInteractionMode = input.getInteractionMode ?? (() => "playing");
-  const densityComposition = prepareRpgDensityComposition(input);
-
-  const vegetation = runVegetationStartup({
-    app,
-    scene,
-    controls,
-    state,
-    lod0Nodes,
-    worldCells,
-    worldSeed,
-    unboundedWorld,
-    grassConfig,
-    stoneConfig,
-    treeConfig,
-    understoryConfig,
-    queryGrassRingGrid,
-    queryGrassRingCell,
-    isWebGpu,
-    rendererWebGpuDevice,
-    hydrologySystem,
-    terrainOcclusionSampler,
-    currentLighting,
-    statControllers,
-    searchParams,
-  });
-  await vegetation.impostorBakePromise;
-  const gpuBackend = resolveVegetationGpuBackend(app.renderer, isWebGpu);
-
-  const {
-    grassController,
-    grassSystem,
-    stoneController,
-    treeController,
-    understoryController,
-    treeSystem,
-    understorySystem,
-  } = vegetation;
-
-  const forestLighting = runForestLightingStartup({
-    worldCells,
-    forestLightingConfig,
-    state,
-    treeSystem,
-    understorySystem,
-    statControllers,
-  });
-
-  const waterWeather = await runWaterWeatherStartup({
-    scene,
-    camera,
-    state,
-    waterConfig,
-    borderCoastOceanConfig,
-    worldCells,
-    hydrologySystem,
-    searchParams,
-    currentLighting,
-    lod0Nodes,
-    isWebGpu,
-  });
-
-  const { waterController } = waterWeather;
-  if (isWebGpu && waterConfig.enabled) {
-    const riverTerrainWetnessMask = buildRiverTerrainWetnessMask({
-      field: waterController.field,
-      worldCells,
-      resolution: parseRiverTerrainWetnessMaskResolution(searchParams.get("riverWetnessMaskRes")),
-    });
-    materialController.setRiverTerrainWetnessMask(riverTerrainWetnessMask);
-  }
-
-  const updateLighting = () => {
-    skyEnvironment?.updateSettings({
-      sunAzimuthDeg: state.sunAzimuthDeg,
-      sunElevationDeg: state.sunElevationDeg,
-      sunIntensity: state.sunIntensity,
-      skyIntensity: state.skyIntensity,
-      groundIntensity: state.groundIntensity,
-      exposure: state.exposure,
-      horizonSoftness: state.horizonSoftness,
-      sunDiskIntensity: state.sunDiskIntensity,
-      sunGlowIntensity: state.sunGlowIntensity,
-      hazeIntensity: state.hazeIntensity,
-    });
-    const lighting = currentLighting();
-    materialController.forEachMaterial((mat) => materialController.applyLighting(mat, lighting));
-    grassController.updateLighting({
-      light: lighting.sunDirection,
-      sunColor: lighting.sunColor,
-      skyLight: lighting.skyLight,
-      groundLight: lighting.groundLight,
-    });
-    const stoneLighting = {
-      light: lighting.sunDirection,
-      sunColor: lighting.sunColor,
-      skyLight: lighting.skyLight,
-      groundLight: lighting.groundLight,
-    };
-    stoneController.updateLighting(stoneLighting);
-    treeController.updateLighting(lighting);
-    understoryController.updateLighting(lighting);
-    waterController.updateSunDirection(lighting.sunDirection);
-    waterWeather.deepOceanMaterial?.updateSunDirection(lighting.sunDirection);
-    waterWeather.deepOceanMaterial?.updateHorizonColor(lighting.skyLight);
-    input.shadowProxyController?.syncSunLight();
-  };
-
-  const drainVegetationDirtyQueue = (): void => {
-    drainVegetationDirty({
-      queue: vegetationDirtyQueue,
-      grassEnabled: state.grassEnabled,
-      treesEnabled: state.treesEnabled,
-      understoryEnabled: state.understoryEnabled,
-      markGrassDirty: () => {
-        grassSystem.markPatchesDirty();
-        bindings.refreshGrassStats();
-      },
-      markTreesDirty: () => {
-        treeController.markPatchesDirty();
-        bindings.refreshTreeStats();
-      },
-      markUnderstoryDirty: () => {
-        understoryController.markPatchesDirty();
-        bindings.refreshUnderstoryStats();
-      },
-    });
-  };
-
-  const importedProps = stagedImport?.manifest.props ?? [];
-  const hasImportedProps = importedProps.length > 0;
-  const customPropsEnabled = searchParams.get("customProps") === "0"
-    ? false
-    : densityComposition !== null
-      || hasImportedProps
-      || searchParams.get("propEditor") === "1"
-      || resolveCustomPropsEnabled(searchParams, customPropsConfig);
-  let customProps: CustomPropsStartupResult | null = null;
-  if (customPropsEnabled) {
-    try {
-      if (hasImportedProps) {
-        projectPropEditStore.restore(importedProps);
-      } else if (densityComposition && !hasLoadedSavePropAuthority()) {
-        projectPropEditStore.restore(propPlacementSceneToProjectProps(densityComposition.propScene));
-      } else if (shouldRestoreDefaultCustomProps({
-        hasImportedProps,
-        hasProjectProps: projectPropEditStore.hasProps(),
-        hasLoadedSavePropAuthority: hasLoadedSavePropAuthority(),
-      })) {
-        const scenePreset = resolvePropPlacementScene(searchParams, propPlacementScenes, propPlacementScenes.smoke!);
-        projectPropEditStore.restore(propPlacementSceneToProjectProps(scenePreset));
-      }
-      customProps = await runCustomPropsStartup({
-        scene,
-        camera,
-        customPropsConfig,
-        placementScene: projectPropEditStore.toPlacementScene(hasImportedProps ? "archive" : "active"),
-        enabled: true,
-        searchParams,
-        getHooks,
-        propEditStore: projectPropEditStore,
-        gpuDevice: rendererWebGpuDevice,
-        gpuBackend,
-      });
-    } catch (error) {
-      console.error("[custom-props] failed to initialize", error);
+  const result = await runRuntimeSystemsStartupBase(input);
+  let probeGiIntegration: ProbeGiIntegration | null = null;
+  if (!input.isWebGpu) {
+    disposeActiveProbeGiIntegration();
+    const requested = input.searchParams.get("probeGi");
+    if (requested === "1" || requested === "true") {
+      console.warn("[probe-gi] probeGi=1 ignored because WebGPU is unavailable");
     }
-  } else {
-    projectPropEditStore.clear();
+  }
+  try {
+    if (input.isWebGpu) {
+      probeGiIntegration = createProbeGiIntegration({
+        scene: input.scene,
+        camera: input.camera,
+        searchParams: input.searchParams,
+        providers: createCanonicalProbeGiProviders(result.environmentQuery),
+        device: input.rendererWebGpuDevice,
+      });
+    }
+  } catch (error) {
+    result.weatherController.dispose();
+    result.waterController.dispose();
+    throw error;
   }
 
-  let constructionController: ConstructionController | null = null;
-  const constructionParam = searchParams.get("construction");
-  const constructionEnabled = constructionParam === "1"
-    ? true
-    : constructionParam === "0"
-      ? false
-      : densityComposition !== null || defaultConstructionConfig.enabled;
-  if (constructionEnabled) {
-    const seededStorageKey = densityComposition ? benchmarkConstructionStorageKey(densityComposition) : null;
-    try {
-      const editAuthority = resolvePlayerEditAuthorityConfig(playerEditingConfigText, searchParams);
-      const maxRayDistanceM = editAuthority.allowFarCommit
-        ? defaultConstructionConfig.placement.maxRayDistanceM
-        : Math.min(
-            defaultConstructionConfig.placement.maxRayDistanceM,
-            editAuthority.allowFarPreview ? editAuthority.buildPreviewRadiusM : editAuthority.buildCommitRadiusM,
-          );
-      // Streaming scenes use canonical coordinates beyond the small startup box.
-      // Loaded-cell readiness remains the authority boundary for commits.
-      const constructionUnboundedWorld = unboundedWorld
-        || densityComposition !== null
-        || usesStreamingRuntimeWorld(searchParams.get("scene"));
-      const constructionConfig = {
-        ...defaultConstructionConfig,
-        placement: {
-          ...defaultConstructionConfig.placement,
-          maxRayDistanceM,
-          storageKey: seededStorageKey ?? defaultConstructionConfig.placement.storageKey,
-          unboundedWorld: constructionUnboundedWorld,
-        },
-      };
-      const constructionWorldCells = constructionUnboundedWorld ? Number.MAX_SAFE_INTEGER / 4 : worldCells;
-      const counters = getHooks()?.stats?.counters ?? null;
-      if (counters) {
-        counters["player_build_preview_limit_m"] = maxRayDistanceM;
-        counters["player_build_commit_limit_m"] = editAuthority.allowFarCommit
-          ? maxRayDistanceM
-          : editAuthority.buildCommitRadiusM;
-        counters["player_build_unbounded_world"] = constructionUnboundedWorld ? 1 : 0;
-      }
-      const getBuildAuthorityOrigin = () => ({ x: camera.position.x, z: camera.position.z });
-      const getBuildAuthorityCounters = () => getHooks()?.stats?.counters ?? null;
-      const readinessFeeds = terrainColliders
-        ? createAppCellReadinessFeeds({ terrainColliders })
-        : null;
-      const constructionReadyAt = readinessFeeds
-        ? (x: number, z: number) => cellReadinessAt(readinessFeeds, x, z).constructionReady
-        : undefined;
-      const recordConstructionEditDenial = (reason: EditCommandDenialReason): void => {
-        const counters = getBuildAuthorityCounters();
-        if (!counters) return;
-        const key = reason === "not_ready"
-          ? "edits_denied_not_ready"
-          : reason === "expired"
-            ? "edit_commands_expired"
-            : reason === "revision_mismatch"
-              ? "edit_commands_denied_revision"
-              : reason === "out_of_range"
-                ? "edit_commands_denied_distance"
-                : reason === "mode_changed"
-                  ? "edit_commands_denied_mode"
-                  : "edit_commands_denied_target_moved";
-        counters[key] = (counters[key] ?? 0) + 1;
-      };
-      const disposeGuard = installConstructionCommitGuard({
-        domElement: app.renderer.domElement,
-        camera,
-        worldCells: constructionWorldCells,
-        unboundedWorld: constructionUnboundedWorld,
-        placement: constructionConfig.placement,
-        editAuthority,
-        getAuthorityOrigin: getBuildAuthorityOrigin,
-        getCounters: getBuildAuthorityCounters,
-        getInteractionMode,
-        getTerrainRevision: getDigEditRevision,
-        constructionReadyAt,
-        recordEditDenial: recordConstructionEditDenial,
-        onRejected: (reason) => console.info(`[construction] edit rejected: ${reason}`),
-      });
-      if (seededStorageKey && densityComposition) {
-        localStorage.setItem(seededStorageKey, JSON.stringify(densityComposition.pieces));
-      }
+  if (probeGiIntegration) {
+    const disposeWater = result.waterController.dispose.bind(result.waterController);
+    let disposed = false;
+    result.waterController.dispose = () => {
+      if (disposed) return;
+      disposed = true;
       try {
-        constructionController = withConstructionGuardDispose(createConstructionController({
-          scene,
-          camera,
-          rendererDomElement: app.renderer.domElement,
-          worldCells: constructionWorldCells,
-          config: constructionConfig,
-          editAuthority,
-          getAuthorityOrigin: getBuildAuthorityOrigin,
-          getAuthorityCounters: getBuildAuthorityCounters,
-          constructionReadyAt,
-          getTerrainRevision: () => getDigEditRevision(),
-          getInteractionMode,
-          recordEditDenial: recordConstructionEditDenial,
-        }), disposeGuard);
-      } catch (error) {
-        disposeGuard();
-        throw error;
+        probeGiIntegration?.dispose();
       } finally {
-        if (seededStorageKey) localStorage.removeItem(seededStorageKey);
+        disposeWater();
       }
-    } catch (error) {
-      console.error("[construction] failed to initialize", error);
-      if (seededStorageKey) localStorage.removeItem(seededStorageKey);
-    }
+    };
   }
-
-  const agentEnvelopeRuntime = searchParams.get("agentEnvelope") === "1"
-    ? createAgentEnvelopeRuntime(scene, searchParams)
-    : null;
 
   return {
-    ...vegetation,
-    ...waterWeather,
-    ...forestLighting,
-    hydrologySystem,
-    updateLighting,
-    drainVegetationDirtyQueue,
-    customProps,
-    constructionController,
-    agentEnvelopeRuntime,
+    ...result,
+    probeGiIntegration,
   };
 }
