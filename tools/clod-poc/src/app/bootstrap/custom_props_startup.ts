@@ -32,8 +32,17 @@ export interface CustomPropsStartupResult {
   initiallyEnabled: boolean;
 }
 
-export function customPropsInitiallyEnabled(searchParams?: URLSearchParams): boolean {
-  return searchParams?.get("customProps") === "1";
+export function customPropsInitiallyEnabled(
+  searchParams?: URLSearchParams,
+  rawLocationSearch?: string | null,
+): boolean {
+  const locationSearch = rawLocationSearch === undefined
+    ? typeof location === "undefined" ? null : location.search
+    : rawLocationSearch;
+  const explicitParams = locationSearch === null
+    ? searchParams
+    : new URLSearchParams(locationSearch);
+  return explicitParams?.get("customProps") === "1";
 }
 
 function installCustomPropQaHooks(input: CustomPropsStartupInput, propController: PropController): void {
