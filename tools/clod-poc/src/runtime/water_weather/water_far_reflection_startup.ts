@@ -31,7 +31,10 @@ export async function runWaterStartupWithFarReflection(
           ...input.waterConfig.visual,
           reflection: {
             ...input.waterConfig.visual.reflection,
-            clipmapTiers: { ...input.waterConfig.visual.reflection.clipmapTiers },
+            clipmapTiers: {
+              ...input.waterConfig.visual.reflection.clipmapTiers,
+              enabled: policy.enabled || input.waterConfig.visual.reflection.clipmapTiers.enabled,
+            },
             farSummary: policy,
           },
         },
