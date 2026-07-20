@@ -16,24 +16,24 @@ const validMeta: EnvironmentQueryMeta = {
 
 function query(overrides: Partial<EnvironmentQuery> = {}): EnvironmentQuery {
   return {
-    surfaceHeightBestEffort: vi.fn((_x, _z, hint) => ({
+    surfaceHeightBestEffort: vi.fn<EnvironmentQuery["surfaceHeightBestEffort"]>((_x, _z, hint) => ({
       height: 10,
       meta: { ...validMeta, cellSizeM: hint ?? 1 },
     })),
-    surfaceNormal: vi.fn((_x, _z, hint) => ({
+    surfaceNormal: vi.fn<EnvironmentQuery["surfaceNormal"]>((_x, _z, hint) => ({
       x: 0.3,
       y: 0.9,
       z: 0.1,
       meta: { ...validMeta, cellSizeM: hint ?? 1 },
     })),
-    materialWeights: vi.fn((_x, _z, hint) => ({
+    materialWeights: vi.fn<EnvironmentQuery["materialWeights"]>((_x, _z, hint) => ({
       grass: 0.2,
       rock: 0.5,
       sand: 0.2,
       snow: 0.1,
       meta: { ...validMeta, cellSizeM: hint ?? 1 },
     })),
-    water: vi.fn((_x, _z, hint) => ({
+    water: vi.fn<EnvironmentQuery["water"]>((_x, _z, hint) => ({
       waterY: 11,
       carvedBedY: 9,
       depth: 2,
@@ -43,7 +43,7 @@ function query(overrides: Partial<EnvironmentQuery> = {}): EnvironmentQuery {
       bodyId: 42,
       meta: { ...validMeta, source: "hydrology-cpu", cellSizeM: hint ?? 1 },
     })),
-    river: vi.fn((_x, _z, hint) => ({
+    river: vi.fn<EnvironmentQuery["river"]>((_x, _z, hint) => ({
       flowX: 1,
       flowZ: 0,
       flowStrength: 0.5,
@@ -54,7 +54,7 @@ function query(overrides: Partial<EnvironmentQuery> = {}): EnvironmentQuery {
       gravelBarMask: 0,
       meta: { ...validMeta, source: "hydrology-cpu", cellSizeM: hint ?? 1 },
     })),
-    visibility: vi.fn((_x, _z, hint) => ({
+    visibility: vi.fn<EnvironmentQuery["visibility"]>((_x, _z, hint) => ({
       sunVisibility: 1,
       meta: { ...validMeta, source: "sun-visibility-cache", cellSizeM: hint ?? 1 },
     })),
@@ -64,9 +64,9 @@ function query(overrides: Partial<EnvironmentQuery> = {}): EnvironmentQuery {
 
 function legacyAuthority(): LegacyStoneEnvironmentAuthority {
   return {
-    surfaceHeight: vi.fn(() => 20),
-    surfaceNormal: vi.fn(() => [0, 1, 0]),
-    terrainWeights: vi.fn(() => [0.4, 0.3, 0.2, 0.1]),
+    surfaceHeight: vi.fn<LegacyStoneEnvironmentAuthority["surfaceHeight"]>(() => 20),
+    surfaceNormal: vi.fn<LegacyStoneEnvironmentAuthority["surfaceNormal"]>(() => [0, 1, 0]),
+    terrainWeights: vi.fn<LegacyStoneEnvironmentAuthority["terrainWeights"]>(() => [0.4, 0.3, 0.2, 0.1]),
     waterLevel: 4,
   };
 }
@@ -105,7 +105,7 @@ describe("StoneEnvironmentSampler", () => {
 
   it("fails closed when an active authority is invalid", () => {
     const active = query({
-      water: vi.fn((_x, _z, hint) => ({
+      water: vi.fn<EnvironmentQuery["water"]>((_x, _z, hint) => ({
         waterY: 0,
         carvedBedY: 0,
         depth: 0,
