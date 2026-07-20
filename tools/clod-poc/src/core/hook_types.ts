@@ -231,8 +231,8 @@ export interface ClodHooks {
   placeConstructionPiece: ((input: PlaceConstructionPieceInput) => Promise<PlaceConstructionPieceResult>) | null;
   breakConstructionPiece: ((input: BreakConstructionPieceInput) => BreakConstructionPieceResult) | null;
   listPlacedConstructionPieces: ((limit?: number) => readonly PlacedConstructionPieceHookInfo[]) | null;
-  getCustomPropPlacementSnapshot: (() => PropPlacementScene | null) | null;
-  replaceTerrainAnchoredCustomProps: ((instances: readonly TerrainAnchoredCustomPropInput[]) => PropPlacementScene | null) | null;
+  getCustomPropPlacementSnapshot?: (() => PropPlacementScene | null) | null;
+  replaceTerrainAnchoredCustomProps?: ((instances: readonly TerrainAnchoredCustomPropInput[]) => PropPlacementScene | null) | null;
   queryEnvironmentalPropExclusion: ((input: EnvironmentalPropExclusionQuery) => EnvironmentalPropExclusionResult | null) | null;
   flushSaveRuntime: (() => Promise<void>) | null;
   getPlayableSliceSnapshot: (() => PlayableSliceSnapshot) | null;
