@@ -165,6 +165,6 @@ describe("large prop occlusion field", () => {
       revision: 3,
       fogOccupancy: 0,
     });
-    expect(field.submit(snapshot(2, [])).toBe(false));
+    expect(field.submit(snapshot(2, []))).toBe(false);
   });
 });
