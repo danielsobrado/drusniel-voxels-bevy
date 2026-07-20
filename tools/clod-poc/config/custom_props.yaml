@@ -39,7 +39,7 @@ category_budgets:
   vegetation:
     max_triangles: 12000
     max_materials: 4
-    max_draw_parts: 8
+    max_drawParts: 8
     max_texture_px: 2048
   interactive:
     max_triangles: 16000
@@ -61,7 +61,7 @@ shadows:
 large_prop_occlusion:
   enabled: true
   cell_size_m: 4
-  build_occluders_per_frame: 8
+  build_cells_per_frame: 256
   footprint_padding_m: 0.35
   minimum_height_m: 1.5
   mist_clip_strength: 0.85
