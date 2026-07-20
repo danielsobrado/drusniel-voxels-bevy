@@ -21,7 +21,7 @@ export function evaluateWaterFoamRuntimeContract(
 ): WaterFoamRuntimeContractResult {
   const failures: string[] = [];
   requireEqual(failures, "model revision", diagnostics.modelRevision, WATER_FOAM_MODEL_REVISION);
-  requireEqual(failures, "model name", diagnostics.modelName, "coherent-fbm-flow-sun-distance-v4");
+  requireEqual(failures, "model name", diagnostics.modelName, "coherent-fbm-flow-sun-distance-v5");
   requireEqual(failures, "quality tier", diagnostics.qualityTier, expectedQuality);
   requireEqual(failures, "max coverage", diagnostics.maxCoverage, WATER_FOAM_MAX_COVERAGE);
   requireEqual(failures, "pattern start", diagnostics.patternStart, WATER_FOAM_PATTERN_START);
