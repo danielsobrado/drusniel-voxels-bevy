@@ -125,6 +125,15 @@ export interface PropShadowSettings {
   maxShadowProps: number;
 }
 
+export interface PropOcclusionSettings {
+  enabled: boolean;
+  cellSizeM: number;
+  buildOccludersPerFrame: number;
+  footprintPaddingM: number;
+  minimumHeightM: number;
+  mistClipStrength: number;
+}
+
 export type PropGpuStatus = "disabled" | "unsupported" | "ring" | "fallback-cpu";
 
 export interface PropGpuSettings {
@@ -144,6 +153,7 @@ export interface CustomPropsSettings {
   spatial: PropSpatialSettings;
   culling: PropCullingSettings;
   shadows: PropShadowSettings;
+  occlusion: PropOcclusionSettings;
   gpu: PropGpuSettings;
   categoryBudgets: Record<PropCategory, PropCategoryBudget>;
   debug: PropDebugSettings;
