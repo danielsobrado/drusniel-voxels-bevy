@@ -6,12 +6,12 @@ function diagnostics(
   overrides: Partial<WaterFoamRuntimeDiagnostics> = {},
 ): WaterFoamRuntimeDiagnostics {
   return {
-    modelRevision: 4,
-    modelName: "coherent-fbm-flow-sun-distance-v4",
+    modelRevision: 5,
+    modelName: "coherent-fbm-flow-sun-distance-v5",
     qualityTier: "high",
-    maxCoverage: 0.52,
-    patternStart: 0.52,
-    patternEnd: 0.88,
+    maxCoverage: 0.68,
+    patternStart: 0.42,
+    patternEnd: 0.85,
     shoreDistanceWeight: 0.35,
     riverShoreAttenuation: 0.28,
     shadeCoverageFloor: 0.55,
@@ -48,7 +48,7 @@ describe("water foam runtime contract", () => {
   });
 
   it("rejects a stale model or wrong tier", () => {
-    const result = evaluateWaterFoamRuntimeContract("low", diagnostics({ modelRevision: 3, qualityTier: "high" }));
+    const result = evaluateWaterFoamRuntimeContract("low", diagnostics({ modelRevision: 4, qualityTier: "high" }));
 
     expect(result.passed).toBe(false);
     expect(result.failures.join("\n")).toMatch(/model revision/);
