@@ -1,4 +1,4 @@
-export const BOUNDARY_PROP_MAX_VERTICAL_DELTA_M = 2;
+export const BOUNDARY_PROP_MAX_VERTICAL_DELTA_M = 1;
 
 export const BOUNDARY_GAP_COUNTERS = [
   "ring_boundary_holes",
