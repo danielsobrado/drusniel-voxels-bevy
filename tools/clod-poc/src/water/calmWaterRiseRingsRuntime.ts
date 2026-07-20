@@ -145,7 +145,9 @@ function booleanOverride(params: URLSearchParams | null, key: string, fallback: 
 }
 
 function numberOverride(params: URLSearchParams | null, key: string, fallback: number): number {
-  const value = Number(params?.get(key));
+  const raw = params?.get(key);
+  if (raw === null || raw === undefined) return fallback;
+  const value = Number(raw);
   return Number.isFinite(value) ? value : fallback;
 }
 
