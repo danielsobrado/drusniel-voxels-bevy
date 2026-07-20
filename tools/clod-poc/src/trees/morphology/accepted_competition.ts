@@ -7,7 +7,7 @@ const PRESSURE_NORMALIZATION = 8;
 
 export interface AcceptedTreeCompetitionRecord {
   readonly identity: TreeIdentity;
-  readonly positionXZ: readonly [number, number];
+  readonly positionXZ: ReadonlyArray<number>;
   readonly crownRadiusM: number;
 }
 
@@ -110,8 +110,8 @@ function competitionInfluence(targetRadius: number, neighborRadius: number, dist
 }
 
 function normalizeRecord(record: AcceptedTreeCompetitionRecord): IndexedRecord {
-  const x = finiteOrZero(record.positionXZ[0]);
-  const z = finiteOrZero(record.positionXZ[1]);
+  const x = finiteOrZero(record.positionXZ[0] ?? 0);
+  const z = finiteOrZero(record.positionXZ[1] ?? 0);
   return {
     ...record,
     positionXZ: [x, z],
