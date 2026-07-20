@@ -181,10 +181,12 @@ export class CalmWaterRiseRingOverlay {
   update(deltaSeconds: number, cameraPosition: THREE.Vector3): void {
     if (!this.lines.visible) return;
     this.advance(deltaSeconds);
-    this.scanTimer += Math.max(0, deltaSeconds);
-    if (!this.scan && this.scanTimer >= this.settings.scanIntervalS) {
-      this.scanTimer = 0;
-      this.beginScan(cameraPosition);
+    if (!this.scan) {
+      this.scanTimer += Math.max(0, deltaSeconds);
+      if (this.scanTimer >= this.settings.scanIntervalS) {
+        this.scanTimer = 0;
+        this.beginScan(cameraPosition);
+      }
     }
     this.stepScan();
     this.writeGeometry();
