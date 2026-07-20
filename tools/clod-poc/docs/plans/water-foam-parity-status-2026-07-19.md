@@ -1,6 +1,6 @@
 # Water Foam Parity Status
 
-Date: 2026-07-19
+Date: 2026-07-20
 Scope: `tools/clod-poc`
 
 This document supersedes the foam-specific status section in
@@ -22,9 +22,10 @@ contract:
 - zero CPU foam-field samples.
 
 The remaining gap is **native headed evidence**, not another foam shader rewrite.
-PR #256 adds the missing deterministic proof that the configured distance fade
-actually produces the expected near, midpoint, and far response in HQ WebGPU,
-performance WebGPU, and WebGL.
+PR #256 is merged and provides the deterministic proof that the configured
+distance fade produces the expected near, midpoint, and far response in HQ
+WebGPU, performance WebGPU, and WebGL. Those native runs still need to be
+executed and retained before foam parity is closed.
 
 ## Delivered on `main`
 
@@ -74,11 +75,9 @@ performance WebGPU, and WebGL.
   cumulative uncaptured WebGPU error. WebGL remains on its separate browser and
   shader error authority.
 
-## Open proof
+### Deterministic distance response
 
-### PR #256 — deterministic distance response
-
-PR #256 is open and mergeable. It proves the live configured fade without moving
+PR #256 merged as `cca71dc0`. It proves the live configured fade without moving
 the camera or changing hydrology:
 
 1. discover one real rapid;
@@ -125,8 +124,8 @@ npx --prefix tools/clod-poc tsx tools/clod-poc/tools/water-foam-renderer-matrix.
   --seed=1 --world=16
 ```
 
-After PR #256 merges, the distance proof runs directly until a small package-alias
-follow-up lands:
+The distance proof currently runs directly until a small package-alias follow-up
+lands:
 
 ```bash
 npx --prefix tools/clod-poc tsx tools/clod-poc/tools/water-foam-distance-acceptance.ts \
@@ -146,7 +145,7 @@ Before marking foam parity complete, run and retain:
 2. high/low deterministic shade reports;
 3. high/low WebGL reports with `renderer.actual = webgl` and no browser errors;
 4. the four-leg renderer matrix report with exact canonical pose reuse;
-5. all three PR #256 distance-response reports after that PR merges;
+5. all three PR #256 distance-response reports;
 6. zero WebGPU uncaptured errors, zero WebGL browser/shader errors, and zero CPU
    foam-field samples in the relevant reports.
 
@@ -157,8 +156,7 @@ temporal divergence, distance response, or actual GPU/browser errors.
 
 ## Remaining implementation work
 
-After PR #256 and native evidence, foam-specific implementation should be limited
-to:
+After native evidence, foam-specific implementation should be limited to:
 
 - a small stable npm alias for the distance proof and, optionally, the renderer
   matrix;
