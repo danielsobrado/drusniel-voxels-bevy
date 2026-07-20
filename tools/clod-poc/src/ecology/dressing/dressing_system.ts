@@ -44,7 +44,10 @@ export class DressingSystem extends ExtensibleDressingSystemBase {
   private canonicalOptions: DressingSystemOptions | null = null;
 
   constructor(options: DressingSystemOptions) {
-    super(options);
+    const deferredConfig = { ...options.config, enabled: false };
+    const deferredOptions = { ...options, config: deferredConfig };
+    super(deferredOptions);
+    deferredConfig.enabled = options.config.enabled;
     this.canonicalOptions = options;
     if (options.config.enabled) {
       const center = options.unboundedWorld
