@@ -40,7 +40,9 @@ export interface WaterNormalModelInput {
 }
 
 function hash12(p: TslNode): TslNode {
-  return fract(sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453123));
+  const base: TslNode = fract(vec3(p.x, p.y, p.x).mul(vec3(0.1031, 0.1031, 0.1031)));
+  const mixed: TslNode = base.add(dot(base, base.yzx.add(33.33)));
+  return fract(mixed.x.add(mixed.y).mul(mixed.z));
 }
 
 function valueNoise(p: TslNode): TslNode {
