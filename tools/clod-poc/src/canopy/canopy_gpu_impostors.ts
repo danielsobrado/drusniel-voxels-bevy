@@ -46,6 +46,7 @@ const DEFAULT_MAX_INSTANCES = 8192;
 const DEFAULT_SAMPLE_STRIDE = 1;
 const CANOPY_IMPOSTOR_MAX_COLOR_CHANNEL = 0.42;
 const CANOPY_CROWN_CLUSTER_TRIS = 6;
+const CANOPY_CROWN_TOP_Y = 0.45;
 const CANOPY_TRANSITION_NOISE_SALT = 8101;
 const CANOPY_SHELL_NOISE_SALT = 9203;
 const TMP_OBJECT = new THREE.Object3D();
@@ -74,6 +75,12 @@ export function canopyTextureFiniteCenter(set: CanopyTextureSet): { x: number; z
     x: Number.isFinite(x) ? x : 0,
     z: Number.isFinite(z) ? z : 0,
   };
+}
+
+export function canopyCrownCenterY(canopyHeight: number, crownSize: number): number {
+  const safeHeight = Number.isFinite(canopyHeight) ? canopyHeight : 0;
+  const safeSize = Number.isFinite(crownSize) ? Math.max(0, crownSize) : 0;
+  return safeHeight - safeSize * CANOPY_CROWN_TOP_Y;
 }
 
 /**
@@ -161,7 +168,11 @@ export function updateCanopyGpuImpostorsFromTextureSet(
     const unifiedDensity = shell.coverageThreshold < DEFAULT_COVERAGE_THRESHOLD;
     const cardSize = canopyCardSize(set, config, sample, shell.coverageThreshold);
     const jitter = unifiedDensity ? canopyCardJitter(sample.x, sample.z, set.extentM / set.resolution) : { x: 0, z: 0 };
-    TMP_OBJECT.position.set(sample.x + jitter.x - center.x, sample.height, sample.z + jitter.z - center.z);
+    TMP_OBJECT.position.set(
+      sample.x + jitter.x - center.x,
+      canopyCrownCenterY(sample.height, cardSize),
+      sample.z + jitter.z - center.z,
+    );
     TMP_OBJECT.quaternion.identity();
     TMP_OBJECT.scale.set(cardSize, cardSize, cardSize);
     TMP_OBJECT.updateMatrix();
