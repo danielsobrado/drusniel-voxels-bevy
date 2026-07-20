@@ -1,0 +1,15 @@
+# Middle-distance water reflection over the coherent far-summary source.
+# Disabled until headed visual/performance acceptance is attached.
+far_summary_reflection:
+  enabled: false
+  source_resolution: 65
+  source_span_m: 1024
+  source_snap_m: 64
+  source_build_cells_per_frame: 512
+  max_steps: 6
+  start_distance_m: 12
+  max_distance_m: 320
+  step_growth: 1.65
+  thickness_m: 18
+  terrain_strength: 0.52
+  prop_strength: 0.72
