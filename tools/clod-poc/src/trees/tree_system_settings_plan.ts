@@ -33,15 +33,20 @@ export function planTreeSystemSettingsUpdate(
     patch.lod !== undefined ||
     ecologyChanged ||
     speciesChanged;
-  const farMaterialChanged = patch.render?.farCheapMaterial !== undefined &&
-    patch.render.farCheapMaterial !== current.render.farCheapMaterial;
   const debugColorChanged = patch.render?.debugColorByLod !== undefined &&
     patch.render.debugColorByLod !== current.render.debugColorByLod;
+  const gpuRenderChanged = patch.render !== undefined && (
+    patch.render.alphaTest !== current.render.alphaTest ||
+    patch.render.castShadows !== current.render.castShadows ||
+    patch.render.receiveShadows !== current.render.receiveShadows ||
+    patch.render.depthPrepass !== current.render.depthPrepass ||
+    patch.render.farCheapMaterial !== current.render.farCheapMaterial
+  );
   const shadowPolicyChanged = patch.lod?.shadowsMaxLod !== undefined &&
     patch.lod.shadowsMaxLod !== current.lod.shadowsMaxLod;
   const clearGpuRing = needsGeometry ||
     patch.gpu !== undefined ||
-    farMaterialChanged ||
+    gpuRenderChanged ||
     shadowPolicyChanged ||
     ecologyChanged ||
     speciesChanged ||
