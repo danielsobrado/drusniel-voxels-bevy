@@ -1,5 +1,5 @@
 export const WATER_NORMAL_MODEL_OPTIONS = {
-  "Fable5 FBM": "fable5",
+  "Fable5-inspired value noise": "fable5",
   "Glacial Valley noise": "glacial",
   "Legacy analytic waves": "legacy",
 } as const;
