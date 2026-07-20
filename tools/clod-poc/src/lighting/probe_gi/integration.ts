@@ -29,10 +29,10 @@ export function createProbeGiIntegration(options: ProbeGiIntegrationOptions): Pr
   const parsed = parseProbeGiConfig(options.configText ?? probeGiConfigText);
   const config = applyProbeGiQueryOverrides(parsed, options.searchParams);
   if (!config.enabled) {
-    activeIntegration?.dispose();
-    activeIntegration = null;
+    disposeActiveProbeGiIntegration();
     return null;
   }
+  if (!options.device) throw new Error("probe GI requires an active WebGPU device");
 
   const runtime = createProbeGiRuntime(
     config,
@@ -89,6 +89,11 @@ export function updateActiveProbeGiIntegration(frame: number): void {
 
 export function readActiveProbeGiIntegration(): ProbeGiIntegration | null {
   return activeIntegration;
+}
+
+export function disposeActiveProbeGiIntegration(): void {
+  activeIntegration?.dispose();
+  activeIntegration = null;
 }
 
 export function applyProbeGiQueryOverrides(

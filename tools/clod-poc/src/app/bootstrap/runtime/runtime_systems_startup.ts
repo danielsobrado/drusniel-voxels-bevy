@@ -1,6 +1,7 @@
 import {
   createCanonicalProbeGiProviders,
   createProbeGiIntegration,
+  disposeActiveProbeGiIntegration,
   type ProbeGiIntegration,
 } from "../../../lighting/probe_gi/index.js";
 import {
@@ -23,6 +24,13 @@ export async function runRuntimeSystemsStartup(
 ): Promise<RuntimeSystemsStartupResult> {
   const result = await runRuntimeSystemsStartupBase(input);
   let probeGiIntegration: ProbeGiIntegration | null = null;
+  if (!input.isWebGpu) {
+    disposeActiveProbeGiIntegration();
+    const requested = input.searchParams.get("probeGi");
+    if (requested === "1" || requested === "true") {
+      console.warn("[probe-gi] probeGi=1 ignored because WebGPU is unavailable");
+    }
+  }
   try {
     if (input.isWebGpu) {
       probeGiIntegration = createProbeGiIntegration({
