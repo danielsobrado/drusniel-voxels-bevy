@@ -40,6 +40,7 @@ export function installBrowserQaHook(): DrusnielQaHook {
       runtime().setAcceptanceSceneOptions?.({
         freeze: state.freeze ?? frozen,
         proceduralDebug: state.proceduralDebug,
+        farClipmapDebug: state.farClipmapDebug,
       });
       if (state.freeze !== undefined) frozen = state.freeze;
       await nextFrame();
@@ -106,10 +107,21 @@ export function installBrowserQaHook(): DrusnielQaHook {
     },
     endSequence: async () => {
       sequenceClock = null;
+      runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "final", proceduralDebug: "final" });
       runtime().setQaDiagnosticBuffer?.("final");
       await settleRuntime(runtime(), 1);
     },
     captureDiagnosticBuffer: async (kind) => {
+      if (kind === "ownership" || kind === "coverage") {
+        runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "ownership" });
+        await settleRuntime(runtime(), 1);
+        const canvas = document.querySelector("canvas");
+        if (!(canvas instanceof HTMLCanvasElement)) throw new Error("render canvas is missing");
+        const dataUrl = canvas.toDataURL("image/png");
+        runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "final" });
+        await settleRuntime(runtime(), 1);
+        return dataUrl;
+      }
       const setBuffer = runtime().setQaDiagnosticBuffer;
       if (!setBuffer) throw new Error("runtime diagnostic-buffer capture is unavailable");
       setBuffer(kind);
@@ -124,6 +136,11 @@ export function installBrowserQaHook(): DrusnielQaHook {
       return dataUrl;
     },
     setDiagnosticBuffer: async (kind) => {
+      if (kind === "ownership" || kind === "coverage") {
+        runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "ownership" });
+        await settleRuntime(runtime(), 1);
+        return;
+      }
       const setBuffer = runtime().setQaDiagnosticBuffer;
       if (!setBuffer) throw new Error("runtime diagnostic-buffer capture is unavailable");
       setBuffer(kind);
@@ -137,8 +154,8 @@ export function installBrowserQaHook(): DrusnielQaHook {
         if (pose) runtime().resetAcceptanceSceneForPose?.(pose);
       }
       else if (action === "streaming-on") runtime().setTerrainStreamingEnabled?.(true);
-      else if (action === "ownership-debug") runtime().setAcceptanceSceneOptions?.({ proceduralDebug: "ownership" });
-      else runtime().setAcceptanceSceneOptions?.({ proceduralDebug: "final" });
+      else if (action === "ownership-debug") runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "ownership" });
+      else runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "final", proceduralDebug: "final" });
       await settleRuntime(runtime(), 1);
     },
   };

@@ -23,6 +23,7 @@ export interface AcceptanceStreamBudgets {
 export interface AcceptanceSceneOptions {
   freeze?: boolean;
   proceduralDebug?: string | null;
+  farClipmapDebug?: "final" | "biome" | "height" | "ownership" | null;
   /** Live stream budgets for pre-route convergence boost; restores via a second call. */
   streamBudgets?: Partial<AcceptanceStreamBudgets>;
 }
@@ -256,7 +257,7 @@ export interface ClodHooks {
     options?: ContinentRiverRouteSearchOptions,
   ) => ContinentRiverCrossingRoute | null) | null;
   setAcceptanceSceneOptions: ((options: AcceptanceSceneOptions) => AcceptanceStreamBudgets | void) | null;
-  setQaDiagnosticBuffer: ((kind: "final" | "depth") => void) | null;
+  setQaDiagnosticBuffer: ((kind: "final" | "depth" | "ownership" | "coverage") => void) | null;
   resetAcceptanceScene: (() => void) | null;
   resetAcceptanceSceneForPose: ((pose: CamPose) => void) | null;
 }

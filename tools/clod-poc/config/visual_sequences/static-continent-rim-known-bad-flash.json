@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "static-continent-rim",
+  "id": "static-continent-rim-known-bad-flash",
   "mode": "static",
   "frames": 8,
-  "warmupFrames": 240,
+  "warmupFrames": 30,
   "stepSeconds": 0.0166666667,
   "scene": "continent",
   "seed": 1,
@@ -12,19 +12,13 @@
   "query": { "world": "4", "acceptance": "1", "farClipmap": "1", "farClipmapMode": "replace", "liveBubble": "1", "liveBubbleRadius": "200", "liveBubbleColliderRadius": "160", "liveClodRootRadius": "384", "oceanRim": "1", "worldRadius": "16384", "continentHydrology": "0", "liveClodRootGpuMesher": "0" },
   "captureDepth": true,
   "maskSources": ["sky-exclude"],
+  "eventFrame": 3,
+  "eventName": "forced-ownership-flash",
+  "eventAction": "ownership-debug",
   "thresholds": {
     "meanLuma": 0.0002,
     "maxP95Luma": 0.001,
     "maxChangedRatio": 0.001,
-    "popEvents": 0,
-    "minMaskCoverage": 0.2,
-    "counterMax": {
-      "live_clod_gap_holes": 0,
-      "clod_far_gap_holes": 0,
-      "live_clod_overlap_cells": 0,
-      "clod_far_overlap_cells": 0,
-      "priority_owner_overlap_cells": 0,
-      "far_clipmap_ownership_holes": 0
-    }
+    "popEvents": 0
   }
 }

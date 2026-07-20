@@ -8,6 +8,7 @@ export interface ReprojectionInput {
   previousViewProjection: readonly number[];
   currentViewProjectionInverse: readonly number[];
   depthTolerance?: number;
+  evaluationMask?: Uint8Array;
 }
 
 export interface ReprojectionResult {
@@ -29,6 +30,7 @@ export function reprojectedResidual(input: ReprojectionInput): ReprojectionResul
   let valid = 0;
   for (let y = 0; y < currentColor.height; y++) for (let x = 0; x < currentColor.width; x++) {
     const p = y * currentColor.width + x;
+    if (input.evaluationMask && input.evaluationMask[p] === 0) continue;
     const depth = input.currentDepth[p]!;
     if (!(depth >= 0 && depth <= 1)) continue;
     // The sequence harness is WebGPU-only, whose camera projection uses zero-to-one clip depth.

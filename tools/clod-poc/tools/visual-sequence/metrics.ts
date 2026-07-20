@@ -86,6 +86,7 @@ export function detectPopComponents(
   frame: number,
   deltaThreshold = 0.12,
   minArea = 2,
+  mask?: Uint8Array,
 ): PopComponent[] {
   assertCompatible(previous, current);
   const width = current.width;
@@ -94,6 +95,7 @@ export function detectPopComponents(
   const hot = new Uint8Array(width * height);
   const delta = new Float32Array(width * height);
   for (let p = 0; p < hot.length; p++) {
+    if (mask && mask[p] === 0) continue;
     const offset = p * channels;
     const d = Math.max(
       Math.abs((current.data[offset] ?? 0) - (previous.data[offset] ?? 0)),

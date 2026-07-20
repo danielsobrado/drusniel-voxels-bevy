@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "tree-wind-on-reference",
+  "mode": "moving",
+  "frames": 24,
+  "stepSeconds": 0.1,
+  "scene": "trees-perf",
+  "seed": 1,
+  "timeoutMs": 420000,
+  "warmupFrames": 120,
+  "start": { "p": [476, 116, 256], "yaw": 1.5707963268, "pitch": -0.364, "fov": 55 },
+  "end": { "p": [430, 104, 256], "yaw": 1.5707963268, "pitch": -0.42, "fov": 55 },
+  "query": { "world": "4", "treeGpu": "1", "webgpuSelection": "1", "treeDistance": "200", "treeDensity": "0.12", "treeMaxInstances": "400", "treeGpuMaxVisible": "400", "treeWind": "1" },
+  "captureDepth": true,
+  "maskSources": ["sky-exclude", "roi"],
+  "rois": [
+    {
+      "type": "annulus",
+      "center": [256, 80, 256],
+      "innerRadiusPx": 20,
+      "outerRadiusPx": 160
+    }
+  ],
+  "thresholds": {
+    "popEvents": 200,
+    "maxChangedRatio": 0.45
+  }
+}

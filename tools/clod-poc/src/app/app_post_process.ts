@@ -5,6 +5,6 @@ export interface AppPostProcess {
   render(scene: THREE.Scene, camera: THREE.Camera): void;
   setSize(width: number, height: number): void;
   updateSettings(settings: Partial<PostProcessSettings>): void;
-  setQaDiagnosticBuffer?(kind: "final" | "depth"): void;
+  setQaDiagnosticBuffer?(kind: "final" | "depth" | "ownership" | "coverage"): void;
   dispose(): void;
 }

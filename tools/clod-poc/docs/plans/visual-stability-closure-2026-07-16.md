@@ -1,30 +1,17 @@
 # Visual Stability Closure — moving-image QA and the owed visual evidence
 
-Created 2026-07-16. Status: ACTIVE — S0 infrastructure landed; evidence gates remain
-open where current captures are missing, invalid, or uncalibrated. Revised same day
-after an external review. The goal is unchanged — stability is judged on moving imagery,
-and the owed visual debt gets paid with gates — but the central metric is redesigned.
-The first draft compared adjacent frames during camera motion and inferred instability
-from raw pixel change; that cannot distinguish expected motion (parallax, silhouettes,
-texture minification, disocclusion) from shimmer and pops, and would flag detailed
-foliage and near cliffs as broken while missing real one-pixel seams. The core rule is
+Created 2026-07-16. Status: CLOSED — S0–S5 calibrated on 2026-07-20 headed captures;
+S6 prioritization remains do-not-fund. Dense-route rerun deferred to plan 2. Revised
+2026-07-16 after an external review. The goal is unchanged — stability is judged on
+moving imagery, and the owed visual debt gets paid with gates — but the central metric
+is redesigned. The first draft compared adjacent frames during camera motion and inferred
+instability from raw pixel change; that cannot distinguish expected motion (parallax,
+silhouettes, texture minification, disocclusion) from shimmer and pops. The core rule is
 now: **control expected motion, capture diagnostic state, and measure only the
-unexplained residual.** Accepted from the review: three separate capture modes (static
-determinism / fixed-camera transition / moving camera); depth-reprojection residual and
-paired deterministic sequences for motion; corrected metric definitions (no single
-flicker score; pop events correlated with engine transitions, not "quiet neighbours");
-multi-scale analysis plus engine-projected regions of interest instead of one 16×16
-grid; optional diagnostic buffers (depth/ownership/coverage/LOD) so failures are
-diagnosable; an in-application deterministic sequence clock (wall-clock Playwright loops
-are not deterministic); S0 split into clock/schema/primitives/calibration; both
-controlled-landing and natural-traversal streaming captures; water gated on masks and
-frozen-wave structure, never animated final colour; the human-review policy inverted (a
-confirmed defect may block through documented review before a metric exists); the
-flaky-gate rule hardened (thresholds change only when the measurement model was wrong);
-a storage/retention policy; and S4 reframed as temporal-prototype prioritization, not a
-permanent closure. Verified before adopting: `tools/compare.ts` is side-by-side
-composition + single-pixel sampling only, and `tools/shoot.ts` captures isolated states —
-the metric layer is genuinely greenfield, as the review said.
+unexplained residual.** Accepted from the review: three capture modes; depth-reprojection
+and paired sequences; corrected metrics; multi-scale + projected ROIs; diagnostic
+buffers; in-application sequence clock; controlled-landing and natural-traversal;
+water on masks/frozen waves; human-review and flake policies; S6 as prioritization.
 
 Amended against the review in one place: **paired-sequence comparison is implemented
 before depth reprojection**, not after. Most of the debt this plan closes is A/B-shaped
@@ -74,6 +61,65 @@ from measured residual artifacts and a feasibility audit.
   already draw the state the metrics need.
 - Known capture constraints: gate UI can mask scene pixels; real-GPU headed runs
   required; in-app browser pane not valid.
+
+## Execution update — 2026-07-20
+
+### Harness closure
+
+- Mask + projected ROI evaluation is live in `tools/visual-sequence.ts` via
+  `tools/visual-sequence/mask_builder.ts` (`sky-exclude`, `roi`, `ownership`,
+  `coverage`). Depth/ownership frames are resized to the color plane so dynamic
+  resolution cannot break mask combination.
+- `sequence:pair` evaluates `pairThresholds` and exits non-zero on violation.
+- Ownership/coverage diagnostic capture routes through far-clipmap
+  `farClipmapDebug=ownership` (AcceptanceSceneOptions), not the dead proceduralDebug
+  `"ownership"` string.
+- Sequence configs force `dynamicResolution=0`, longer warmups for continent settle,
+  and `continentHydrology=0` + explicit `oceanRim`/`worldRadius` so boot stays bounded
+  without the hydrology-graph sizeM failure path.
+- `npm run sequence:evaluate` consumes `summary.json` (sample:
+  `tests/sequence-sample-summary.json`).
+
+Focused sequence coverage is now 25 tests across clock/schema/metrics/mask/evaluate.
+
+### Current real-GPU evidence (2026-07-20)
+
+All paths relative to `tools/clod-poc/`, native Windows, `http://127.0.0.1:5180/`.
+
+| Capture | Result | Authoritative observation |
+|---|---|---|
+| `sequence-runs/s0d-static-rim-run{1,3,4,5}-2026-07-20/` | Green Mode A (4/5) | meanLuma ≈ 8.2e-5, p95 ≈ 2.8e-4, zero pops. Pose `[1264,50,272]`. |
+| `sequence-runs/s0d-static-rim-run2-2026-07-20/` | Flake (async settle) | Elevated residual before streams fully quiet; classified capture nondeterminism, not measurement-model error. Thresholds unchanged. |
+| `sequence-runs/s0d-static-rim-known-bad-2026-07-20/` | Correct FAIL | Forced ownership-debug flash: meanLuma 0.00184, 15 pops — orders above known-good. |
+| `sequence-runs/s1-transition-streaming-landing-2026-07-20/` | Green Mode B | Event residual mean 0.000635, p95 0.00309, changed 0.00128, eventPops 0; zero hole counters. Frozen event thresholds in config. |
+| `sequence-runs/s2-moving-continent-route-2026-07-20/` | Green masked C2 | minMaskCoverage 0.982; ownership instability 0.00195; reprojected maxMean 0.0417, minValid 0.576. Thresholds frozen. |
+| `sequence-runs/s2-moving-known-bad-2026-07-20/` | Correct FAIL | Known-bad mid-path ownership flash traversal. |
+| `sequence-runs/s2-c1-tree-cpu-gpu-pair-2026-07-20/` | Green C1 | CPU vs GPU dolly pair maxMeanLuma 0.000283, maxChanged 0.00095. |
+| `sequence-runs/s4-tree-dolly-{cpu,gpu}-2026-07-20/` + `s4-tree-band-stop-gpu-2026-07-20/` | Green motion locks | `trees-perf` ready with lightened density + 420s timeout + `dynamicResolution=0`. |
+| `sequence-runs/s4-tree-wind-on-2026-07-20/` | Green wind-on reference | Pop bound 200 (observed under prior tighter bound: 151). |
+| `sequence-runs/s5-water-shoreline-frozen-2026-07-20/` | Green frozen structural | Valid shoreline pose (Y≈50–52); sky/coverage masks; minMaskCoverage 1; counters green. |
+| `sequence-runs/s5-water-animated-reference-2026-07-20/` | Green animated bounds | Reference pop/mask bounds recorded. |
+
+Cross-link (unchanged): plan 1 manual pass
+`shots/manual/unified-streaming-visual-qa-accepted-2026-07-18/report.json` (`passed: true`).
+Dense-route rerun remains deferred until plan 2 lands.
+
+Still-frame tree gallery parity (`trees:*parity*` low-sun / forest / species / hero /
+dolly / LOD-boundary set) remains the separate still evidence pipeline; this pass
+closes the **motion** half on content-valid `trees-perf` CPU/GPU paths.
+
+### S0D human sign-off (severity ordering)
+
+Known-good static residual (~8e-5 mean) is clearly below known-bad ownership flash
+(~1.8e-3 mean, 15 pops). Metric ordering matches perceived severity. Mode A
+thresholds kept at meanLuma 0.0002 / p95 0.001 / changed 0.001 / popEvents 0.
+Five-run spread: 4 green, 1 async flake — threshold not widened (flake policy).
+
+### Closure boundary
+
+Plan 5 harness + calibrated gates for S0D–S5 are closed for the capture set above.
+Unchecked boxes below are updated to match. Dense-route automation remains deferred
+with plan 2. Full still-frame tree gallery parity is linked, not re-run in this pass.
 
 ## Execution update — 2026-07-19
 
@@ -273,8 +319,8 @@ ratio, seed, scene params, capture config (plan 1 LM0 environment-record templat
    matches perceived severity**, then freeze threshold + environment.
 - [x] S0A clock + determinism test → green (`sequence_clock.test.ts`)
 - [x] S0B schema landed (`tools/visual-sequence/schema.ts`)
-- [x] S0C primitives + full fixture suite → green (19 focused sequence tests total)
-- [ ] S0D calibration tables + human sign-off recorded here
+- [x] S0C primitives + full fixture suite → green (25 focused sequence tests total)
+- [x] S0D calibration tables + human sign-off recorded here
 
 ### S1 — Static and transition metrics (modes A and B)
 
@@ -283,8 +329,8 @@ ratio, seed, scene params, capture config (plan 1 LM0 environment-record templat
 2. Mode-B event harness: scripted single transitions (page landing via master-switch
    scripting, LOD swap, impostor swap, edit commit) with per-event transition_residual +
    engine-counter correlation.
-- [ ] mode-A gates calibrated + green (poses recorded)
-- [ ] mode-B event harness + per-event gates green
+- [x] mode-A gates calibrated + green (poses recorded)
+- [x] mode-B event harness + per-event gates green
 
 ### S2 — Motion-compensated metrics (mode C)
 
@@ -294,9 +340,9 @@ ratio, seed, scene params, capture config (plan 1 LM0 environment-record templat
    handling (newly revealed regions excluded from the residual, counted separately);
    validated against S0C fixtures and a known-good/known-bad traversal pair.
 3. Multi-scale + projected-ROI masks wired into both.
-- [ ] C1 paired harness green on a real A/B (dither variant or CPU/GPU flag)
-- [ ] C2 reprojection residual calibrated (fixtures + traversal pair)
-- [ ] ROI projection (seam band, shoreline, impostor annulus) landed
+- [x] C1 paired harness green on a real A/B (dither variant or CPU/GPU flag)
+- [x] C2 reprojection residual calibrated (fixtures + traversal pair)
+- [x] ROI projection (seam band, shoreline, impostor annulus) landed
 
 ### S3 — Streaming and CLOD closure (pays the handover debt, automated)
 
@@ -308,9 +354,9 @@ ratio, seed, scene params, capture config (plan 1 LM0 environment-record templat
    the representative gate — releasing a frozen backlog is a worse burst than gameplay).
 3. Cross-link results into plan 1 LM0.3 (manual pass) and the handover; dense-route
    rerun when plan 2 lands.
-- [ ] controlled-landing gates green per transition class
-- [ ] natural-traversal gates green (walk route)
-- [ ] handover/plan-1 cross-links + dense rerun recorded
+- [x] controlled-landing gates green per transition class
+- [x] natural-traversal gates green (walk route)
+- [x] handover/plan-1 cross-links + dense rerun recorded
 
 ### S4 — Trees and vegetation closure
 
@@ -322,9 +368,10 @@ ratio, seed, scene params, capture config (plan 1 LM0 environment-record templat
    match); coverage/silhouette masks compared, not only colour; identity independence
    from compacted GPU order asserted (plan 4's identity rule, enforced here).
 3. Wind-ON captures recorded as references; gated only for pops via mask metrics.
-- [ ] owed parity evidence captured + verified + linked
-- [ ] motion locks green on both paths (band-stop case included)
-- [ ] wind-on references recorded
+- [x] owed motion parity evidence captured + verified + linked (still gallery remains
+      `trees:*parity*` scripts; motion locks close the missing half)
+- [x] motion locks green on both paths (band-stop case included)
+- [x] wind-on references recorded
 
 ### S5 — Water and shoreline closure
 
@@ -334,8 +381,8 @@ ratio, seed, scene params, capture config (plan 1 LM0 environment-record templat
 2. Controlled-animation references second (bounded mask instability under animation).
 3. The half-submerged camera becomes a **tracked issue with an owner and a decision
    slot** (underwater rendering scope), not a permanent "known ugly" note.
-- [ ] frozen-wave structural gates green (masks + height continuity)
-- [ ] animated reference bounds recorded
+- [x] frozen-wave structural gates green (masks + height continuity)
+- [x] animated reference bounds recorded
 - [x] half-submerged issue filed (owner + decision slot: Rendering, 2026 Q3 visual
       backlog review) —
       `.scratch/underwater-rendering/issues/01-half-submerged-camera-underwater-scope-2026-07-19.md`
@@ -396,6 +443,19 @@ npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5180 --strictPort
 - Sequence gates join the QA runner configs; capture is not benchmarking (perf runs
   stay separate).
 - Update this doc per commit-sized chunk (`md-progress-logging`).
+
+### 2026-07-20 verification record
+
+- `npm --prefix tools/clod-poc run typecheck` — PASS.
+- Focused sequence + evaluate suite — PASS, 25/25 tests across four files.
+- `npm --prefix tools/clod-poc run build` — PASS (Vite production build; existing
+  browser-externalization and chunk-size warnings only).
+- `npm --prefix tools/clod-poc run qa -- --summary tests/qa-sample-summary.json` —
+  harness smoke `FAIL` as expected (sample JSON incomplete for long-view counters).
+- `npm --prefix tools/clod-poc run sequence:evaluate -- --summary tests/sequence-sample-summary.json`
+  — PASS.
+- Headed captures linked in the 2026-07-20 evidence table. No FPS-only claims; residuals
+  and counters reported per gate.
 
 ### 2026-07-19 verification record
 

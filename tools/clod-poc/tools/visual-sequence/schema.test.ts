@@ -27,4 +27,22 @@ describe("visual sequence schema", () => {
   it("rejects negative metric thresholds", () => {
     expect(() => validateVisualSequenceConfig({ ...config, thresholds: { meanLuma: -1 } })).toThrow(/non-negative/);
   });
+
+  it("accepts rois, maskSources, and pair thresholds", () => {
+    expect(validateVisualSequenceConfig({
+      ...config,
+      maskSources: ["sky-exclude", "roi", "ownership"],
+      rois: [
+        { type: "polyline", points: [[0, 10, 0], [20, 10, 0]], radiusPx: 4 },
+        { type: "annulus", center: [10, 12, 10], innerRadiusPx: 8, outerRadiusPx: 20 },
+      ],
+      pairThresholds: { maxMeanLuma: 0.05, maxChangedRatio: 0.1 },
+      thresholds: { minMaskCoverage: 0.2, maxMaskInstability: 0.01 },
+      timeoutMs: 300_000,
+    })).toMatchObject({ id: "static-rim", timeoutMs: 300_000 });
+  });
+
+  it("rejects unknown maskSources", () => {
+    expect(() => validateVisualSequenceConfig({ ...config, maskSources: ["albedo"] })).toThrow(/maskSources/);
+  });
 });

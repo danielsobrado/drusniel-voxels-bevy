@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "static-continent-rim-sample",
+  "mode": "static",
+  "frameCount": 8,
+  "static_temporal_variance": {
+    "meanLuma": 0.00009,
+    "maxP95Luma": 0.00028,
+    "maxChangedRatio": 0.00008
+  },
+  "popEvents": 0,
+  "gateViolations": [],
+  "passed": true
+}

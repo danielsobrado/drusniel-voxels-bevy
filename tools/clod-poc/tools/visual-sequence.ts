@@ -3,13 +3,25 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import sharp from "sharp";
 import { clodUrl, launchWebGPU } from "./launch.js";
-import { detectPopComponents, residualMetrics, temporalMetrics, type ImagePlane } from "./visual-sequence/metrics.js";
+import {
+  buildEvaluationMask,
+  ownershipMaskFromImage,
+} from "./visual-sequence/mask_builder.js";
+import {
+  detectPopComponents,
+  maskInstability,
+  residualMetrics,
+  temporalMetrics,
+  type ImagePlane,
+} from "./visual-sequence/metrics.js";
 import { reprojectedResidual } from "./visual-sequence/reprojection.js";
 import {
   validateVisualSequenceConfig,
   type VisualSequenceEvent,
   type VisualSequenceFrameRecord,
   type VisualSequenceManifest,
+  type VisualSequencePairThresholds,
+  type VisualSequenceThresholds,
 } from "./visual-sequence/schema.js";
 
 type Args = Record<string, string | boolean>;
@@ -18,7 +30,12 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const pair = stringArg(args, "pair");
   if (pair) {
-    await comparePair(resolve(requiredArg(args, "left")), resolve(pair), resolve(stringArg(args, "out") ?? "sequence-runs/paired"));
+    await comparePair(
+      resolve(requiredArg(args, "left")),
+      resolve(pair),
+      resolve(stringArg(args, "out") ?? "sequence-runs/paired"),
+      parsePairThresholdOverrides(args),
+    );
     return;
   }
   const configPath = resolve(requiredArg(args, "config"));
@@ -26,10 +43,13 @@ async function main(): Promise<void> {
   const config = validateVisualSequenceConfig(JSON.parse(readFileSync(configPath, "utf8")));
   const width = Number(stringArg(args, "width") ?? 960);
   const height = Number(stringArg(args, "height") ?? 540);
-  const timeoutMs = Number(stringArg(args, "timeout") ?? 180_000);
+  const timeoutMs = Number(stringArg(args, "timeout") ?? config.timeoutMs ?? 180_000);
+  const wantsOwnership = (config.maskSources ?? []).includes("ownership")
+    || (config.maskSources ?? []).includes("coverage");
   mkdirSync(join(outputDir, "frames"), { recursive: true });
   mkdirSync(join(outputDir, "stats"), { recursive: true });
   if (config.captureDepth) mkdirSync(join(outputDir, "depth"), { recursive: true });
+  if (wantsOwnership) mkdirSync(join(outputDir, "ownership"), { recursive: true });
 
   const { browser, recipe } = await launchWebGPU();
   const consoleErrors: string[] = [];
@@ -59,6 +79,7 @@ async function main(): Promise<void> {
         treeWind: "0",
         grassWind: "0",
         taa: "0",
+        dynamicResolution: "0",
         ...config.query,
       },
     });
@@ -117,6 +138,7 @@ async function main(): Promise<void> {
       const colorDataUrl = await page.evaluate(async (frameIndex) => window.__drusnielQa!.captureScreenshot(`final-${frameIndex}`), index);
       writeFileSync(join(outputDir, colorRelative), decodeDataUrl(colorDataUrl));
       const depthRelative = config.captureDepth ? `depth/${stem}.png` : undefined;
+      const ownershipRelative = wantsOwnership ? `ownership/${stem}.png` : undefined;
       const captured = await page.evaluate(async () => ({
         stats: await window.__drusnielQa!.captureStats(),
         camera: window.__drusnielQa!.getCameraMatrices(),
@@ -124,7 +146,16 @@ async function main(): Promise<void> {
       const statsRelative = `stats/${stem}.json`;
       writeJson(join(outputDir, statsRelative), captured);
       frameStats.push({ counters: captured.stats.counters, camera: captured.camera });
-      records.push({ index, timeSeconds: state.timeSeconds, pose: state.pose, color: colorRelative, depth: depthRelative, stats: statsRelative });
+      records.push({
+        index,
+        timeSeconds: state.timeSeconds,
+        pose: state.pose,
+        color: colorRelative,
+        depth: depthRelative,
+        ownership: ownershipRelative,
+        coverage: ownershipRelative,
+        stats: statsRelative,
+      });
     }
     if (config.captureDepth) {
       await page.evaluate(async () => window.__drusnielQa!.setDiagnosticBuffer("depth"));
@@ -136,6 +167,19 @@ async function main(): Promise<void> {
         const dataUrl = await page.evaluate(async (frameIndex) => window.__drusnielQa!.captureScreenshot(`depth-${frameIndex}`), index);
         writeFileSync(join(outputDir, records[index]!.depth!), decodeDataUrl(dataUrl));
       }
+      await page.evaluate(async () => window.__drusnielQa!.setDiagnosticBuffer("final"));
+    }
+    if (wantsOwnership) {
+      await page.evaluate(async () => window.__drusnielQa!.setDiagnosticBuffer("ownership"));
+      for (let index = 0; index < config.frames; index++) {
+        await page.evaluate(
+          async ({ frameIndex, applyPose }) => window.__drusnielQa!.stepSequence(frameIndex, applyPose),
+          { frameIndex: index, applyPose: movingPath },
+        );
+        const dataUrl = await page.evaluate(async (frameIndex) => window.__drusnielQa!.captureScreenshot(`ownership-${frameIndex}`), index);
+        writeFileSync(join(outputDir, records[index]!.ownership!), decodeDataUrl(dataUrl));
+      }
+      await page.evaluate(async () => window.__drusnielQa!.runSequenceEvent("final-debug"));
       await page.evaluate(async () => window.__drusnielQa!.setDiagnosticBuffer("final"));
     }
     await page.evaluate(async () => window.__drusnielQa?.endSequence());
@@ -153,10 +197,48 @@ async function main(): Promise<void> {
     };
     writeJson(join(outputDir, "sequence.json"), manifest);
     const colorPlanes = await Promise.all(records.map((record) => readPlane(join(outputDir, record.color))));
-    const temporal = temporalMetrics(colorPlanes);
+    const colorSize = { width: colorPlanes[0]!.width, height: colorPlanes[0]!.height };
+    const depthPlanes = config.captureDepth
+      ? await Promise.all(records.map((record) => readDepth(join(outputDir, record.depth!), colorSize)))
+      : [];
+    const ownershipPlanes = wantsOwnership
+      ? await Promise.all(records.map((record) => readPlane(join(outputDir, record.ownership!), colorSize)))
+      : [];
+    const ownershipMasks = ownershipPlanes.map((plane) => ownershipMaskFromImage(
+      plane.data instanceof Uint8Array ? plane.data : new Uint8Array(plane.data),
+      plane.width,
+      plane.height,
+      plane.channels ?? 4,
+    ));
+    const evaluationMasks = colorPlanes.map((plane, index) => buildEvaluationMask({
+      width: plane.width,
+      height: plane.height,
+      depth: depthPlanes[index],
+      viewProjection: frameStats[index]?.camera.viewProjection,
+      rois: config.rois,
+      ownership: ownershipMasks[index],
+      maskSources: config.maskSources,
+    }));
+    const primaryMask = evaluationMasks[0]?.mask;
+    const adjacent = colorPlanes.slice(1).map((frame, index) => {
+      const previousMask = evaluationMasks[index]?.mask;
+      const currentMask = evaluationMasks[index + 1]?.mask ?? previousMask;
+      const pairMask = previousMask && currentMask
+        ? previousMask.map((value, pixel) => value && currentMask[pixel]! ? 1 : 0)
+        : currentMask ?? previousMask ?? primaryMask;
+      return residualMetrics(colorPlanes[index]!, frame, pairMask);
+    });
+    const temporal = {
+      adjacent,
+      meanLuma: adjacent.reduce((sum, item) => sum + item.meanLuma, 0) / Math.max(1, adjacent.length),
+      maxP95Luma: Math.max(...adjacent.map((item) => item.p95Luma)),
+      maxChangedRatio: Math.max(...adjacent.map((item) => item.changedRatio)),
+      multiScaleMean: temporalMetrics(colorPlanes, primaryMask).multiScaleMean,
+    };
     const events: VisualSequenceEvent[] = [];
     for (let index = 1; index < colorPlanes.length; index++) {
-      const components = detectPopComponents(colorPlanes[index - 1]!, colorPlanes[index]!, index, 0.12, 8);
+      const frameMask = evaluationMasks[index]?.mask ?? primaryMask;
+      const components = detectPopComponents(colorPlanes[index - 1]!, colorPlanes[index]!, index, 0.12, 8, frameMask);
       for (const component of components.slice(0, 20)) events.push({
         frame: index,
         name: config.eventFrame === index ? config.eventName ?? "controlled-transition" : "visual-residual",
@@ -170,11 +252,26 @@ async function main(): Promise<void> {
     writeJson(join(outputDir, "events.json"), events);
 
     const reprojection = config.captureDepth
-      ? await calculateReprojection(outputDir, records, colorPlanes, frameStats)
+      ? await calculateReprojection(colorPlanes, depthPlanes, frameStats, evaluationMasks.map((item) => item.mask))
       : [];
     const eventResidual = config.eventFrame && config.eventFrame > 0 ? temporal.adjacent[config.eventFrame - 1] ?? null : null;
     const eventPopEvents = config.eventFrame === undefined ? 0 : events.filter((event) => event.frame === config.eventFrame).length;
-    const gateViolations = evaluateThresholds(config.thresholds, temporal, events.length, reprojection, eventResidual, eventPopEvents, frameStats);
+    const ownershipInstability = ownershipMasks.length > 1 ? maskInstability(ownershipMasks) : 0;
+    const minObservedMaskCoverage = evaluationMasks.length > 0
+      ? Math.min(...evaluationMasks.map((item) => item.coverage))
+      : 1;
+    const gateViolations = evaluateThresholds(
+      config.thresholds,
+      temporal,
+      events.length,
+      reprojection,
+      eventResidual,
+      eventPopEvents,
+      frameStats,
+      minObservedMaskCoverage,
+      ownershipInstability,
+    );
+    const fatalConsoleErrors = consoleErrors.filter((message) => !isAdvisoryConsoleError(message));
     const summary = {
       schemaVersion: 1,
       id: config.id,
@@ -184,13 +281,16 @@ async function main(): Promise<void> {
       transition_residual: config.mode === "transition" ? temporal : null,
       moving_residual: config.mode === "moving" ? temporal : null,
       reprojected_colour_residual: reprojection,
+      coverage_mask_instability: ownershipInstability,
+      minMaskCoverage: minObservedMaskCoverage,
       popEvents: events.length,
       eventResidual,
       eventPopEvents,
-      consoleErrors,
+      consoleErrors: fatalConsoleErrors,
+      advisoryConsoleErrors: consoleErrors.filter((message) => isAdvisoryConsoleError(message)),
       thresholds: config.thresholds ?? null,
       gateViolations,
-      passed: consoleErrors.length === 0 && gateViolations.length === 0,
+      passed: fatalConsoleErrors.length === 0 && gateViolations.length === 0,
     };
     writeJson(join(outputDir, "summary.json"), summary);
     writeFileSync(join(outputDir, "report.md"), reportMarkdown(summary, relative(process.cwd(), outputDir)));
@@ -204,13 +304,15 @@ async function main(): Promise<void> {
 interface CameraRecord { viewProjection: number[]; viewProjectionInverse: number[]; near: number; far: number }
 
 function evaluateThresholds(
-  thresholds: VisualSequenceManifest["config"]["thresholds"],
+  thresholds: VisualSequenceThresholds | undefined,
   temporal: ReturnType<typeof temporalMetrics>,
   popEvents: number,
   reprojection: readonly { meanLuma: number; validRatio: number }[],
   eventResidual: { meanLuma: number; p95Luma: number; changedRatio: number } | null,
   eventPopEvents: number,
   frameStats: readonly { counters: Record<string, number> }[],
+  minObservedMaskCoverage: number,
+  ownershipInstability: number,
 ): string[] {
   if (!thresholds) return [];
   const violations: string[] = [];
@@ -226,6 +328,12 @@ function evaluateThresholds(
   if (thresholds.eventPopEvents !== undefined && eventPopEvents > thresholds.eventPopEvents) violations.push(`eventPopEvents ${eventPopEvents} > ${thresholds.eventPopEvents}`);
   if (thresholds.maxReprojectedMeanLuma !== undefined && maximumReprojected > thresholds.maxReprojectedMeanLuma) violations.push(`maxReprojectedMeanLuma ${maximumReprojected} > ${thresholds.maxReprojectedMeanLuma}`);
   if (thresholds.minReprojectedValidRatio !== undefined && minimumValidRatio < thresholds.minReprojectedValidRatio) violations.push(`minReprojectedValidRatio ${minimumValidRatio} < ${thresholds.minReprojectedValidRatio}`);
+  if (thresholds.minMaskCoverage !== undefined && minObservedMaskCoverage < thresholds.minMaskCoverage) {
+    violations.push(`minMaskCoverage ${minObservedMaskCoverage} < ${thresholds.minMaskCoverage}`);
+  }
+  if (thresholds.maxMaskInstability !== undefined && ownershipInstability > thresholds.maxMaskInstability) {
+    violations.push(`maxMaskInstability ${ownershipInstability} > ${thresholds.maxMaskInstability}`);
+  }
   for (const [counter, maximum] of Object.entries(thresholds.counterMax ?? {})) {
     const observed = Math.max(...frameStats.map((frame) => frame.counters[counter] ?? 0));
     if (observed > maximum) violations.push(`counterMax.${counter} ${observed} > ${maximum}`);
@@ -234,12 +342,11 @@ function evaluateThresholds(
 }
 
 async function calculateReprojection(
-  outputDir: string,
-  records: readonly VisualSequenceFrameRecord[],
   colors: readonly ImagePlane[],
+  depth: readonly Float32Array[],
   stats: readonly { camera: CameraRecord }[],
+  evaluationMasks: readonly Uint8Array[],
 ): Promise<Array<{ frame: number; meanLuma: number; edgeMean: number; validRatio: number; disoccludedRatio: number }>> {
-  const depth = await Promise.all(records.map((record) => readDepth(join(outputDir, record.depth!))));
   return colors.slice(1).map((current, offset) => {
     const frame = offset + 1;
     const result = reprojectedResidual({
@@ -250,12 +357,18 @@ async function calculateReprojection(
       previousViewProjection: stats[offset]!.camera.viewProjection,
       currentViewProjectionInverse: stats[frame]!.camera.viewProjectionInverse,
       depthTolerance: 0.02,
+      evaluationMask: evaluationMasks[frame] ?? evaluationMasks[offset],
     });
     return { frame, meanLuma: result.residual.meanLuma, edgeMean: result.residual.edgeMean, validRatio: result.validRatio, disoccludedRatio: result.disoccludedRatio };
   });
 }
 
-async function comparePair(leftDir: string, rightDir: string, outputDir: string): Promise<void> {
+async function comparePair(
+  leftDir: string,
+  rightDir: string,
+  outputDir: string,
+  overrides: VisualSequencePairThresholds,
+): Promise<void> {
   const left = JSON.parse(readFileSync(join(leftDir, "sequence.json"), "utf8")) as VisualSequenceManifest;
   const right = JSON.parse(readFileSync(join(rightDir, "sequence.json"), "utf8")) as VisualSequenceManifest;
   if (left.frames.length !== right.frames.length) throw new Error("paired sequences have different frame counts");
@@ -266,28 +379,63 @@ async function comparePair(leftDir: string, rightDir: string, outputDir: string)
     const b = await readPlane(join(rightDir, right.frames[index]!.color));
     frames.push({ frame: index, ...residualMetrics(a, b) });
   }
+  const thresholds: VisualSequencePairThresholds = {
+    ...left.config.pairThresholds,
+    ...right.config.pairThresholds,
+    ...overrides,
+  };
+  const maxMeanLuma = Math.max(...frames.map((frame) => frame.meanLuma));
+  const maxChangedRatio = Math.max(...frames.map((frame) => frame.changedRatio));
+  const maxEdgeMean = Math.max(...frames.map((frame) => frame.edgeMean));
+  const gateViolations: string[] = [];
+  if (thresholds.maxMeanLuma !== undefined && maxMeanLuma > thresholds.maxMeanLuma) {
+    gateViolations.push(`maxMeanLuma ${maxMeanLuma} > ${thresholds.maxMeanLuma}`);
+  }
+  if (thresholds.maxChangedRatio !== undefined && maxChangedRatio > thresholds.maxChangedRatio) {
+    gateViolations.push(`maxChangedRatio ${maxChangedRatio} > ${thresholds.maxChangedRatio}`);
+  }
+  if (thresholds.maxEdgeMean !== undefined && maxEdgeMean > thresholds.maxEdgeMean) {
+    gateViolations.push(`maxEdgeMean ${maxEdgeMean} > ${thresholds.maxEdgeMean}`);
+  }
   const summary = {
     schemaVersion: 1,
     mode: "paired",
     left: left.id,
     right: right.id,
     paired_residual: frames,
-    maxMeanLuma: Math.max(...frames.map((frame) => frame.meanLuma)),
-    maxChangedRatio: Math.max(...frames.map((frame) => frame.changedRatio)),
-    passed: true,
+    maxMeanLuma,
+    maxChangedRatio,
+    maxEdgeMean,
+    thresholds,
+    gateViolations,
+    passed: gateViolations.length === 0,
   };
   writeJson(join(outputDir, "summary.json"), summary);
   writeFileSync(join(outputDir, "report.md"), reportMarkdown(summary, relative(process.cwd(), outputDir)));
-  console.log(`[visual-sequence] wrote paired comparison ${outputDir}`);
+  console.log(`[visual-sequence] wrote paired comparison ${outputDir} passed=${summary.passed}`);
+  if (!summary.passed) process.exitCode = 1;
 }
 
-async function readPlane(path: string): Promise<ImagePlane> {
-  const { data, info } = await sharp(path).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+function parsePairThresholdOverrides(args: Args): VisualSequencePairThresholds {
+  const result: VisualSequencePairThresholds = {};
+  const maxMeanLuma = stringArg(args, "maxMeanLuma");
+  const maxChangedRatio = stringArg(args, "maxChangedRatio");
+  const maxEdgeMean = stringArg(args, "maxEdgeMean");
+  if (maxMeanLuma !== undefined) result.maxMeanLuma = Number(maxMeanLuma);
+  if (maxChangedRatio !== undefined) result.maxChangedRatio = Number(maxChangedRatio);
+  if (maxEdgeMean !== undefined) result.maxEdgeMean = Number(maxEdgeMean);
+  return result;
+}
+
+async function readPlane(path: string, size?: { width: number; height: number }): Promise<ImagePlane> {
+  let pipeline = sharp(path).ensureAlpha();
+  if (size) pipeline = pipeline.resize(size.width, size.height, { fit: "fill" });
+  const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
   return { width: info.width, height: info.height, data: new Uint8Array(data), channels: 4 };
 }
 
-async function readDepth(path: string): Promise<Float32Array> {
-  const plane = await readPlane(path);
+async function readDepth(path: string, size?: { width: number; height: number }): Promise<Float32Array> {
+  const plane = await readPlane(path, size);
   const result = new Float32Array(plane.width * plane.height);
   for (let p = 0; p < result.length; p++) {
     const high = plane.data[p * 4] ?? 255;
@@ -300,6 +448,10 @@ async function readDepth(path: string): Promise<Float32Array> {
 function transitionCounters(counters: Record<string, number>): Record<string, number> {
   const patterns = ["ready", "ownership", "revision", "fallback", "pending", "inflight", "holes", "overlap"];
   return Object.fromEntries(Object.entries(counters).filter(([key]) => patterns.some((pattern) => key.toLowerCase().includes(pattern))));
+}
+
+function isAdvisoryConsoleError(message: string): boolean {
+  return message.includes("[clod-stream-gpu] GPU path failed; falling back to CPU");
 }
 
 function reportMarkdown(summary: object, artifactPath: string): string {

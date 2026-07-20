@@ -280,6 +280,7 @@ export function runFrameLoopStartup(
   const spellVfxController = session.spellVfxController;
   const clodShadowOverlayController = session.clodShadowOverlayController;
   let streamingClodRootControllerRef: ReturnType<typeof createStreamingClodRootController> | null = null;
+  let farClipmapControllerRef: ReturnType<typeof createFarClipmapController> | null = null;
 
   if (longView.hooks) {
     longView.hooks.compareStreamRootBuilds = (coords) => input.clodWorker.compareStreamRootBuilds(coords);
@@ -292,6 +293,9 @@ export function runFrameLoopStartup(
           state.proceduralDebugMode = nextMode as ProceduralDebugMode;
           input.terrainView.applyTerrainTextures();
         }
+      }
+      if (options.farClipmapDebug !== undefined && farClipmapControllerRef) {
+        farClipmapControllerRef.setDebugMode(options.farClipmapDebug ?? "final");
       }
       if (options.streamBudgets && streamingClodRootControllerRef) {
         return streamingClodRootControllerRef.setStreamBudgets(options.streamBudgets);
@@ -363,6 +367,7 @@ export function runFrameLoopStartup(
     targetVisibleRadiusM: longView.phase0TargetVisibleM,
   });
   const farClipmapController = streamingScene && searchParams.get("farClipmap") === "1" ? createFarClipmapController(scene, farClipmapConfig, undefined, { webGpuCompatibleMaterial: input.app.isWebGpu, getLighting: currentLighting }) : null;
+  farClipmapControllerRef = farClipmapController;
   const farClipmapUsesRefinedOwnership = searchParams.get("farClipmapMode") === "replace";
   const streamedRootGpuEnabled = searchParams.get("liveClodRootGpuMesher") === "1";
   const acceptanceMaxStreamInflightBatches = streamedRootGpuEnabled ? ACCEPTANCE_GPU_MAX_STREAM_INFLIGHT_BATCHES : ACCEPTANCE_CPU_MAX_STREAM_INFLIGHT_BATCHES;

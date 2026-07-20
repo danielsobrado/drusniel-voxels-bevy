@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "moving-continent-route-known-bad",
+  "mode": "moving",
+  "frames": 24,
+  "warmupFrames": 120,
+  "stepSeconds": 0.05,
+  "scene": "continent",
+  "seed": 1,
+  "start": { "p": [1264, 50, 272], "yaw": 0, "pitch": -0.35, "fov": 55 },
+  "end": { "p": [1264, 48, 260], "yaw": 0, "pitch": -0.3, "fov": 55 },
+  "query": { "world": "4", "acceptance": "1", "farClipmap": "1", "farClipmapMode": "replace", "liveBubble": "1", "liveBubbleRadius": "200", "liveBubbleColliderRadius": "160", "liveClodRootRadius": "384", "oceanRim": "1", "worldRadius": "16384", "continentHydrology": "0", "liveClodRootGpuMesher": "0" },
+  "captureDepth": true,
+  "maskSources": ["sky-exclude"],
+  "eventFrame": 8,
+  "eventName": "forced-ownership-debug",
+  "eventAction": "ownership-debug",
+  "thresholds": {
+    "maxReprojectedMeanLuma": 0.01,
+    "minReprojectedValidRatio": 0.9,
+    "popEvents": 4
+  }
+}

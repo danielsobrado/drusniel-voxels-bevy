@@ -115,6 +115,9 @@ export function applyEnvironmentQueryOverrides(state: ClodAppState, searchParams
   const treePlacementDebug = flagParam(searchParams, "treePlacementDebug", "treeDebugPlacement", "treePlacementOverlay");
   if (treePlacementDebug !== null) state.treePlacementDebug = treePlacementDebug;
 
+  const treeColorByLod = flagParam(searchParams, "treeColorByLod", "treeDebugColorByLod", "treeLodColors");
+  if (treeColorByLod !== null) state.treeDebugColorByLod = treeColorByLod;
+
   const treeImpostorSwapOnBake = flagParam(searchParams, "treeImpostorSwapOnBake", "treeImpostorHotSwap", "treeSwapImpostors");
   if (treeImpostorSwapOnBake !== null) state.treeImpostorSwapOnBake = treeImpostorSwapOnBake;
 

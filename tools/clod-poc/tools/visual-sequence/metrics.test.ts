@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { detectPopComponents, residualMetrics, temporalMetrics, type ImagePlane } from "./metrics.js";
+import { buildEvaluationMask, projectWorldPoint, skyExcludeMask } from "./mask_builder.js";
 import { reprojectedResidual } from "./reprojection.js";
 import { rasterizeAnnulusRoi, rasterizePolylineRoi } from "./roi.js";
 
@@ -97,6 +98,15 @@ describe("visual sequence metric defect fixtures", () => {
     });
     expect(result.residual.meanLuma).toBeGreaterThan(0.25);
   });
+
+  it("ignores masked pixels in residual and pop detection", () => {
+    const mask = new Uint8Array(WIDTH * HEIGHT);
+    mask[0] = 1;
+    const changed = paint(plane(), () => true, 255);
+    expect(residualMetrics(plane(), changed, mask).changedRatio).toBe(1);
+    expect(detectPopComponents(plane(), changed, 1, 0.1, 1, mask)).toHaveLength(1);
+    expect(detectPopComponents(plane(), changed, 1, 0.1, 1, new Uint8Array(WIDTH * HEIGHT))).toHaveLength(0);
+  });
 });
 
 describe("visual sequence projected ROI primitives", () => {
@@ -110,5 +120,24 @@ describe("visual sequence projected ROI primitives", () => {
     const active = mask.reduce((sum, value) => sum + value, 0);
     expect(active).toBeGreaterThan(20);
     expect(active).toBeLessThan(100);
+  });
+
+  it("projects world points and builds sky-excluded evaluation masks", () => {
+    const projected = projectWorldPoint(IDENTITY, [0, 0, 0.5], 8, 8);
+    expect(projected).toEqual({ x: 4, y: 4 });
+    const depth = new Float32Array(WIDTH * HEIGHT).fill(0.4);
+    depth[0] = 1;
+    expect(skyExcludeMask(depth)[0]).toBe(0);
+    expect(skyExcludeMask(depth)[1]).toBe(1);
+    const evaluation = buildEvaluationMask({
+      width: WIDTH,
+      height: HEIGHT,
+      depth,
+      viewProjection: IDENTITY,
+      maskSources: ["sky-exclude", "roi"],
+      rois: [{ type: "annulus", center: [0, 0, 0.5], innerRadiusPx: 0, outerRadiusPx: 3 }],
+    });
+    expect(evaluation.coverage).toBeGreaterThan(0);
+    expect(evaluation.mask[0]).toBe(0);
   });
 });

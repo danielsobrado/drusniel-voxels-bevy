@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
-  "id": "water-shoreline-frozen",
+  "id": "water-shoreline-animated-reference",
   "mode": "moving",
-  "frames": 32,
-  "warmupFrames": 180,
+  "frames": 24,
+  "warmupFrames": 120,
   "stepSeconds": 0.05,
   "scene": "continent",
   "seed": 1,
   "start": { "p": [1264, 52, 220], "yaw": 0, "pitch": -0.32, "fov": 55 },
   "end": { "p": [1264, 50, 200], "yaw": 0, "pitch": -0.28, "fov": 55 },
-  "query": { "world": "4", "acceptance": "1", "farClipmap": "1", "farClipmapMode": "replace", "liveBubble": "1", "liveBubbleRadius": "200", "liveBubbleColliderRadius": "160", "liveClodRootRadius": "384", "oceanRim": "1", "worldRadius": "16384", "continentHydrology": "0", "liveClodRootGpuMesher": "0", "water": "1" },
+  "query": { "world": "4", "acceptance": "1", "farClipmap": "1", "farClipmapMode": "replace", "liveBubble": "1", "liveBubbleRadius": "200", "liveBubbleColliderRadius": "160", "liveClodRootRadius": "384", "oceanRim": "1", "worldRadius": "16384", "continentHydrology": "0", "liveClodRootGpuMesher": "0", "water": "1", "precisionDiag": "0" },
   "captureDepth": true,
   "maskSources": ["sky-exclude", "coverage"],
   "thresholds": {
@@ -19,6 +19,7 @@
       "priority_owner_overlap_cells": 0
     },
     "minMaskCoverage": 0.2,
-    "maxMaskInstability": 0.25
+    "maxMaskInstability": 0.35,
+    "popEvents": 800
   }
 }

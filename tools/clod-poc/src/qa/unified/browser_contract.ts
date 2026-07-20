@@ -12,6 +12,7 @@ export interface QaEnvironment {
 export interface QaWorldState {
   freeze?: boolean;
   proceduralDebug?: string | null;
+  farClipmapDebug?: "final" | "biome" | "height" | "ownership" | null;
 }
 
 export interface DrusnielQaHook {
@@ -34,8 +35,8 @@ export interface DrusnielQaHook {
   beginSequence(config: SequenceClockConfig): Promise<void>;
   stepSequence(index: number, applyPose?: boolean): Promise<SequenceClockState>;
   endSequence(): Promise<void>;
-  captureDiagnosticBuffer(kind: "final" | "depth"): Promise<string>;
-  setDiagnosticBuffer(kind: "final" | "depth"): Promise<void>;
+  captureDiagnosticBuffer(kind: "final" | "depth" | "ownership" | "coverage"): Promise<string>;
+  setDiagnosticBuffer(kind: "final" | "depth" | "ownership" | "coverage"): Promise<void>;
   runSequenceEvent(action: "streaming-off" | "streaming-off-reset" | "streaming-on" | "ownership-debug" | "final-debug"): Promise<void>;
 }
 

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "tree-band-stop-gpu",
+  "mode": "moving",
+  "frames": 16,
+  "stepSeconds": 0.1,
+  "scene": "trees-perf",
+  "seed": 1,
+  "timeoutMs": 420000,
+  "warmupFrames": 120,
+  "start": { "p": [430, 104, 256], "yaw": 1.5707963268, "pitch": -0.42, "fov": 55 },
+  "end": { "p": [430, 104, 256], "yaw": 1.5707963268, "pitch": -0.42, "fov": 55 },
+  "query": { "world": "4", "treeGpu": "1", "webgpuSelection": "1", "treeDistance": "200", "treeDensity": "0.12", "treeMaxInstances": "400", "treeGpuMaxVisible": "400" },
+  "captureDepth": true,
+  "maskSources": ["sky-exclude"],
+  "rois": [
+    {
+      "type": "annulus",
+      "center": [256, 80, 256],
+      "innerRadiusPx": 40,
+      "outerRadiusPx": 120
+    }
+  ],
+  "thresholds": {
+    "meanLuma": 0.002,
+    "maxP95Luma": 0.01,
+    "maxChangedRatio": 0.01,
+    "popEvents": 4
+  }
+}
