@@ -46,6 +46,7 @@ async function main(): Promise<void> {
         if (root.isScene) scene = root;
       }
       if (!scene) return { keys, clodKeys, error: "no scene handle" };
+      window.__probeScene = scene;
       const census = new Map();
       scene.traverse((node) => {
         if (!node.isMesh || !node.visible) return;
@@ -71,12 +72,26 @@ async function main(): Promise<void> {
     console.log("census:", JSON.stringify(hidden, null, 2));
     await settleFrames(page, 30);
     await page.screenshot(join(out, "without-clipmap.png"));
-    for (const prefix of ["clod-page", "terrain", "far", "Far", "Drusniel"]) {
-      const n = await page.evaluate(`window.__probeHide(${JSON.stringify(prefix)})`);
-      console.log("hid prefix", prefix, ":", n);
-      await settleFrames(page, 20);
-      await page.screenshot(join(out, `hide-${prefix.toLowerCase()}.png`));
-    }
+    const hiddenBig = await page.evaluate(`(() => {
+      const root = window.__probeScene;
+      if (!root) return { error: "no scene" };
+      const hidden = [];
+      root.traverse((node) => {
+        if (!node.isMesh || !node.visible || !node.geometry) return;
+        const material = Array.isArray(node.material) ? node.material[0] : node.material;
+        const matName = material?.name || "";
+        const meshName = node.name || "";
+        const verts = node.geometry.attributes?.position?.count ?? 0;
+        if (matName === "" && meshName === "" && verts > 5000 && material?.type === "MeshBasicNodeMaterial") {
+          node.visible = false;
+          hidden.push({ verts, frustumCulled: node.frustumCulled });
+        }
+      });
+      return hidden;
+    })()`);
+    console.log("hidden big unnamed:", JSON.stringify(hiddenBig));
+    await settleFrames(page, 20);
+    await page.screenshot(join(out, "hide-unnamed-big.png"));
   });
 }
 

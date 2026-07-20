@@ -10,6 +10,7 @@ import {
   getTerrainLayerAverageAlbedo,
   terrainLayerAverageAlbedoRevision,
 } from "../../textures/terrain_layer_average_albedo.js";
+import { TERRAIN_LAYER_HEIGHT_BANDS } from "../../textures/terrainTextureArrays.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -73,9 +74,7 @@ const FAR_CLIPMAP_PALETTE_LAYERS = {
   uSnow: "snow",
 } as const;
 
-type FarClipmapPaletteUniforms = Record<keyof typeof FAR_CLIPMAP_PALETTE_LAYERS, FarClipmapNodeUniform<THREE.Vector3>> & {
-  uExposure: FarClipmapNodeUniform<number>;
-};
+type FarClipmapPaletteUniforms = Record<keyof typeof FAR_CLIPMAP_PALETTE_LAYERS, FarClipmapNodeUniform<THREE.Vector3>>;
 
 const FAR_CLIPMAP_LIGHTING_UNIFORMS = "farClipmapLightingUniforms";
 
@@ -346,10 +345,7 @@ function createFarClipmapPaletteUniforms(): FarClipmapPaletteUniforms {
     const [r, g, b] = getTerrainLayerAverageAlbedo(layerId);
     return [key, uniform(new THREE.Vector3(r, g, b))];
   });
-  return {
-    ...Object.fromEntries(entries),
-    uExposure: uniform(1.0),
-  } as FarClipmapPaletteUniforms;
+  return Object.fromEntries(entries) as FarClipmapPaletteUniforms;
 }
 
 function createFarClipmapLightingUniforms(): FarClipmapLightingUniforms {
@@ -487,17 +483,18 @@ function createWebGpuFarClipmapMaterial(input: {
     palette.uGroundCoast,
     tslSmoothstep(4.15, 4.85, materialId),
   );
-  // Elevation bands mirror the near-terrain texture layer ranges (layerRanges in
-  // terrainTextureArrays: sand<24, ground 22-66, rock 58-106, snow 86-132, absolute Y)
-  // so the far palette hands off to the textured pages without a colour step.
+  // Elevation bands derive from the near-terrain layer table (absolute Y) so the far
+  // palette hands off to the textured pages without a colour step.
+  const bands = TERRAIN_LAYER_HEIGHT_BANDS;
   const bandHeight: TslNode = terrainHeight.add(bandNoise.sub(0.5).mul(12.0));
-  // Beach stays a narrow ring like the near sand layer (fades out by ~24 m); the
-  // lowland above it is dirt+grass like the vegetated near ground, with the biome
+  // Beach stays a narrow ring fading out at the near sand layer's upper edge; the
+  // lowland above it is dirt+rock like the vegetated near ground, with the biome
   // colour only as a tint so coast/plains ids cannot repaint whole islands yellow.
-  const sandBand: TslNode = tslSmoothstep(20.0, 26.0, bandHeight).oneMinus();
+  const sandBand: TslNode = tslSmoothstep(bands.sand.heightMax - 4, bands.sand.heightMax + 2, bandHeight).oneMinus();
   const slopeRock: TslNode = tslSmoothstep(0.10, 0.46, normalY.oneMinus());
-  const rockBand: TslNode = max(tslSmoothstep(58.0, 96.0, bandHeight), slopeRock);
-  const snowBand: TslNode = tslSmoothstep(86.0, 132.0, bandHeight).mul(tslSmoothstep(0.58, 0.92, normalY));
+  const rockBand: TslNode = max(tslSmoothstep(bands.rock.heightMin, bands.rock.heightMax, bandHeight), slopeRock);
+  const snowBand: TslNode = tslSmoothstep(bands.snow.heightMin, bands.snow.heightMax, bandHeight)
+    .mul(tslSmoothstep(0.58, 0.92, normalY));
   // Calibrated against near-render seam pixels: the visible near ground at 24-58 m
   // resolves to a neutral dirt/rock brown (wet/moss tinting mutes the raw layers), so
   // the biome hue only contributes a quarter of the lowland colour.
@@ -513,7 +510,7 @@ function createWebGpuFarClipmapMaterial(input: {
   const hemiLight: TslNode = tslMix(lighting.uGroundLight, lighting.uSkyLight, normalY.mul(0.5).add(0.5));
   const terrainLight: TslNode = hemiLight.add(lighting.uSunColor.mul(directLight.pow(1.35)));
   const tintVariation: TslNode = tintNoise.sub(0.5).mul(0.16).add(1.0);
-  const landColor: TslNode = landAlbedo.mul(terrainLight).mul(tintVariation).mul(palette.uExposure);
+  const landColor: TslNode = landAlbedo.mul(terrainLight).mul(tintVariation);
   // Distance fog is applied once in the shared post-process path so refined CLOD and
   // clipmap terrain cross the same haze field instead of exposing a material boundary.
   const waterDepth: TslNode = waterSample.x.sub(rawHeight);
@@ -760,6 +757,12 @@ export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMateri
   }
 
   const gridResolution = Math.max(2, Math.floor(input.gridResolution));
+  // Inner-radius cells are only rendered where the ownership mask marks them
+  // fallback-owned, so restrict the (expensive) inner sampling to those cells.
+  // Without mask data yet, sample the whole disc rather than render zeros.
+  const ownershipData = input.includeInnerRadius === true
+    ? material.userData[FAR_CLIPMAP_OWNERSHIP_DATA] as Float32Array | undefined
+    : undefined;
   let fallbackSamples = 0;
   let exceptionSamples = 0;
   const summary = {
@@ -773,9 +776,11 @@ export function updateFarClipmapMaterialSourceTexture(material: FarClipmapMateri
       const worldZ = input.ringOriginZ + z * input.cellSizeM;
       const distanceM = Math.hypot(worldX - input.cameraX, worldZ - input.cameraZ);
       const offset = (z * gridResolution + x) * 4;
-      const outsideInnerRadius = input.includeInnerRadius !== true
-        && input.clipInnerRadiusM !== undefined
+      const insideInnerRadius = input.clipInnerRadiusM !== undefined
         && distanceM + input.cellSizeM < input.clipInnerRadiusM;
+      const innerFallbackOwned = input.includeInnerRadius === true
+        && (ownershipData === undefined || ownershipData[z * gridResolution + x] > 0.5);
+      const outsideInnerRadius = insideInnerRadius && !innerFallbackOwned;
       const outsideOuterRadius = input.clipOuterRadiusM !== undefined
         && distanceM > input.clipOuterRadiusM + input.cellSizeM;
       if (outsideInnerRadius || outsideOuterRadius) {

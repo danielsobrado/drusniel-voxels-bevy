@@ -85,8 +85,10 @@ postfx_atmosphere:
     const { transmittance, color } = aerialPerspectiveReference(
       [0.3, 0.35, 0.25], 1000, 0, 0.2, DEFAULT_POSTFX_ATMOSPHERE.hillaire,
     );
+    // The raised mie band (near->far terrain hand-off haze) costs up to ~8% in the
+    // blue channel at 1 km; anything past 10% would be the old wash creeping back.
     for (let c = 0; c < 3; c++) {
-      expect(transmittance[c]).toBeGreaterThan(0.94);
+      expect(transmittance[c]).toBeGreaterThan(0.90);
       expect(Math.abs(color[c] - [0.3, 0.35, 0.25][c])).toBeLessThan(0.05);
     }
   });

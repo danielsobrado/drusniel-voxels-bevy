@@ -52,13 +52,24 @@ function colorByte(value: number): number {
   return Math.round(clamp01(value) * 255);
 }
 
+/** Near-terrain elevation bands (absolute world Y, metres). Far renderers must
+ *  derive their bands from this table — copied literals are how the far/near
+ *  palette divergence happened. */
+export const TERRAIN_LAYER_HEIGHT_BANDS = {
+  sand: { heightMin: -40, heightMax: 24 },
+  grass: { heightMin: 22, heightMax: 66 },
+  dirt: { heightMin: 14, heightMax: 58 },
+  rock: { heightMin: 58, heightMax: 106 },
+  snow: { heightMin: 86, heightMax: 132 },
+} as const;
+
 function layerRanges(id: ProceduralMaterialId, fallbackIndex: number): { heightMin: number; heightMax: number; scale: number } {
   switch (id) {
-    case "sand": return { heightMin: -40, heightMax: 24, scale: 0.055 };
-    case "grass": return { heightMin: 22, heightMax: 66, scale: 0.06 };
-    case "dirt": return { heightMin: 14, heightMax: 58, scale: 0.045 };
-    case "rock": return { heightMin: 58, heightMax: 106, scale: 0.04 };
-    case "snow": return { heightMin: 86, heightMax: 132, scale: 0.035 };
+    case "sand": return { ...TERRAIN_LAYER_HEIGHT_BANDS.sand, scale: 0.055 };
+    case "grass": return { ...TERRAIN_LAYER_HEIGHT_BANDS.grass, scale: 0.06 };
+    case "dirt": return { ...TERRAIN_LAYER_HEIGHT_BANDS.dirt, scale: 0.045 };
+    case "rock": return { ...TERRAIN_LAYER_HEIGHT_BANDS.rock, scale: 0.04 };
+    case "snow": return { ...TERRAIN_LAYER_HEIGHT_BANDS.snow, scale: 0.035 };
     case "moss": return { heightMin: 20, heightMax: 68, scale: 0.07 };
     case "gravel": return { heightMin: 48, heightMax: 94, scale: 0.065 };
     case "wet_soil": return { heightMin: 0, heightMax: 30, scale: 0.05 };

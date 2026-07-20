@@ -3,7 +3,7 @@
 import { withWaterHarness } from "./water-harness.js";
 
 async function main(): Promise<void> {
-  const url = "http://127.0.0.1:5180/?scene=infinite-islands&seed=1&world=8&quality=low";
+  const url = "http://127.0.0.1:5180/?scene=infinite-islands&seed=1&world=8&quality=ultra&renderPreset=ultra&materialTiers=1";
   await withWaterHarness({ url, world: 8, width: 640, height: 360 }, async ({ page }) => {
     await page.evaluate(`new Promise((resolve, reject) => {
       const t0 = Date.now();
@@ -24,17 +24,23 @@ async function main(): Promise<void> {
       const pose = window.__drusnielClod.getPose ? window.__drusnielClod.getPose() : null;
       const cx = pose ? pose.p[0] : 2048, cz = pose ? pose.p[2] : 2048;
       const rows = [];
-      for (const d of [200, 350, 500, 650, 800, 1000, 1500, 2500]) {
-        for (const ang of [0, 2.1, 4.2]) {
+      let maxTruth = { h: -Infinity };
+      // Find the highest true-land points at far distances and compare summary heights.
+      for (const d of [500, 900, 1400, 2000, 3000, 4000]) {
+        let best = null;
+        for (let ang = 0; ang < 6.28; ang += 0.13) {
           const x = cx + Math.cos(ang) * d, z = cz + Math.sin(ang) * d;
-          const h = provider.sampleHeight(x, z);
-          const out = { height: 0, normalX: 0, normalY: 1, normalZ: 0, material: 0, waterCoverage: 0, waterLevel: 0, bodyKind: 0, shoreDistance: 0, unifiedChannels: false };
-          const ok = provider.sampleSummaryInto ? provider.sampleSummaryInto(x, z, d, out) : false;
           const truth = window.waterProbe ? window.waterProbe(x, z).terrain : null;
-          rows.push({ d, ang, h: Math.round(h * 10) / 10, ok, sh: Math.round(out.height * 10) / 10, mat: out.material, wc: out.waterCoverage, truth: truth === null ? null : Math.round(truth * 10) / 10 });
+          if (truth !== null && (!best || truth > best.truth)) best = { x, z, truth, d };
         }
+        if (!best) continue;
+        const h = provider.sampleHeight(best.x, best.z);
+        const out = { height: 0, normalX: 0, normalY: 1, normalZ: 0, material: 0, waterCoverage: 0, waterLevel: 0, bodyKind: 0, shoreDistance: 0, unifiedChannels: false };
+        const ok = provider.sampleSummaryInto ? provider.sampleSummaryInto(best.x, best.z, best.d, out) : false;
+        if (best.truth > maxTruth.h) maxTruth = { h: best.truth, d: best.d };
+        rows.push({ d, truth: Math.round(best.truth * 10) / 10, h: Math.round(h * 10) / 10, ok, sh: Math.round(out.height * 10) / 10, mat: out.material, wc: Math.round((out.waterCoverage ?? 0) * 100) / 100 });
       }
-      return { pose, rows };
+      return { pose, maxTruth, rows };
     })()`);
     console.log(JSON.stringify(report, null, 2));
   });

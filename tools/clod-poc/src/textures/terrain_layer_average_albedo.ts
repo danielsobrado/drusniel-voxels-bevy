@@ -51,7 +51,9 @@ export function recordTerrainLayerAverageAlbedos(
     }
     if (count > 0) next[order[layer]] = [r / count, g / count, b / count];
   }
-  bakedAverages = next;
+  // Merge, don't replace: a re-bake with a subset of layers (biome material
+  // streaming) must not silently reset other layers to recipe fallbacks.
+  bakedAverages = { ...bakedAverages, ...next };
   revision++;
 }
 

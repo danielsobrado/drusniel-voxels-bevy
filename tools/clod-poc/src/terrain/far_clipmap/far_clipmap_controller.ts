@@ -519,6 +519,9 @@ class FarClipmapControllerImpl implements FarClipmapController {
         ring.ownershipRevision = this.refinedClodRevision;
         ring.ownershipOriginX = ringOriginX;
         ring.ownershipOriginZ = ringOriginZ;
+        // Inner-radius source sampling is gated by this mask; invalidate the source so
+        // newly fallback-owned cells pick up real heights on the next throttled refresh.
+        if (ownershipInput) ring.sourceRevision = Number.NaN;
       }
       if (ring.displacementMode === "shader") {
         ring.mesh.position.set(ringOriginX, 0, ringOriginZ);
