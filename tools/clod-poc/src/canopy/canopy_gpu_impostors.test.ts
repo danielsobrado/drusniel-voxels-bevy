@@ -179,7 +179,7 @@ describe("canopy GPU impostors", () => {
   it("derives an instance cap that never exceeds the crown-cluster triangle budget", () => {
     expect(maxCanopyGpuImpostorInstances(1000)).toBe(166);
     expect(maxCanopyGpuImpostorInstances(6)).toBe(1);
-    expect(maxCanopyGpuImpostorInstances(5)).toBe(1);
-    expect(maxCanopyGpuImpostorInstances(-1)).toBeGreaterThan(0);
+    expect(maxCanopyGpuImpostorInstances(5)).toBe(0);
+    expect(maxCanopyGpuImpostorInstances(-1)).toBe(0);
   });
 });
