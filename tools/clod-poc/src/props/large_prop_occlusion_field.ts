@@ -33,6 +33,8 @@ interface CellAccumulator {
   fogTopY: number;
 }
 
+type CellRows = Map<number, Map<number, CellAccumulator>>;
+
 interface RasterCursor {
   readonly occluder: PropOccluder;
   readonly minCellX: number;
@@ -45,7 +47,8 @@ interface RasterCursor {
 
 interface PendingBuild {
   readonly snapshot: PropOccluderSnapshot;
-  readonly cells: Map<string, CellAccumulator>;
+  readonly rows: CellRows;
+  cellCount: number;
   occluderIndex: number;
   cursor: RasterCursor | null;
 }
@@ -72,7 +75,8 @@ export function createLargePropOcclusionSample(): LargePropOcclusionSample {
 export class LargePropOcclusionField {
   private activeRevision = 0;
   private activeEnabled = false;
-  private activeCells = new Map<string, CellAccumulator>();
+  private activeRows: CellRows = new Map();
+  private activeCellCount = 0;
   private pendingBuild: PendingBuild | null = null;
   private submittedRevision = 0;
   private processedCellsLastStep = 0;
@@ -88,7 +92,8 @@ export class LargePropOcclusionField {
       this.pendingBuild = null;
       this.activeRevision = snapshot.revision;
       this.activeEnabled = snapshot.enabled && this.settings.enabled;
-      this.activeCells = new Map();
+      this.activeRows = new Map();
+      this.activeCellCount = 0;
       this.processedCellsLastStep = 0;
       this.swaps += 1;
       return true;
@@ -96,7 +101,8 @@ export class LargePropOcclusionField {
 
     this.pendingBuild = {
       snapshot,
-      cells: new Map(),
+      rows: new Map(),
+      cellCount: 0,
       occluderIndex: 0,
       cursor: null,
     };
@@ -117,7 +123,7 @@ export class LargePropOcclusionField {
       }
 
       pending.cursor ??= this.createCursor(pending.snapshot.occluders[pending.occluderIndex]!);
-      this.rasterCell(pending.cells, pending.cursor);
+      if (this.rasterCell(pending.rows, pending.cursor)) pending.cellCount += 1;
       this.processedCellsLastStep += 1;
       budget -= 1;
 
@@ -145,7 +151,7 @@ export class LargePropOcclusionField {
 
     const cellX = Math.floor(x / this.settings.cellSizeM);
     const cellZ = Math.floor(z / this.settings.cellSizeM);
-    const cell = this.activeCells.get(cellKey(cellX, cellZ));
+    const cell = this.activeRows.get(cellZ)?.get(cellX);
     if (!cell) return out;
 
     out.giOccupancy = cell.giOccupancy;
@@ -165,8 +171,8 @@ export class LargePropOcclusionField {
     return {
       activeRevision: this.activeRevision,
       pendingRevision: this.pendingBuild?.snapshot.revision ?? 0,
-      activeCells: this.activeCells.size,
-      pendingCells: this.pendingBuild?.cells.size ?? 0,
+      activeCells: this.activeCellCount,
+      pendingCells: this.pendingBuild?.cellCount ?? 0,
       pending: this.pendingBuild !== null,
       processedCellsLastStep: this.processedCellsLastStep,
       swaps: this.swaps,
@@ -190,7 +196,7 @@ export class LargePropOcclusionField {
     };
   }
 
-  private rasterCell(cells: Map<string, CellAccumulator>, cursor: RasterCursor): void {
+  private rasterCell(rows: CellRows, cursor: RasterCursor): boolean {
     const cellSize = this.settings.cellSizeM;
     const cellMinX = cursor.cellX * cellSize;
     const cellMinZ = cursor.cellZ * cellSize;
@@ -198,10 +204,19 @@ export class LargePropOcclusionField {
     const overlapX = Math.max(0, Math.min(bounds.maxX, cellMinX + cellSize) - Math.max(bounds.minX, cellMinX));
     const overlapZ = Math.max(0, Math.min(bounds.maxZ, cellMinZ + cellSize) - Math.max(bounds.minZ, cellMinZ));
     const coverage = clamp01((overlapX * overlapZ) / (cellSize * cellSize));
-    if (coverage <= COVERAGE_EPSILON) return;
+    if (coverage <= COVERAGE_EPSILON) return false;
 
-    const key = cellKey(cursor.cellX, cursor.cellZ);
-    const cell = cells.get(key) ?? emptyCell();
+    let row = rows.get(cursor.cellZ);
+    if (!row) {
+      row = new Map();
+      rows.set(cursor.cellZ, row);
+    }
+    let cell = row.get(cursor.cellX);
+    const created = cell === undefined;
+    if (!cell) {
+      cell = emptyCell();
+      row.set(cursor.cellX, cell);
+    }
     if (cursor.occluder.affectGi) {
       cell.giOccupancy = unionCoverage(cell.giOccupancy, coverage);
       cell.giBottomY = Math.min(cell.giBottomY, bounds.minY);
@@ -212,14 +227,15 @@ export class LargePropOcclusionField {
       cell.fogBottomY = Math.min(cell.fogBottomY, bounds.minY);
       cell.fogTopY = Math.max(cell.fogTopY, bounds.maxY);
     }
-    cells.set(key, cell);
+    return created;
   }
 
   private commitPending(pending: PendingBuild): void {
     if (this.pendingBuild !== pending) return;
     this.activeRevision = pending.snapshot.revision;
     this.activeEnabled = pending.snapshot.enabled && this.settings.enabled;
-    this.activeCells = pending.cells;
+    this.activeRows = pending.rows;
+    this.activeCellCount = pending.cellCount;
     this.pendingBuild = null;
     this.swaps += 1;
   }
@@ -260,10 +276,6 @@ function resetSample(
   out.fogOccupancy = 0;
   out.fogBottomY = 0;
   out.fogTopY = 0;
-}
-
-function cellKey(x: number, z: number): string {
-  return `${x},${z}`;
 }
 
 function unionCoverage(current: number, next: number): number {
