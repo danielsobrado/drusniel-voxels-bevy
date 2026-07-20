@@ -24,6 +24,10 @@ import { buildVegetationSlotPrefilter, VegetationSlotPrefilterCache } from "../v
 import { runtimeWorldUsesCameraRelativeCoordinates } from "../world/runtime_world_policy.js";
 import { heightfieldTileGpuAtlasBindings } from "../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 import { GpuTimestampRecorder } from "../diagnostics/gpu_timestamp_recorder.js";
+import {
+  activeForestLightingGpuTexture,
+  type ForestLightingGpuTextureSource,
+} from "../forest_lighting/forest_lighting_texture.js";
 
 const CLASS_PARAMS_BYTES = UNDERSTORY_RING_CLASS_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32 * Float32Array.BYTES_PER_ELEMENT;
 const COUNTER_BYTES = UNDERSTORY_RING_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
@@ -32,6 +36,8 @@ const ACTIVE_SLOT_SENTINEL = 0xffffffff;
 const PREFILTER_CLUSTER_DIM_SLOTS = 16;
 const CAMERA_HEIGHT_FALLBACK_M = 48;
 const TIMING_LABELS = ["clear", "world_view", "indirect"] as const;
+const CANOPY_ECOLOGY_RESOLUTION_PARAM_INDEX = 38;
+const CANOPY_ECOLOGY_ENABLED_PARAM_INDEX = 39;
 
 export const UNDERSTORY_GPU_RING_STORAGE_BINDINGS = 6;
 
@@ -103,6 +109,9 @@ export class UnderstoryGpuRingCompute {
   private bindGroup: GPUBindGroup;
   private readonly hydroTexture: GPUTexture;
   private readonly hydroSampler: GPUSampler;
+  private canopyEcologyTexture: GPUTexture;
+  private canopyEcologySource: ForestLightingGpuTextureSource | null;
+  private ownsCanopyEcologyTexture: boolean;
   private readonly paramScratch = new ArrayBuffer(UNDERSTORY_RING_PARAM_BYTES);
   private readonly classParamsScratch = new Float32Array(UNDERSTORY_RING_CLASS_COUNT * UNDERSTORY_RING_CLASS_STRIDE_F32);
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
@@ -168,6 +177,9 @@ export class UnderstoryGpuRingCompute {
       this.hydroTexture = device.createTexture({ label: "understory ring fallback hydro texture", size: { width: 1, height: 1 }, format: "rgba32float", usage: GPUTextureUsage.TEXTURE_BINDING });
     }
     this.hydroSampler = device.createSampler({ label: "understory ring hydro sampler", magFilter: "nearest", minFilter: "nearest" });
+    this.canopyEcologySource = activeForestLightingGpuTexture();
+    this.ownsCanopyEcologyTexture = !this.canopyEcologySource;
+    this.canopyEcologyTexture = this.canopyEcologySource?.auxTexture ?? createCanopyEcologyFallbackTexture(device);
     this.bindGroup = this.createBindGroup();
   }
 
@@ -192,6 +204,7 @@ export class UnderstoryGpuRingCompute {
       { binding: 11, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
       { binding: 12, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "sint" } },
       { binding: 13, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+      { binding: 14, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
     ] });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
     const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `understory ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
@@ -224,6 +237,7 @@ export class UnderstoryGpuRingCompute {
   dispatch(params: UnderstoryGpuRingDispatchParams): boolean {
     if (this.failedReason) return false;
     this.syncDigEdits();
+    this.syncCanopyEcologyTexture();
     const frame = this.frame++;
     const requestReadback = understoryRingRequestsDebugReadback(this.settings, frame);
     const readbackSlot = requestReadback ? this.counterReadbacks.find((candidate) => !candidate.busy) ?? null : null;
@@ -245,6 +259,7 @@ export class UnderstoryGpuRingCompute {
       params.hydroAtlas ? params : { ...params, hydroAtlas: hydrologyAtlasGpuParams() },
       this.paramScratch,
     );
+    this.writeCanopyEcologyParams();
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramScratch);
     this.device.queue.writeBuffer(this.activeSlotBuffer, 0, activeSlots.data.buffer, activeSlots.data.byteOffset, activeSlots.data.byteLength);
     packUnderstoryRingClassParams(this.settings, this.classParamsScratch);
@@ -314,6 +329,7 @@ export class UnderstoryGpuRingCompute {
     this.digEdits.destroy();
     this.fieldParams.destroy();
     this.hydroTexture.destroy();
+    if (this.ownsCanopyEcologyTexture) this.canopyEcologyTexture.destroy();
     this.timestamps.destroy();
     for (const slot of this.counterReadbacks) {
       if (slot.busy) slot.destroyAfterMap = true;
@@ -326,6 +342,30 @@ export class UnderstoryGpuRingCompute {
     if (revision === this.lastDigEditRevision) return;
     this.updateDigEdits(resolveDigEdits(getDigEditsSnapshot()));
     this.lastDigEditRevision = revision;
+  }
+
+  private syncCanopyEcologyTexture(): void {
+    const source = activeForestLightingGpuTexture();
+    if (source?.auxTexture === this.canopyEcologyTexture) {
+      this.canopyEcologySource = source;
+      return;
+    }
+    if (!source && this.ownsCanopyEcologyTexture) {
+      this.canopyEcologySource = null;
+      return;
+    }
+
+    if (this.ownsCanopyEcologyTexture) this.canopyEcologyTexture.destroy();
+    this.canopyEcologySource = source;
+    this.ownsCanopyEcologyTexture = !source;
+    this.canopyEcologyTexture = source?.auxTexture ?? createCanopyEcologyFallbackTexture(this.device);
+    this.bindGroup = this.createBindGroup();
+  }
+
+  private writeCanopyEcologyParams(): void {
+    const packed = new Float32Array(this.paramScratch);
+    packed[CANOPY_ECOLOGY_RESOLUTION_PARAM_INDEX] = this.canopyEcologySource?.resolution ?? 1;
+    packed[CANOPY_ECOLOGY_ENABLED_PARAM_INDEX] = this.canopyEcologySource ? 1 : 0;
   }
 
   private createBindGroup(): GPUBindGroup {
@@ -345,6 +385,7 @@ export class UnderstoryGpuRingCompute {
       { binding: 11, resource: canonicalHeight.heightView },
       { binding: 12, resource: canonicalHeight.residencyView },
       { binding: 13, resource: { buffer: canonicalHeight.params } },
+      { binding: 14, resource: this.canopyEcologyTexture.createView() },
     ] });
   }
 
@@ -447,6 +488,22 @@ export class UnderstoryGpuRingCompute {
       this.failedReason = error instanceof Error ? error.message : String(error);
     });
   }
+}
+
+function createCanopyEcologyFallbackTexture(device: GPUDevice): GPUTexture {
+  const texture = device.createTexture({
+    label: "understory ring fail-open canopy ecology",
+    size: { width: 1, height: 1 },
+    format: "rgba8unorm",
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  device.queue.writeTexture(
+    { texture },
+    new Uint8Array([0, 0, 0, 255]),
+    {},
+    { width: 1, height: 1 },
+  );
+  return texture;
 }
 
 function activeCullWorkgroups(settings: UnderstorySettings, activeSlotCount: number): number {
