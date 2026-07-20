@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { LargePropOcclusionHeightPayload } from "../../props/large_prop_occlusion_height.js";
 import { createSunLightRemoteTileBuilder } from "./sun_light_worker_client.js";
 import type { SunLightWorkerTileRequest } from "./sun_light_worker_protocol.js";
 
@@ -75,6 +76,47 @@ describe("sun-light worker lifecycle", () => {
     ]);
     expect(client.available()).toBe(true);
     expect(worker.terminate).not.toHaveBeenCalled();
+    client.dispose();
+  });
+
+  it("clones prop height arrays before transferring worker configuration", () => {
+    const client = createSunLightRemoteTileBuilder()!;
+    const worker = latestWorker();
+    const source: LargePropOcclusionHeightPayload = {
+      revision: 4,
+      cellSizeM: 4,
+      cellX: new Int32Array([1, 2]),
+      cellZ: new Int32Array([3, 4]),
+      topY: new Float32Array([12, 18]),
+      minX: 4,
+      minZ: 12,
+      maxX: 12,
+      maxZ: 20,
+    };
+
+    client.configure({
+      terrainFieldConfig: null,
+      summary: null,
+      propOcclusion: source,
+      options: {},
+    } as never);
+
+    const [message, transfer] = worker.postMessage.mock.calls.at(-1) as [
+      { propOcclusion: LargePropOcclusionHeightPayload },
+      Transferable[],
+    ];
+    expect(message.propOcclusion.cellX).not.toBe(source.cellX);
+    expect(message.propOcclusion.cellZ).not.toBe(source.cellZ);
+    expect(message.propOcclusion.topY).not.toBe(source.topY);
+    expect(Array.from(message.propOcclusion.cellX)).toEqual([1, 2]);
+    expect(Array.from(message.propOcclusion.topY)).toEqual([12, 18]);
+    expect(transfer).toEqual([
+      message.propOcclusion.cellX.buffer,
+      message.propOcclusion.cellZ.buffer,
+      message.propOcclusion.topY.buffer,
+    ]);
+    expect(Array.from(source.cellX)).toEqual([1, 2]);
+    expect(Array.from(source.topY)).toEqual([12, 18]);
     client.dispose();
   });
 
