@@ -10,6 +10,7 @@ import {
   type TerrainSourceInputs,
 } from "./terrainSource.js";
 import type { ClodCacheKeyParts } from "./cacheTypes.js";
+import { installWorkerTerrainSourceRuntime } from "./worker_terrain_source_runtime.js";
 import cacheConfigText from "../../config/clod_cache.yaml?raw";
 
 type CacheRole = "main" | "main-pages" | "worker";
@@ -45,13 +46,15 @@ export async function initClodCacheContext(input: {
   }
 
   const terrainSource = normalizeTerrainSourceInputs(input.terrainSource);
+  const role = input.role ?? (typeof document !== "undefined" ? "main" : "worker");
+  if (role === "worker") installWorkerTerrainSourceRuntime(terrainSource);
+
   const worldSeed = terrainSource.worldSeed;
   const generatorVersion = input.cfg.meshopt_package_version;
   const terrainSourceHash = await computeTerrainSourceHash(terrainSource);
   const farReduceFactor = input.farReduceFactor ?? 8;
   const configHash = await computeCacheConfigHash(input.cfg, { farReduceFactor });
 
-  const role = input.role ?? (typeof document !== "undefined" ? "main" : "worker");
   const service = makeCacheService(cacheConfig, undefined, role);
   await service.initialize();
 
