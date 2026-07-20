@@ -1,8 +1,8 @@
 import type { WaterVisualConfig } from "./water_config_types.js";
 
 export const WATER_REFERENCE_PRESET_OPTIONS = {
-  "Fable5 (stable)": "fable5",
-  "Glacial Valley": "glacial",
+  "Fable5-inspired (stable)": "fable5",
+  "Glacial Valley-inspired": "glacial",
   Custom: "custom",
 } as const;
 
