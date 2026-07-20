@@ -126,6 +126,7 @@ water:
     deep_color: [0.00, 0.025, 0.12]
     foam_color: [0.90, 0.95, 0.96]
     alpha: 0.90
+    normal_model: fable5 # fable5 | glacial | legacy
     # Stable Fable5-inspired response. The previous high-amplitude analytic waves
     # turned the narrow glitter lobes into repeated white contour lines.
     ripple_cycle: 0.45
