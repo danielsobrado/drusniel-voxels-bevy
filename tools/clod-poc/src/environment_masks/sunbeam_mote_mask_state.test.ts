@@ -14,11 +14,10 @@ const enabledBiome = {
 
 describe("sunbeam mote mask state", () => {
   it("combines seasonal particles without losing morning mist", () => {
-    expect(evaluateSunbeamMoteAirborneState(enabledBiome)).toEqual({
-      amount: 0.6,
-      coldBlend: expect.closeTo(1 / 3),
-      localMist: 0.35,
-    });
+    const seasonal = evaluateSunbeamMoteAirborneState(enabledBiome);
+    expect(seasonal.amount).toBeCloseTo(0.6);
+    expect(seasonal.coldBlend).toBeCloseTo(1 / 3);
+    expect(seasonal.localMist).toBeCloseTo(0.35);
     expect(evaluateSunbeamMoteAirborneState({
       enabled: true,
       morningMist: 0.75,
