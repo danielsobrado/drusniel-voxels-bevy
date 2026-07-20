@@ -18,6 +18,7 @@ export interface TreeRingSpeciesLayout {
   visiblePlanesOffset: number;
   shadowPlanesOffset: number;
   hydroAtlasOffset: number;
+  canopyCompetitionOffset: number;
   paramFloatCount: number;
   paramBytes: number;
 }
@@ -30,6 +31,7 @@ const TERRAIN_VISIBILITY_U32S = 4;
 const SETTINGS_FLOATS = 4;
 const MATERIAL_DENSITY_FLOATS = 4;
 const HYDRO_ATLAS_FLOATS = 4;
+const CANOPY_COMPETITION_FLOATS = 4;
 
 export function treeRingSpeciesLayout(speciesCount: number, shadowCascadeCount: number): TreeRingSpeciesLayout {
   const safeSpeciesCount = Math.max(1, Math.floor(speciesCount));
@@ -46,7 +48,8 @@ export function treeRingSpeciesLayout(speciesCount: number, shadowCascadeCount: 
   const visiblePlanesOffset = speciesMaterialOffset + safeSpeciesCount * 4;
   const shadowPlanesOffset = visiblePlanesOffset + VISIBLE_PLANE_FLOATS;
   const hydroAtlasOffset = shadowPlanesOffset + safeCascadeCount * SHADOW_PLANE_FLOATS_PER_CASCADE;
-  const paramFloatCount = hydroAtlasOffset + HYDRO_ATLAS_FLOATS;
+  const canopyCompetitionOffset = hydroAtlasOffset + HYDRO_ATLAS_FLOATS;
+  const paramFloatCount = canopyCompetitionOffset + CANOPY_COMPETITION_FLOATS;
   return {
     speciesCount: safeSpeciesCount,
     lodCount: TREE_RING_LOD_COUNT,
@@ -64,6 +67,7 @@ export function treeRingSpeciesLayout(speciesCount: number, shadowCascadeCount: 
     visiblePlanesOffset,
     shadowPlanesOffset,
     hydroAtlasOffset,
+    canopyCompetitionOffset,
     paramFloatCount,
     paramBytes: align4(paramFloatCount) * Float32Array.BYTES_PER_ELEMENT,
   };
