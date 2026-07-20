@@ -51,7 +51,7 @@ describe("terrain edit command service orbit authority", () => {
     ["raise", "add"],
   ] as const)("allows orbit-mode %s without a player authority origin", async (_label, brushOp) => {
     vi.useFakeTimers();
-    const runDigNow = vi.fn(async () => {});
+    const runDigNow = vi.fn<TerrainEditService["runDigNow"]>(async (_ray, _execution) => {});
     const service = createCommandGuardedTerrainEditService(createBaseService(runDigNow), {
       terrainRaycast: {
         raycastEditableTerrain: vi.fn(() => HIT),
