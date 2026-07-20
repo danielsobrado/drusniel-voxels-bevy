@@ -19,7 +19,9 @@ describe("water far reflection config", () => {
       sourceSpanM: 1024,
       sourceBuildCellsPerFrame: 512,
       maxSteps: 6,
+      startDistanceM: 16,
       maxDistanceM: 320,
+      stepGrowth: 1.8,
     });
   });
 
