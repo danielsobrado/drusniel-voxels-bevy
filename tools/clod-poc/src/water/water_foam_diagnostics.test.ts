@@ -3,14 +3,16 @@ import { publishWaterFoamDistanceFade } from "./water_foam_distance.js";
 import { getWaterFoamRuntimeDiagnostics } from "./water_foam_diagnostics.js";
 
 describe("water foam runtime diagnostics", () => {
-  it("reports the HQ material tier and v4 model contract", () => {
+  it("reports the HQ material tier and v5 model contract", () => {
     publishWaterFoamDistanceFade({ detailFadeStartM: 120, detailFadeEndM: 320 });
     const result = getWaterFoamRuntimeDiagnostics(new URLSearchParams("waterQuality=high&waterPerf=0"));
 
-    expect(result.modelRevision).toBe(4);
-    expect(result.modelName).toBe("coherent-fbm-flow-sun-distance-v4");
+    expect(result.modelRevision).toBe(5);
+    expect(result.modelName).toBe("coherent-fbm-flow-sun-distance-v5");
     expect(result.qualityTier).toBe("high");
-    expect(result.maxCoverage).toBe(0.52);
+    expect(result.maxCoverage).toBe(0.68);
+    expect(result.patternStart).toBe(0.42);
+    expect(result.patternEnd).toBe(0.85);
     expect(result.shadeCoverageFloor).toBe(0.55);
     expect(result.cpuFieldSamples).toBe(0);
     expect(result.webGpuUncapturedErrors).toBe(0);
