@@ -30,7 +30,7 @@ export class TreeCanopyCompetitionBinding {
     device.queue.writeTexture(
       { texture: this.fallbackTexture },
       new Uint8Array([0, 0, 0, 0]),
-      { bytesPerRow: 4 },
+      {},
       { width: 1, height: 1 },
     );
     this.texture = this.fallbackTexture;
