@@ -7,9 +7,9 @@ far_summary_reflection:
   source_snap_m: 64
   source_build_cells_per_frame: 512
   max_steps: 6
-  start_distance_m: 12
+  start_distance_m: 16
   max_distance_m: 320
-  step_growth: 1.65
+  step_growth: 1.8
   thickness_m: 18
   terrain_strength: 0.52
   prop_strength: 0.72
