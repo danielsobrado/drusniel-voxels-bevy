@@ -70,10 +70,10 @@ tree_impostor_evidence_mode = 0 off, 1 age, 2 competition
 
 ```powershell
 npm --prefix tools/clod-poc test -- `
+  src/trees/morphology/competition.test.ts `
   src/trees/morphology/impostor_competition.test.ts `
   src/trees/morphology/impostor_competition_contract.test.ts `
   src/trees/morphology/tree_lod_morphology_authority.test.ts `
-  src/trees/morphology/impostor_age_layers.test.ts `
   src/trees/tree_ring_impostor_node_material.test.ts
 
 npm --prefix tools/clod-poc run typecheck
