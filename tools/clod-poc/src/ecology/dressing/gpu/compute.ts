@@ -32,7 +32,7 @@ const CLASS_PARAM_BYTES = (DRESSING_GPU_GROUP_COUNT / DRESSING_GPU_LOD_COUNT)
   * Uint32Array.BYTES_PER_ELEMENT;
 const EXCLUSION_ENTRY_BYTES = 4 * Uint32Array.BYTES_PER_ELEMENT;
 
- type PipelineName = "clear_counters" | "generate_persistent" | "generate_terrain" | "build_indirect_args";
+type PipelineName = "clear_counters" | "generate_persistent" | "generate_terrain" | "build_indirect_args";
 
 export interface DressingGpuHydrologyData {
   readonly res: number;
@@ -60,6 +60,7 @@ export interface DressingGpuComputeStats {
 
 interface ExclusionGpuState {
   readonly table: DressingPersistentExclusionTable;
+  readonly sourceCount: number;
   readonly overflow: boolean;
 }
 
@@ -71,6 +72,7 @@ export class DressingGpuCompute {
   private digEdits: GPUBuffer;
   private persistentExclusions: GPUBuffer;
   private persistentExclusionCapacityMask: number;
+  private persistentExclusionTableCount: number;
   private persistentExclusionCount: number;
   private persistentExclusionOverflow: boolean;
   private lastPersistentExclusionRevision: number;
@@ -110,7 +112,8 @@ export class DressingGpuCompute {
     const exclusions = this.resolvePersistentExclusions();
     this.persistentExclusions = this.createPersistentExclusionsBuffer(exclusions.table);
     this.persistentExclusionCapacityMask = exclusions.table.capacityMask;
-    this.persistentExclusionCount = exclusions.table.count;
+    this.persistentExclusionTableCount = exclusions.table.count;
+    this.persistentExclusionCount = exclusions.sourceCount;
     this.persistentExclusionOverflow = exclusions.overflow;
     this.lastPersistentExclusionRevision = persistenceBridge.revision;
     device.queue.writeBuffer(this.classParamsBuffer, 0, gpuLayout.packed);
@@ -202,11 +205,15 @@ export class DressingGpuCompute {
     f32[14] = this.canopySource ? 1 : 0;
     f32[15] = input.unboundedWorld ? 1 : 0;
     u32[16] = this.gpuLayout.persistentCandidateStart >>> 0;
-    u32[17] = this.gpuLayout.persistentCandidateEnd >>> 0;
+    u32[17] = (
+      this.persistentExclusionOverflow
+        ? this.gpuLayout.persistentCandidateStart
+        : this.gpuLayout.persistentCandidateEnd
+    ) >>> 0;
     u32[18] = this.gpuLayout.terrainCandidateStart >>> 0;
     u32[19] = this.gpuLayout.terrainCandidateEnd >>> 0;
     u32[20] = this.persistentExclusionCapacityMask >>> 0;
-    u32[21] = this.persistentExclusionCount >>> 0;
+    u32[21] = this.persistentExclusionTableCount >>> 0;
     u32[22] = this.persistentExclusionOverflow ? 1 : 0;
     u32[23] = this.lastPersistentExclusionRevision >>> 0;
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramsScratch);
@@ -299,7 +306,8 @@ export class DressingGpuCompute {
     const previous = this.persistentExclusions;
     this.persistentExclusions = this.createPersistentExclusionsBuffer(next.table);
     this.persistentExclusionCapacityMask = next.table.capacityMask;
-    this.persistentExclusionCount = next.table.count;
+    this.persistentExclusionTableCount = next.table.count;
+    this.persistentExclusionCount = next.sourceCount;
     this.persistentExclusionOverflow = next.overflow;
     this.lastPersistentExclusionRevision = this.persistenceBridge.revision;
     this.bindGroup = this.createBindGroup();
@@ -308,10 +316,20 @@ export class DressingGpuCompute {
 
   private resolvePersistentExclusions(): ExclusionGpuState {
     const identities = this.persistenceBridge.exclusionSnapshot();
-    const table = buildDressingPersistentExclusionTable(identities);
+    const requiredCapacity = nextPowerOfTwo(Math.max(2, identities.length * 2));
     const maximumBytes = Number(this.device.limits.maxStorageBufferBindingSize);
-    if (table.words.byteLength <= maximumBytes) return { table, overflow: false };
-    return { table: buildDressingPersistentExclusionTable([]), overflow: true };
+    if (requiredCapacity * EXCLUSION_ENTRY_BYTES > maximumBytes) {
+      return {
+        table: buildDressingPersistentExclusionTable([]),
+        sourceCount: identities.length,
+        overflow: true,
+      };
+    }
+    return {
+      table: buildDressingPersistentExclusionTable(identities),
+      sourceCount: identities.length,
+      overflow: false,
+    };
   }
 
   private createBindGroup(): GPUBindGroup {
@@ -380,6 +398,10 @@ function createCanopyFallbackTextures(device: GPUDevice): { aux: GPUTexture; det
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   });
   return { aux: create("dressing GPU canopy fallback aux"), detail: create("dressing GPU canopy fallback detail") };
+}
+
+function nextPowerOfTwo(value: number): number {
+  return 2 ** Math.ceil(Math.log2(Math.max(2, value)));
 }
 
 export function dressingGpuComputeUnsupportedReason(device: GPUDevice): string | null {
