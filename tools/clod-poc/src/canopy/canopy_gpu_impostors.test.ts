@@ -85,7 +85,7 @@ describe("canopy GPU impostors", () => {
     });
 
     expect(shell.instanceCount).toBeLessThanOrEqual(5);
-    expect(shell.triangleCount).toBe(shell.instanceCount * 2);
+    expect(shell.triangleCount).toBe(shell.instanceCount * 6);
     expect(shell.maxInstances).toBe(5);
     expect(shell.centerX).toBe(300);
     expect(shell.centerZ).toBe(-100);
@@ -101,7 +101,7 @@ describe("canopy GPU impostors", () => {
     shell.dispose();
   });
 
-  it("uses a soft alpha-masked material instead of visible square cards", () => {
+  it("uses an alpha-hashed opaque material instead of blended square cards", () => {
     const shell = buildCanopyGpuImpostorsFromTextureSet(textureSet(), DEFAULT_CANOPY_SHELL_CONFIG, lighting(), {
       maxInstances: 5,
       coverageThreshold: 0.2,
@@ -109,11 +109,11 @@ describe("canopy GPU impostors", () => {
     });
     const material = shell.mesh.material as THREE.MeshBasicMaterial;
 
-    expect(material.transparent).toBe(true);
-    expect(material.depthWrite).toBe(false);
-    expect(material.opacity).toBeLessThan(0.7);
-    expect(material.alphaTest).toBeGreaterThan(0);
-    expect(material.alphaMap).toBeInstanceOf(THREE.DataTexture);
+    expect(material.transparent).toBe(false);
+    expect(material.depthWrite).toBe(true);
+    expect(material.alphaTest).toBe(0);
+    expect(shell.mesh.geometry.getAttribute("canopyTransitionNoise")).toBeInstanceOf(THREE.InstancedBufferAttribute);
+    expect(shell.mesh.geometry.getAttribute("canopyShellNoise")).toBeInstanceOf(THREE.InstancedBufferAttribute);
     shell.dispose();
   });
 
@@ -132,12 +132,12 @@ describe("canopy GPU impostors", () => {
     expect(shell.textureSetRevision).toBe(8);
     expect(shell.centerX).toBe(700);
     expect(shell.centerZ).toBe(300);
-    expect((shell.mesh.material as THREE.MeshBasicMaterial).opacity).toBe(0.25);
+    expect(shell.mesh.userData.canopyGpuImpostorOpacity).toBe(0.25);
     shell.dispose();
   });
 
   it("clamps and desaturates impostor colors to avoid neon canopy blocks", () => {
-    const display = canopyImpostorDisplayColor(new THREE.Color(0.0, 1.0, 0.0), 1, 2);
+    const display = canopyImpostorDisplayColor(new THREE.Color(0.0, 1.0, 0.0), 1);
 
     expect(display.g).toBeLessThanOrEqual(0.42);
     expect(display.r).toBeGreaterThan(0.05);
@@ -152,7 +152,7 @@ describe("canopy GPU impostors", () => {
     });
 
     expect(shell.mesh.userData.canopyGpuImpostorMaxColorChannel).toBeLessThanOrEqual(0.42);
-    expect(shell.mesh.userData.canopyGpuImpostorOpacity).toBeLessThan(0.7);
+    expect(shell.mesh.userData.canopyGpuImpostorOpacity).toBe(1);
     shell.dispose();
   });
 

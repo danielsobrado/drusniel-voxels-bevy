@@ -1,12 +1,20 @@
 import * as THREE from "three";
 import { StorageInstancedBufferAttribute } from "three/webgpu";
 import type { EnvironmentLighting } from "../environment/environment.js";
+import { hash01 as stableCellHash01 } from "./canopy_hash.js";
+import {
+  createCanopyGpuImpostorMaterial,
+  type CanopyGpuImpostorMaterialHandle,
+} from "./canopy_gpu_impostor_material.js";
+import { createCanopyCrownClusterGeometry } from "./canopy_gpu_impostor_geometry.js";
 import type { CanopyShellConfig } from "./canopy_types_internal.js";
 import type { CanopyTextureSet } from "./canopy_types.js";
 
 export interface CanopyGpuImpostorSample {
   x: number;
   z: number;
+  cellX: number;
+  cellZ: number;
   height: number;
   coverage: number;
   roughness: number;
@@ -21,6 +29,7 @@ export interface CanopyGpuImpostorOptions {
 
 export interface CanopyGpuImpostorShell {
   mesh: THREE.InstancedMesh;
+  materialHandle: CanopyGpuImpostorMaterialHandle;
   triangleCount: number;
   instanceCount: number;
   maxInstances: number;
@@ -35,12 +44,11 @@ const DEFAULT_COVERAGE_THRESHOLD = 0.12;
 const DEFAULT_MIN_INSTANCES = 64;
 const DEFAULT_MAX_INSTANCES = 8192;
 const DEFAULT_SAMPLE_STRIDE = 1;
-const CANOPY_IMPOSTOR_ALPHA_TEXTURE_SIZE = 48;
-const CANOPY_IMPOSTOR_OPACITY = 0.58;
-const CANOPY_IMPOSTOR_ALPHA_TEST = 0.08;
 const CANOPY_IMPOSTOR_MAX_COLOR_CHANNEL = 0.42;
+const CANOPY_CROWN_CLUSTER_TRIS = 6;
+const CANOPY_TRANSITION_NOISE_SALT = 8101;
+const CANOPY_SHELL_NOISE_SALT = 9203;
 const TMP_OBJECT = new THREE.Object3D();
-const HORIZONTAL_CANOPY_CARD = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
 
 type NumericTextureArray =
   | Float32Array
@@ -67,13 +75,16 @@ export function canopyTextureFiniteCenter(set: CanopyTextureSet): { x: number; z
   };
 }
 
-export function canopyImpostorDisplayColor(input: THREE.Color, coverage: number, sunScale: number): THREE.Color {
+/**
+ * Instance albedo for the canopy impostor. Sun/sky lighting is applied in the material
+ * from live uniforms, so only the desaturated forest albedo is baked here.
+ */
+export function canopyImpostorDisplayColor(input: THREE.Color, coverage: number): THREE.Color {
   const safeCoverage = clamp01(coverage);
-  const safeSun = Math.max(0.35, Math.min(1.05, Number.isFinite(sunScale) ? sunScale : 0.75));
   const forestBase = new THREE.Color(0.10, 0.17, 0.08);
   const desaturated = desaturateColor(input, 0.35);
   const coverageMix = 0.28 + safeCoverage * 0.42;
-  const display = forestBase.lerp(desaturated, coverageMix).multiplyScalar(0.78 + safeCoverage * 0.12).multiplyScalar(safeSun);
+  const display = forestBase.lerp(desaturated, coverageMix).multiplyScalar(0.78 + safeCoverage * 0.12);
   display.r = Math.min(display.r, CANOPY_IMPOSTOR_MAX_COLOR_CHANNEL);
   display.g = Math.min(display.g, CANOPY_IMPOSTOR_MAX_COLOR_CHANNEL);
   display.b = Math.min(display.b, CANOPY_IMPOSTOR_MAX_COLOR_CHANNEL);
@@ -91,21 +102,14 @@ export function buildCanopyGpuImpostorsFromTextureSet(
   const sampleStride = sanitizePositiveInteger(options.sampleStride, DEFAULT_SAMPLE_STRIDE);
   const samples = selectCanopyGpuImpostorSamples(set, maxInstances, coverageThreshold, sampleStride);
 
-  const geometry = new THREE.PlaneGeometry(1, 1, 1, 1);
-  const alphaMap = createCanopyImpostorAlphaMap();
-  const material = new THREE.MeshBasicMaterial({
-    alphaMap,
-    vertexColors: true,
-    transparent: true,
-    opacity: CANOPY_IMPOSTOR_OPACITY,
-    alphaTest: CANOPY_IMPOSTOR_ALPHA_TEST,
-    depthWrite: false,
-    depthTest: true,
-    side: THREE.DoubleSide,
-    toneMapped: true,
-  });
-  const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, maxInstances));
-  mesh.instanceMatrix = new StorageInstancedBufferAttribute(Math.max(1, maxInstances), 16);
+  const capacity = Math.max(1, maxInstances);
+  const geometry = createCanopyCrownClusterGeometry();
+  geometry.setAttribute("canopyAlbedo", new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3));
+  geometry.setAttribute("canopyTransitionNoise", new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1));
+  geometry.setAttribute("canopyShellNoise", new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1));
+  const materialHandle = createCanopyGpuImpostorMaterial(lighting, 0, 1);
+  const mesh = new THREE.InstancedMesh(geometry, materialHandle.material, capacity);
+  mesh.instanceMatrix = new StorageInstancedBufferAttribute(capacity, 16);
   mesh.name = "CanopyGpuImpostors";
   mesh.frustumCulled = true;
   mesh.castShadow = false;
@@ -114,6 +118,7 @@ export function buildCanopyGpuImpostorsFromTextureSet(
 
   const shell: CanopyGpuImpostorShell = {
     mesh,
+    materialHandle,
     triangleCount: 0,
     instanceCount: 0,
     maxInstances,
@@ -123,8 +128,7 @@ export function buildCanopyGpuImpostorsFromTextureSet(
     textureSetRevision: -1,
     dispose: () => {
       geometry.dispose();
-      alphaMap.dispose();
-      material.dispose();
+      materialHandle.dispose();
     },
   };
   updateCanopyGpuImpostorsFromTextureSet(shell, set, config, lighting, sampleStride, samples);
@@ -146,7 +150,10 @@ export function updateCanopyGpuImpostorsFromTextureSet(
     sampleStride,
   );
   const center = canopyTextureFiniteCenter(set);
-  const sunScale = canopySunScale(lighting);
+  const seed = Math.floor(config.seed);
+  const albedoAttr = shell.mesh.geometry.getAttribute("canopyAlbedo") as THREE.InstancedBufferAttribute;
+  const transitionAttr = shell.mesh.geometry.getAttribute("canopyTransitionNoise") as THREE.InstancedBufferAttribute;
+  const shellNoiseAttr = shell.mesh.geometry.getAttribute("canopyShellNoise") as THREE.InstancedBufferAttribute;
   let maxDisplayChannel = 0;
   for (let i = 0; i < samples.length; i++) {
     const sample = samples[i]!;
@@ -154,18 +161,23 @@ export function updateCanopyGpuImpostorsFromTextureSet(
     const cardSize = canopyCardSize(set, config, sample, shell.coverageThreshold);
     const jitter = unifiedDensity ? canopyCardJitter(sample.x, sample.z, set.extentM / set.resolution) : { x: 0, z: 0 };
     TMP_OBJECT.position.set(sample.x + jitter.x - center.x, sample.height, sample.z + jitter.z - center.z);
-    TMP_OBJECT.quaternion.copy(HORIZONTAL_CANOPY_CARD);
-    TMP_OBJECT.scale.set(cardSize, cardSize, 1);
+    TMP_OBJECT.quaternion.identity();
+    TMP_OBJECT.scale.set(cardSize, cardSize, cardSize);
     TMP_OBJECT.updateMatrix();
     shell.mesh.setMatrixAt(i, TMP_OBJECT.matrix);
     const displayCoverage = unifiedDensity ? clamp01(sample.coverage / 0.05) : sample.coverage;
-    const displayColor = canopyImpostorDisplayColor(sample.color, displayCoverage, sunScale);
+    const displayColor = canopyImpostorDisplayColor(sample.color, displayCoverage);
     maxDisplayChannel = Math.max(maxDisplayChannel, displayColor.r, displayColor.g, displayColor.b);
-    shell.mesh.setColorAt(i, displayColor);
+    albedoAttr.setXYZ(i, displayColor.r, displayColor.g, displayColor.b);
+    transitionAttr.setX(i, stableCellHash01(sample.cellX, sample.cellZ, seed + CANOPY_TRANSITION_NOISE_SALT));
+    shellNoiseAttr.setX(i, stableCellHash01(sample.cellX, sample.cellZ, seed + CANOPY_SHELL_NOISE_SALT));
   }
   shell.mesh.count = samples.length;
   shell.mesh.instanceMatrix.needsUpdate = true;
-  if (shell.mesh.instanceColor) shell.mesh.instanceColor.needsUpdate = true;
+  albedoAttr.needsUpdate = true;
+  transitionAttr.needsUpdate = true;
+  shellNoiseAttr.needsUpdate = true;
+  shell.materialHandle.updateLighting(lighting);
   shell.mesh.computeBoundingBox();
   shell.mesh.computeBoundingSphere();
   shell.mesh.position.set(center.x, 0, center.z);
@@ -174,8 +186,8 @@ export function updateCanopyGpuImpostorsFromTextureSet(
   shell.mesh.userData.canopyGpuImpostorCenterX = center.x;
   shell.mesh.userData.canopyGpuImpostorCenterZ = center.z;
   shell.mesh.userData.canopyGpuImpostorMaxColorChannel = maxDisplayChannel;
-  shell.mesh.userData.canopyGpuImpostorOpacity = (shell.mesh.material as THREE.MeshBasicMaterial).opacity;
-  shell.triangleCount = samples.length * 2;
+  shell.mesh.userData.canopyGpuImpostorOpacity = canopyGpuImpostorDefaultOpacity();
+  shell.triangleCount = samples.length * CANOPY_CROWN_CLUSTER_TRIS;
   shell.instanceCount = samples.length;
   shell.centerX = center.x;
   shell.centerZ = center.z;
@@ -183,13 +195,13 @@ export function updateCanopyGpuImpostorsFromTextureSet(
 }
 
 export function setCanopyGpuImpostorOpacity(shell: CanopyGpuImpostorShell, opacity: number): void {
-  const material = shell.mesh.material as THREE.MeshBasicMaterial;
-  material.opacity = THREE.MathUtils.clamp(opacity, 0, CANOPY_IMPOSTOR_OPACITY);
-  shell.mesh.userData.canopyGpuImpostorOpacity = material.opacity;
+  const blend = THREE.MathUtils.clamp(opacity, 0, 1);
+  shell.materialHandle.setShellBlend(blend);
+  shell.mesh.userData.canopyGpuImpostorOpacity = blend;
 }
 
 export function canopyGpuImpostorDefaultOpacity(): number {
-  return CANOPY_IMPOSTOR_OPACITY;
+  return 1;
 }
 
 export function selectCanopyGpuImpostorSamples(
@@ -207,15 +219,20 @@ export function selectCanopyGpuImpostorSamples(
   const stride = Math.max(1, Math.floor(sampleStride));
   const cellM = set.extentM / resolution;
 
+  const safeCellM = Math.max(1e-3, cellM);
   for (let z = 0; z < resolution; z += stride) {
     for (let x = 0; x < resolution; x += stride) {
       const index = z * resolution + x;
       const coverage = clamp01(coverageData[index] ?? 0);
       if (coverage < coverageThreshold) continue;
       const speciesIndex = speciesData.length >= resolution * resolution * 4 ? index * 4 : index * 3;
+      const worldX = set.originX + (x + 0.5) * cellM;
+      const worldZ = set.originZ + (z + 0.5) * cellM;
       candidates.push({
-        x: set.originX + (x + 0.5) * cellM,
-        z: set.originZ + (z + 0.5) * cellM,
+        x: worldX,
+        z: worldZ,
+        cellX: Math.floor(worldX / safeCellM),
+        cellZ: Math.floor(worldZ / safeCellM),
         height: finiteOr(heightData[index], 0),
         coverage,
         roughness: clamp01(roughnessData[index] ?? 0),
@@ -235,35 +252,6 @@ export function selectCanopyGpuImpostorSamples(
     picked.push(candidates[Math.floor(i * step)]!);
   }
   return picked;
-}
-
-function createCanopyImpostorAlphaMap(): THREE.DataTexture {
-  const size = CANOPY_IMPOSTOR_ALPHA_TEXTURE_SIZE;
-  const data = new Uint8Array(size * size * 4);
-  const center = (size - 1) * 0.5;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const dx = (x - center) / center;
-      const dy = (y - center) / center;
-      const radius = Math.hypot(dx, dy);
-      const core = 1 - smoothstep(0.35, 1.0, radius);
-      const dither = ((x * 17 + y * 31) % 11) / 255;
-      const value = Math.round(clamp01(core + dither) * 255);
-      const offset = (y * size + x) * 4;
-      data[offset] = value;
-      data[offset + 1] = value;
-      data[offset + 2] = value;
-      data[offset + 3] = value;
-    }
-  }
-  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
-  texture.name = "CanopyGpuImpostorAlphaMap";
-  texture.magFilter = THREE.LinearFilter;
-  texture.minFilter = THREE.LinearFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.needsUpdate = true;
-  return texture;
 }
 
 function textureFloatData(texture: THREE.DataTexture): Float32Array {
@@ -321,12 +309,6 @@ function hash01(x: number, z: number): number {
   return value - Math.floor(value);
 }
 
-function canopySunScale(lighting: EnvironmentLighting): number {
-  const sun = Math.max(lighting.sunColor.r, lighting.sunColor.g, lighting.sunColor.b);
-  const sky = Math.max(lighting.skyLight.r, lighting.skyLight.g, lighting.skyLight.b);
-  return Math.max(0.4, Math.min(1.05, sky * 0.65 + sun * 0.22));
-}
-
 function desaturateColor(color: THREE.Color, amount: number): THREE.Color {
   const t = clamp01(amount);
   const luma = color.r * 0.299 + color.g * 0.587 + color.b * 0.114;
@@ -335,11 +317,6 @@ function desaturateColor(color: THREE.Color, amount: number): THREE.Color {
     THREE.MathUtils.lerp(color.g, luma, t),
     THREE.MathUtils.lerp(color.b, luma, t),
   );
-}
-
-function smoothstep(edge0: number, edge1: number, value: number): number {
-  const t = clamp01((value - edge0) / Math.max(1e-6, edge1 - edge0));
-  return t * t * (3 - 2 * t);
 }
 
 function sanitizePositiveInteger(value: number | undefined, fallback: number): number {
