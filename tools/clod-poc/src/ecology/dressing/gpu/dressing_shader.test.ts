@@ -20,6 +20,18 @@ describe("dressing GPU shader", () => {
     expect(shader).not.toContain("DRESSING_WORKGROUP_SIZE: u32 = 64u");
   });
 
+  it("rejects saved persistent identities before parent-derived emission", () => {
+    const shader = composeDressingGpuShader();
+    expect(shader).toContain("@group(0) @binding(15) var<storage, read> persistent_exclusions");
+    expect(shader).toContain("fn dressing_identity_excluded");
+    expect(shader).toContain("class_data.class_meta.y == DRESSING_PERSISTENT_OWNERSHIP && dressing_identity_excluded(identity)");
+    expect(shader).toContain("pairing_roll >= pairing_probability || dressing_identity_excluded(stump_identity)");
+    const exclusionIndex = shader.indexOf("dressing_identity_excluded(identity)");
+    const parentEmissionIndex = shader.indexOf("emit_paired_stump(class_index");
+    expect(exclusionIndex).toBeGreaterThanOrEqual(0);
+    expect(parentEmissionIndex).toBeGreaterThan(exclusionIndex);
+  });
+
   it("avoids Dawn-reserved identifiers and ambiguous bitwise precedence", () => {
     const shader = composeDressingGpuShader();
     expect(shader).not.toMatch(/\blet\s+class\b/);
