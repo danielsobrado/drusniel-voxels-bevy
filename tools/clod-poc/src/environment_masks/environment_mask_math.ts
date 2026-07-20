@@ -9,6 +9,7 @@ import type {
   EnvironmentalMaskSettings,
   RiverMistMaskSettings,
 } from "./environment_mask_types.js";
+import { evaluateSunbeamMoteMaskValue } from "./sunbeam_mote_mask_state.js";
 
 export interface EnvironmentalMaskMathInput {
   readonly settings: EnvironmentalMaskSettings;
@@ -156,13 +157,12 @@ export function evaluateEnvironmentalMaskValues(
     output.rapidSplash = config.strength * wet * isRiver * Math.max(configuredRapid, derivedRapid);
   }
 
-  if (input.settings.sunbeamMote.enabled && input.visibilityValid) {
-    const config = input.settings.sunbeamMote;
-    const airborneAmount = Math.max(input.biome.morningMist, input.biome.pollenAmount * 0.45);
-    output.sunbeamMote = config.strength
-      * clamp01(airborneAmount)
-      * ramp(config.visibilityStart, config.visibilityEnd, visibility);
-  }
+  output.sunbeamMote = evaluateSunbeamMoteMaskValue({
+    settings: input.settings.sunbeamMote,
+    biome: input.biome,
+    visibilityValid: input.visibilityValid,
+    sunVisibility: input.sunVisibility,
+  });
 
   if (input.settings.calmPool.enabled && input.waterValid && input.riverValid) {
     const config = input.settings.calmPool;
