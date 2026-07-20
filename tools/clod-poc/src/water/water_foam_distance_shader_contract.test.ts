@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const CONFIG_SOURCE = readFileSync(new URL("../../config/water.yaml", import.meta.url), "utf8");
 const FOAM_NODES_SOURCE = readFileSync(new URL("./water_foam_nodes.ts", import.meta.url), "utf8");
+const DISTANCE_SOURCE = readFileSync(new URL("./water_foam_distance.ts", import.meta.url), "utf8");
 const DISTANCE_NODES_SOURCE = readFileSync(new URL("./water_foam_distance_nodes.ts", import.meta.url), "utf8");
 const HQ_SOURCE = readFileSync(new URL("./waterNodeMaterial.ts", import.meta.url), "utf8");
 const PERF_SOURCE = readFileSync(new URL("./waterPerfNodeMaterial.ts", import.meta.url), "utf8");
@@ -10,6 +11,10 @@ const WEBGL_SOURCE = readFileSync(new URL("./water_glsl_fragment.ts", import.met
 const UNIFORMS_SOURCE = readFileSync(new URL("./water_uniform_state.ts", import.meta.url), "utf8");
 const MATERIAL_SOURCE = readFileSync(new URL("./waterMaterial.ts", import.meta.url), "utf8");
 const MODEL_SOURCE = readFileSync(new URL("./water_foam_model.ts", import.meta.url), "utf8");
+const DEBUG_SOURCE = readFileSync(
+  new URL("../runtime/water_weather/water_controller_debug.ts", import.meta.url),
+  "utf8",
+);
 
 describe("shared water foam camera-distance fade", () => {
   it("owns the metre range in canonical YAML", () => {
@@ -50,10 +55,37 @@ describe("shared water foam camera-distance fade", () => {
     expect(WEBGL_SOURCE).not.toContain("smoothstep(0.25, 1.25, vLevel)");
   });
 
+  it("injects synthetic metres before the real smoothstep in both shader families", () => {
+    expect(DISTANCE_SOURCE).toContain("setWaterFoamDistanceDebugOverrideM");
+    expect(DISTANCE_NODES_SOURCE).toContain("mix(measuredDistanceM, refs.debugDistanceM, refs.debugEnabled)");
+    expect(DISTANCE_NODES_SOURCE).toContain("smoothstep(startM, endM, distanceM)");
+    expect(WEBGL_SOURCE).toContain("uFoamDetailDistanceOverrideEnabled");
+    expect(WEBGL_SOURCE).toContain("uFoamDetailDistanceOverrideM");
+    expect(WEBGL_SOURCE).toContain("mix(\n      measuredCameraDistanceM,");
+    expect(WEBGL_SOURCE).toContain(
+      "smoothstep(uFoamDetailFadeStartM, uFoamDetailFadeEndM, cameraDistanceM)",
+    );
+  });
+
+  it("shares WebGL override uniforms and keeps renderer-neutral state free of TSL", () => {
+    expect(UNIFORMS_SOURCE).toContain("getWaterFoamDistanceDebugUniforms");
+    expect(UNIFORMS_SOURCE).toContain("uFoamDetailDistanceOverrideEnabled: foamDistanceDebug.enabled");
+    expect(UNIFORMS_SOURCE).toContain("uFoamDetailDistanceOverrideM: foamDistanceDebug.distanceM");
+    expect(DISTANCE_SOURCE).not.toContain('from "three/tsl"');
+    expect(UNIFORMS_SOURCE).not.toContain('from "three/tsl"');
+  });
+
+  it("exposes and resets the synthetic acceptance controls only through water debug", () => {
+    expect(DEBUG_SOURCE).toContain("setWaterFoamDistanceDebugOverrideM(null)");
+    expect(DEBUG_SOURCE).toContain("foamTimeFreeze.setFrozen(false)");
+    expect(DEBUG_SOURCE).toContain("setWaterFoamDistanceOverrideM");
+    expect(DEBUG_SOURCE).toContain("setWaterFoamTimeFrozen");
+    expect(DEBUG_SOURCE).not.toContain('searchParams.get("foamDistance');
+  });
+
   it("publishes and synchronizes the range without a TSL import in WebGL state", () => {
     expect(UNIFORMS_SOURCE).toContain("publishWaterFoamDistanceFade(visual.foam)");
     expect(UNIFORMS_SOURCE).toContain("uFoamDetailFadeStartM");
-    expect(UNIFORMS_SOURCE).not.toContain('from "three/tsl"');
     expect(MATERIAL_SOURCE).toContain("publishWaterFoamDistanceFade(v.foam)");
     expect(MATERIAL_SOURCE).toContain("uFoamDetailFadeEndM.value = foamDistance.endM");
   });

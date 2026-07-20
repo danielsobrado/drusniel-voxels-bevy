@@ -12,7 +12,20 @@ export interface WaterFoamDistanceFadeState extends WaterFoamDistanceFade {
   readonly version: number;
 }
 
+export interface WaterFoamDistanceDebugOverrideState {
+  readonly enabled: boolean;
+  readonly distanceM: number;
+}
+
+export interface WaterFoamDistanceDebugUniforms {
+  readonly enabled: { value: number };
+  readonly distanceM: { value: number };
+}
+
 export type WaterFoamDistanceFadeListener = (state: WaterFoamDistanceFadeState) => void;
+export type WaterFoamDistanceDebugOverrideListener = (
+  state: WaterFoamDistanceDebugOverrideState,
+) => void;
 
 let state: WaterFoamDistanceFadeState = {
   startM: 0,
@@ -20,7 +33,16 @@ let state: WaterFoamDistanceFadeState = {
   valid: false,
   version: 0,
 };
+let debugOverride: WaterFoamDistanceDebugOverrideState = {
+  enabled: false,
+  distanceM: 0,
+};
 const listeners = new Set<WaterFoamDistanceFadeListener>();
+const debugListeners = new Set<WaterFoamDistanceDebugOverrideListener>();
+const debugUniforms: WaterFoamDistanceDebugUniforms = {
+  enabled: { value: 0 },
+  distanceM: { value: 0 },
+};
 
 export function resolveWaterFoamDistanceFade(
   foam: Pick<WaterFoamVisualConfig, "detailFadeStartM" | "detailFadeEndM">,
@@ -57,6 +79,38 @@ export function subscribeWaterFoamDistanceFade(listener: WaterFoamDistanceFadeLi
   return () => listeners.delete(listener);
 }
 
+export function setWaterFoamDistanceDebugOverrideM(
+  value: number | null,
+): WaterFoamDistanceDebugOverrideState {
+  const next = value === null
+    ? { enabled: false, distanceM: 0 }
+    : { enabled: true, distanceM: finiteNonNegative(value, "foam distance debug override") };
+  if (debugOverride.enabled === next.enabled && debugOverride.distanceM === next.distanceM) {
+    return debugOverride;
+  }
+  debugOverride = next;
+  debugUniforms.enabled.value = next.enabled ? 1 : 0;
+  debugUniforms.distanceM.value = next.distanceM;
+  for (const listener of debugListeners) listener(debugOverride);
+  return debugOverride;
+}
+
+export function getWaterFoamDistanceDebugOverride(): WaterFoamDistanceDebugOverrideState {
+  return debugOverride;
+}
+
+export function getWaterFoamDistanceDebugUniforms(): WaterFoamDistanceDebugUniforms {
+  return debugUniforms;
+}
+
+export function subscribeWaterFoamDistanceDebugOverride(
+  listener: WaterFoamDistanceDebugOverrideListener,
+): () => void {
+  debugListeners.add(listener);
+  listener(debugOverride);
+  return () => debugListeners.delete(listener);
+}
+
 export function evaluateWaterFoamDistanceFade(
   distanceM: number,
   fade: WaterFoamDistanceFade,
@@ -69,6 +123,11 @@ export function evaluateWaterFoamDistanceFade(
 
 function nonNegativeFinite(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function finiteNonNegative(value: number, label: string): number {
+  if (!Number.isFinite(value)) throw new Error(`${label} must be finite or null`);
+  return Math.max(0, value);
 }
 
 function clamp01(value: number): number {

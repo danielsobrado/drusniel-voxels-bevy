@@ -45,6 +45,8 @@ export const WATER_FRAG = /* glsl */ `
   uniform float uShoreDistFoamEnd;
   uniform float uFoamDetailFadeStartM;
   uniform float uFoamDetailFadeEndM;
+  uniform float uFoamDetailDistanceOverrideEnabled;
+  uniform float uFoamDetailDistanceOverrideM;
   uniform float uFoamNoiseScale;
   uniform float uFoamShoreStrength;
   uniform float uFoamRiverStrength;
@@ -235,7 +237,12 @@ export const WATER_FRAG = /* glsl */ `
     float riverFast = smoothstep(uFoamSpeedStart, uFoamSpeedEnd, vFlow.z);
     float riverDrop = smoothstep(uFoamDropStart, uFoamDropEnd, abs(vFlow.w));
     float rapidSource = riverFast * riverDrop * riverWeight * uFoamRiverStrength;
-    float cameraDistanceM = distance(worldPos.xz, uCameraPos.xz);
+    float measuredCameraDistanceM = distance(worldPos.xz, uCameraPos.xz);
+    float cameraDistanceM = mix(
+      measuredCameraDistanceM,
+      uFoamDetailDistanceOverrideM,
+      uFoamDetailDistanceOverrideEnabled
+    );
     float foamDetailFade = 1.0 - smoothstep(uFoamDetailFadeStartM, uFoamDetailFadeEndM, cameraDistanceM);
     float foam = clamp(
       (shoreSource + rapidSource) * breakup * wetFade * foamDetailFade,
