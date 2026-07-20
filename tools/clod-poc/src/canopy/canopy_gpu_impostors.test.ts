@@ -4,6 +4,7 @@ import { DEFAULT_CANOPY_SHELL_CONFIG } from "./canopy_defaults.js";
 import type { CanopyTextureSet } from "./canopy_types.js";
 import {
   buildCanopyGpuImpostorsFromTextureSet,
+  canopyCrownCenterY,
   canopyImpostorDisplayColor,
   canopyTextureFiniteCenter,
   maxCanopyGpuImpostorInstances,
@@ -115,6 +116,14 @@ describe("canopy GPU impostors", () => {
     expect(shell.mesh.geometry.getAttribute("canopyTransitionNoise")).toBeInstanceOf(THREE.InstancedBufferAttribute);
     expect(shell.mesh.geometry.getAttribute("canopyShellNoise")).toBeInstanceOf(THREE.InstancedBufferAttribute);
     shell.dispose();
+  });
+
+  it("anchors the crown top at the sampled canopy height", () => {
+    const canopyHeight = 42;
+    const crownSize = 20;
+    const centerY = canopyCrownCenterY(canopyHeight, crownSize);
+
+    expect(centerY + crownSize * 0.45).toBeCloseTo(canopyHeight);
   });
 
   it("refreshes instance content without rebuilding shell geometry", () => {
