@@ -74,12 +74,7 @@ function parseConfig(raw: Record<string, unknown> | undefined, fallback: Config)
       debugFallbackWarning: readBoolean(source.debug_fallback_warning, fallback.source.debugFallbackWarning),
     },
     distances: {
-      realTreeEndM: readNumber(distances.real_tree_end_m, fallback.distances.realTreeEndM),
-      impostorEndM: readNumber(distances.impostor_end_m, fallback.distances.impostorEndM),
-      shellStartM: readNumber(distances.shell_start_m, fallback.distances.shellStartM),
-      shellFullM: readNumber(distances.shell_full_m, fallback.distances.shellFullM),
       shellEndM: readNumber(distances.shell_end_m, fallback.distances.shellEndM),
-      fadeBandM: readNumber(distances.fade_band_m, fallback.distances.fadeBandM),
     },
     clipmap: {
       enabled: readBoolean(clipmap.enabled, fallback.clipmap.enabled),
@@ -130,23 +125,8 @@ function parseConfig(raw: Record<string, unknown> | undefined, fallback: Config)
 
 export function validateCanopyShellConfig(config: CanopyShellConfig): void {
   const d = config.distances;
-  if (d.realTreeEndM > d.impostorEndM) {
-    throw new Error(`canopy_shell: real_tree_end_m (${d.realTreeEndM}) must be <= impostor_end_m (${d.impostorEndM})`);
-  }
-  if (d.impostorEndM > d.shellFullM) {
-    throw new Error(`canopy_shell: impostor_end_m (${d.impostorEndM}) must be <= shell_full_m (${d.shellFullM})`);
-  }
-  if (d.shellStartM > d.shellFullM) {
-    throw new Error(`canopy_shell: shell_start_m (${d.shellStartM}) must be <= shell_full_m (${d.shellFullM})`);
-  }
-  if (d.shellFullM > d.shellEndM) {
-    throw new Error(`canopy_shell: shell_full_m (${d.shellFullM}) must be <= shell_end_m (${d.shellEndM})`);
-  }
   if (d.shellEndM <= 0) {
     throw new Error("canopy_shell: shell_end_m must be > 0");
-  }
-  if (d.fadeBandM <= 0) {
-    throw new Error("canopy_shell: fade_band_m must be > 0");
   }
   if (config.clipmap.cellSizeM <= 0) {
     throw new Error("canopy_shell: clipmap.cell_size_m must be > 0");

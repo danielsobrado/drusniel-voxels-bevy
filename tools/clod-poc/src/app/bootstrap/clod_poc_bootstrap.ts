@@ -1,5 +1,7 @@
 import phase0ConfigText from "../../../config/infinite_streaming_phase0.yaml?raw";
 import naadfConfigText from "../../../config/naadf_poc.yaml?raw";
+import vegetationLodYaml from "../../../config/vegetation_lod.yaml?raw";
+import canopyShellYaml from "../../../config/canopy_shell.yaml?raw";
 import { installGlobalErrorHooks } from "../../core/diagnostics.js";
 import { parseClodRuntimeConfig } from "../runtime_config.js";
 import { runContentRegistryStartup } from "./content_registry_startup.js";
@@ -13,6 +15,15 @@ import { runPostRendererStartup } from "./post_renderer_startup.js";
 import { runTerrainViewStartup } from "./terrain_view_startup.js";
 import { runRuntimeSystemsStartup } from "./runtime/runtime_systems_startup.js";
 import { runUiStartup } from "./ui/ui_startup.js";
+import {
+  parseVegetationLodConfig,
+  validateVegetationLodContract,
+} from "../../vegetation/vegetation_lod_config.js";
+import { applyVegetationLodToTrees } from "../../vegetation/apply_vegetation_lod.js";
+import {
+  applyCanopyShellQueryOverrides,
+  parseCanopyShellConfig,
+} from "../../canopy/canopy_config.js";
 import { initFarSummaryIntegration } from "../../far-summary/integration.js";
 import {
   applyFarSummaryOceanFallback,
@@ -139,6 +150,21 @@ export async function bootstrapClodPoc() {
   }
   attachSaveRuntimeCounters(postRenderer.longViewHooks?.stats?.counters ?? null);
 
+  const vegetationLodConfig = parseVegetationLodConfig(vegetationLodYaml);
+  const initialCanopyConfig = applyCanopyShellQueryOverrides(
+    parseCanopyShellConfig(canopyShellYaml),
+    searchParams,
+  );
+  const runtimeTreeConfig = applyVegetationLodToTrees(
+    world.treeConfig,
+    vegetationLodConfig,
+  );
+  validateVegetationLodContract(
+    vegetationLodConfig,
+    runtimeTreeConfig,
+    initialCanopyConfig,
+  );
+
   const terrainView = runTerrainViewStartup({
     app: renderer.app,
     scene: renderer.scene,
@@ -156,6 +182,9 @@ export async function bootstrapClodPoc() {
     worldMode: world.worldMode,
     terrainSummary: world.terrainSummary,
     terrainFieldConfig: world.worldSource.metadata.terrain,
+    treeConfig: runtimeTreeConfig,
+    canopyConfig: initialCanopyConfig,
+    vegetationLodConfig,
     hydrologyFieldsTexture: world.hydrologySystem?.hydrologyFieldsTexture() ?? null,
     isLongView: postRenderer.isLongView,
     queryFarShell: queries.queryFarShell,
@@ -458,7 +487,7 @@ export async function bootstrapClodPoc() {
     unboundedWorld: world.worldSource.metadata.bounds === "infinite",
     grassConfig: world.grassConfig,
     stoneConfig: world.stoneConfig,
-    treeConfig: world.treeConfig,
+    treeConfig: runtimeTreeConfig,
     understoryConfig: world.understoryConfig,
     forestLightingConfig: world.forestLightingConfig,
     waterConfig: world.waterConfig,
@@ -586,7 +615,7 @@ export async function bootstrapClodPoc() {
     getClodErrorCompute: postRenderer.getClodErrorCompute,
     ensureClodErrorCompute: postRenderer.ensureClodErrorCompute,
     textureLoadOptions: postRenderer.textureLoadOptions,
-    treeConfig: world.treeConfig,
+    treeConfig: runtimeTreeConfig,
     understoryConfig: world.understoryConfig,
   });
 }

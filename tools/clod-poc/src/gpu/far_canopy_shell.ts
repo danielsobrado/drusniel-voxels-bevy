@@ -110,12 +110,7 @@ export function buildFarCanopyShell(
   };
   const config = {
     distances: {
-      shellStartM: opts.fadeIn,
-      shellFullM: opts.fadeIn + opts.fadeBand,
       shellEndM: farRadius,
-      fadeBandM: opts.fadeBand,
-      realTreeEndM: 220,
-      impostorEndM: 650,
     },
     material: {
       crownBumpStrengthM: 4.5,
@@ -134,6 +129,8 @@ export function buildFarCanopyShell(
     worldSize,
     buildRelative: false,
     skipInteriorHole: false,
+    fadeIn: opts.fadeIn,
+    fadeBand: opts.fadeBand,
   });
 }
 
@@ -143,6 +140,8 @@ export interface FarCanopyShellFromSourceOptions extends Partial<FarCanopyShellO
   skipInteriorHole?: boolean;
   showCoverageHeatmap?: boolean;
   wireframe?: boolean;
+  fadeIn?: number;
+  fadeBand?: number;
 }
 
 /**
@@ -160,8 +159,8 @@ export function buildFarCanopyShellFromTextureSet(
   const origin = textureSet.originX;
   const extent = textureSet.extentM;
   const farRadius = extent * 0.5;
-  const FADE_IN = config.distances.shellStartM;
-  const FADE_BAND = config.distances.fadeBandM;
+  const FADE_IN = options.fadeIn ?? opts.fadeIn;
+  const FADE_BAND = options.fadeBand ?? opts.fadeBand;
   const worldSize = options.worldSize ?? extent;
   const buildRelative = options.buildRelative ?? false;
   const center = buildRelative ? 0 : worldSize / 2;

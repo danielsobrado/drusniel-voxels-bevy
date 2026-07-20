@@ -8,12 +8,7 @@ canopy_shell:
     debug_fallback_warning: true
 
   distances:
-    real_tree_end_m: 220
-    impostor_end_m: 650
-    shell_start_m: 620
-    shell_full_m: 760
     shell_end_m: 8192
-    fade_band_m: 140
 
   clipmap:
     enabled: true

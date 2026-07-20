@@ -3,10 +3,9 @@ import type { EnvironmentLighting } from "../environment/environment.js";
 import type { TerrainSummaryField } from "../clod/terrain_summary.js";
 import type { CanopyShellConfig } from "./canopy_types_internal.js";
 import {
-  applyCanopyShellQueryOverrides,
-  parseCanopyShellConfig,
   shouldUseDeterministicCanopy,
 } from "./canopy_config.js";
+import type { VegetationLodConfig } from "../vegetation/vegetation_lod_config.js";
 import type { CanopyTextureSet } from "./canopy_types.js";
 import { canopyMetricsToCounters, createEmptyCanopyMetrics } from "./canopy_types.js";
 import { createCanopyClipmap } from "./canopy_clipmap.js";
@@ -47,6 +46,7 @@ export interface CanopyShellSystemDeps {
   terrainFieldConfig?: TerrainFieldConfig | null;
   getLighting: () => EnvironmentLighting;
   getConfig: () => CanopyShellConfig;
+  getVegetationLodConfig: () => VegetationLodConfig;
   getDebugState: () => CanopyDebugState;
   onCounters?: (counters: Record<string, number>) => void;
   getFarSummaryProvider?: () => FarHeightProvider | undefined;
@@ -152,13 +152,12 @@ export function shouldKeepCanopyShellActive(
 }
 
 export function createCanopyShellSystem(
-  yamlText: string,
   searchParams: URLSearchParams,
   scene: string | null,
   queryCanopy: boolean,
   deps: CanopyShellSystemDeps,
 ): CanopyShellSystem | null {
-  let config = applyCanopyShellQueryOverrides(parseCanopyShellConfig(yamlText), searchParams);
+  let config = structuredClone(deps.getConfig());
   const active = shouldUseDeterministicCanopy(scene, config, queryCanopy);
   if (!active) return null;
 
@@ -256,6 +255,12 @@ export function createCanopyShellSystem(
     debugState.syntheticFallbackActive = false;
   };
 
+  const applyShellHandoff = (target: CanopyGpuImpostorShell) => {
+    const handoff = deps.getVegetationLodConfig().canopyHandoff;
+    target.materialHandle.updateTransition(handoff.startM, handoff.endM);
+    target.materialHandle.updateLighting(deps.getLighting());
+  };
+
   const rebuildShell = (set: CanopyTextureSet) => {
     if (shell) {
       deps.scene.remove(shell.mesh);
@@ -267,6 +272,7 @@ export function createCanopyShellSystem(
       coverageThreshold: impostorCoverageThreshold,
       sampleStride: 1,
     });
+    applyShellHandoff(shell);
     deps.scene.add(shell.mesh);
     metrics.shellTriangles = shell.triangleCount;
     metrics.gpuImpostorEnabled = 1;
@@ -284,6 +290,7 @@ export function createCanopyShellSystem(
         coverageThreshold: impostorCoverageThreshold,
         sampleStride: 1,
       });
+      applyShellHandoff(standbyShell);
       setCanopyGpuImpostorOpacity(standbyShell, 0);
       standbyShell.mesh.visible = false;
       deps.scene.add(standbyShell.mesh);
@@ -299,6 +306,7 @@ export function createCanopyShellSystem(
     }
     if (!standbyShell) return;
     updateCanopyGpuImpostorsFromTextureSet(standbyShell, set, config, deps.getLighting());
+    applyShellHandoff(standbyShell);
     metrics.shellTriangles = standbyShell.triangleCount;
     metrics.gpuImpostorInstances = standbyShell.instanceCount;
     metrics.gpuImpostorCenterX = standbyShell.centerX;
@@ -455,7 +463,15 @@ export function createCanopyShellSystem(
     if (!shouldKeepCanopyShellActive(config, false)) {
       disposeShellAndTextures();
       textureRefreshPending = false;
-      updateCanopyDebugOverlays(overlays, clipmap.getVisibleTiles(), config, centerX, centerZ, debugState);
+      updateCanopyDebugOverlays(
+        overlays,
+        clipmap.getVisibleTiles(),
+        config,
+        centerX,
+        centerZ,
+        debugState,
+        deps.getVegetationLodConfig().canopyHandoff,
+      );
       publish();
       return;
     }
@@ -503,7 +519,15 @@ export function createCanopyShellSystem(
       if (!Array.isArray(material) && "wireframe" in material) material.wireframe = debugState.showShellWireframe;
     }
 
-    updateCanopyDebugOverlays(overlays, clipmap.getVisibleTiles(), config, centerX, centerZ, debugState);
+    updateCanopyDebugOverlays(
+      overlays,
+      clipmap.getVisibleTiles(),
+      config,
+      centerX,
+      centerZ,
+      debugState,
+      deps.getVegetationLodConfig().canopyHandoff,
+    );
     publish();
   };
 

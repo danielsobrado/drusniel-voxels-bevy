@@ -40,7 +40,7 @@ export function createTreeCrownProxyNodeMaterialHandle(
   const uDensity = uniform(dims.density);
   const uFadeCenter = uniform(new THREE.Vector2());
   const uFarDistance = uniform(settings.distanceM * settings.lod.farFraction);
-  const uImpostorDistance = uniform(settings.distanceM * settings.lod.impostorFraction);
+  const uImpostorDistance = uniform(settings.lod.impostorEndM);
   const uBandDistance = uniform(settings.lod.crossfadeEnabled ? settings.lod.crossfadeBandM : 0);
   const uLodIndex = uniform(TREE_LODS.indexOf(lod));
   const regularMaterial = buildMaterial(
@@ -81,7 +81,7 @@ export function createTreeCrownProxyNodeMaterialHandle(
       uCenterY.value = nextDims.centerY;
       uDensity.value = nextDims.density;
       uFarDistance.value = next.distanceM * next.lod.farFraction;
-      uImpostorDistance.value = next.distanceM * next.lod.impostorFraction;
+      uImpostorDistance.value = next.lod.impostorEndM;
       uBandDistance.value = next.lod.crossfadeEnabled ? next.lod.crossfadeBandM : 0;
     },
     dispose() {

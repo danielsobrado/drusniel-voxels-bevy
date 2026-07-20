@@ -9,12 +9,7 @@ export const DEFAULT_CANOPY_SHELL_CONFIG: CanopyShellConfig = {
     debugFallbackWarning: true,
   },
   distances: {
-    realTreeEndM: 220,
-    impostorEndM: 650,
-    shellStartM: 620,
-    shellFullM: 760,
     shellEndM: 8192,
-    fadeBandM: 140,
   },
   clipmap: {
     enabled: true,

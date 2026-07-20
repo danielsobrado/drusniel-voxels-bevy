@@ -5,12 +5,7 @@ export interface CanopySourceConfig {
 }
 
 export interface CanopyDistanceConfig {
-  realTreeEndM: number;
-  impostorEndM: number;
-  shellStartM: number;
-  shellFullM: number;
   shellEndM: number;
-  fadeBandM: number;
 }
 
 export interface CanopyClipmapRingConfig {

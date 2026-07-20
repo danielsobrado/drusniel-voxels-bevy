@@ -137,7 +137,7 @@ function validationSettings() {
   settings.lod.nearFraction = 0.3;
   settings.lod.midFraction = 0.55;
   settings.lod.farFraction = 0.8;
-  settings.lod.impostorFraction = 1;
+  settings.lod.impostorEndM = 80;
   settings.lod.crossfadeBandM = 4;
   settings.lod.shadowsMaxLod = "impostor";
   for (const species of TREE_SPECIES) settings.species[species].weight = species === "oak" ? 1 : 0;

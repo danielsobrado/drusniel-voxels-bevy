@@ -46,20 +46,22 @@ import { type TerrainTextureLoadOptions } from "../../terrain/material/texture_l
 import { createTerrainTextureController } from "../../terrain/material/terrain_texture_controller.js";
 import { createTerrainMaterialController } from "../../terrain/material/terrain_material_controller.js";
 import { createFarShellController } from "../../systems/far_shell_controller.js";
-import canopyShellYaml from "../../../config/canopy_shell.yaml?raw";
 import {
-  applyCanopyShellQueryOverrides,
-  parseCanopyShellConfig,
   shouldSkipLegacyCanopy,
   shouldUseDeterministicCanopy,
+  type CanopyShellConfig,
 } from "../../canopy/canopy_config.js";
 import {
   createCanopyShellSystem,
   type CanopyShellSystem,
 } from "../../canopy/canopy_system.js";
-import { applyConfigToCanopyDebugState, createCanopyDebugState } from "../../canopy/canopy_debug.js";
-import type { CanopyShellConfig } from "../../canopy/canopy_types_internal.js";
-import type { CanopyDebugState } from "../../canopy/canopy_debug.js";
+import {
+  applyConfigToCanopyDebugState,
+  createCanopyDebugState,
+  type CanopyDebugState,
+} from "../../canopy/canopy_debug.js";
+import type { VegetationLodConfig } from "../../vegetation/vegetation_lod_config.js";
+import type { TreeSettings } from "../../trees/tree_config.js";
 import materialsYaml from "../../../config/long_view_materials.yaml?raw";
 import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
 import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
@@ -108,6 +110,9 @@ export interface TerrainViewStartupInput {
   terrainSummary: TerrainSummaryField;
   /** Resolved procedural terrain config (worldSource.metadata.terrain); powers worker-side canopy builds. */
   terrainFieldConfig?: import("../../terrain/terrain.js").TerrainFieldConfig | null;
+  treeConfig: TreeSettings;
+  canopyConfig: CanopyShellConfig;
+  vegetationLodConfig: VegetationLodConfig;
   hydrologyFieldsTexture: THREE.Texture | null;
   isLongView: boolean;
   queryFarShell: boolean;
@@ -308,7 +313,7 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   }
   let liveShadowProxyConfig = { ...shadowProxyConfig };
 
-  let liveCanopyConfig = applyCanopyShellQueryOverrides(parseCanopyShellConfig(canopyShellYaml), searchParams);
+  let liveCanopyConfig = structuredClone(input.canopyConfig);
   const useDeterministicCanopy = shouldUseDeterministicCanopy(queryScene, liveCanopyConfig, input.queryCanopy);
   let canopyDebugState: CanopyDebugState | null = useDeterministicCanopy
     ? createCanopyDebugState(liveCanopyConfig)
@@ -360,13 +365,14 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
   }
 
   const canopyShellSystem = useDeterministicCanopy
-    ? createCanopyShellSystem(canopyShellYaml, searchParams, queryScene, input.queryCanopy, {
+    ? createCanopyShellSystem(searchParams, queryScene, input.queryCanopy, {
       scene,
       terrainSummary,
       worldSizeCells,
       terrainFieldConfig: input.terrainFieldConfig ?? null,
       getLighting: currentLighting,
       getConfig: () => liveCanopyConfig,
+      getVegetationLodConfig: () => input.vegetationLodConfig,
       getDebugState: () => canopyDebugState!,
       onCounters: (counters) => {
         if (!longViewHooks?.stats) return;
@@ -656,9 +662,10 @@ export function runTerrainViewStartup(input: TerrainViewStartupInput): TerrainVi
     canopyDebugState,
     getCanopyConfig: () => liveCanopyConfig,
     setCanopyConfig: (config: CanopyShellConfig) => {
-      liveCanopyConfig = { ...config };
+      liveCanopyConfig = structuredClone(config);
+
       if (canopyDebugState) {
-        applyConfigToCanopyDebugState(canopyDebugState, config);
+        applyConfigToCanopyDebugState(canopyDebugState, liveCanopyConfig);
       }
     },
     shadowProxyController,

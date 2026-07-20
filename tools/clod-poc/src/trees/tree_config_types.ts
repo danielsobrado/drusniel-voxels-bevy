@@ -88,10 +88,20 @@ export interface TreeLodSettings {
   nearFraction: number;
   midFraction: number;
   farFraction: number;
-  impostorFraction: number;
+
+  /** Final tree-impostor ownership radius. Injected from vegetation_lod.yaml. */
+  impostorEndM: number;
+
+  /** Start and end of the tree-impostor → far-canopy handoff. */
+  canopyFadeStartM: number;
+  canopyFadeEndM: number;
+
   hysteresisM: number;
-  crossfadeEnabled: boolean;
+
+  /** Full transition width. Rendering code converts this to a half-width. */
   crossfadeBandM: number;
+
+  crossfadeEnabled: boolean;
   ditherEnabled: boolean;
   shadowsMaxLod: TreeLod | "none";
   budgets: {

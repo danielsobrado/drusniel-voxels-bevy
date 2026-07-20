@@ -1,0 +1,4 @@
+vegetation_lod:
+  canopy_handoff:
+    start_m: 620
+    end_m: 760

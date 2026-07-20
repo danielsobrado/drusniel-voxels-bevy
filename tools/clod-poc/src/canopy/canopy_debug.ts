@@ -117,6 +117,7 @@ export function updateCanopyDebugOverlays(
   centerX: number,
   centerZ: number,
   state: CanopyDebugState,
+  handoff?: { startM: number; endM: number },
 ): void {
   disposeGroupGeometry(overlays.tileBoundsGroup);
   disposeGroupGeometry(overlays.fadeZoneGroup);
@@ -134,7 +135,10 @@ export function updateCanopyDebugOverlays(
   }
 
   if (state.showFadeZone) {
-    const { shellStartM, shellFullM, shellEndM, fadeBandM } = config.distances;
+    const shellEndM = config.distances.shellEndM;
+    const shellStartM = handoff?.startM ?? 620;
+    const shellFullM = handoff?.endM ?? 760;
+    const fadeBandM = Math.max(1, shellFullM - shellStartM);
     for (const [radius, color] of [
       [shellStartM, 0x00ffff],
       [shellFullM, 0x0088ff],

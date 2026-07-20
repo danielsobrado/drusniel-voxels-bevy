@@ -17,26 +17,10 @@ describe("canopy config", () => {
     expect(cfg.clipmap.rings.length).toBe(3);
   });
 
-  it("rejects invalid distance ordering", () => {
-    const bad = structuredClone(DEFAULT_CANOPY_SHELL_CONFIG);
-    bad.distances.impostorEndM = 9000;
-    expect(() => validateCanopyShellConfig(bad)).toThrow(/impostor_end_m/);
-  });
-
-  it("rejects shell start after shell full distance", () => {
-    const bad = structuredClone(DEFAULT_CANOPY_SHELL_CONFIG);
-    bad.distances.shellStartM = bad.distances.shellFullM + 1;
-    expect(() => validateCanopyShellConfig(bad)).toThrow(/shell_start_m/);
-  });
-
-  it("rejects non-positive shell and fade distances", () => {
+  it("rejects non-positive shell end distance", () => {
     const badShell = structuredClone(DEFAULT_CANOPY_SHELL_CONFIG);
     badShell.distances.shellEndM = 0;
     expect(() => validateCanopyShellConfig(badShell)).toThrow(/shell_end_m/);
-
-    const badFade = structuredClone(DEFAULT_CANOPY_SHELL_CONFIG);
-    badFade.distances.fadeBandM = 0;
-    expect(() => validateCanopyShellConfig(badFade)).toThrow(/fade_band_m/);
   });
 
   it("rejects invalid streaming budgets", () => {

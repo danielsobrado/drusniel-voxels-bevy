@@ -34,7 +34,7 @@ function settings() {
   out.lod.nearFraction = 0.3;
   out.lod.midFraction = 0.55;
   out.lod.farFraction = 0.8;
-  out.lod.impostorFraction = 1;
+  out.lod.impostorEndM = 80;
   out.lod.crossfadeBandM = 4;
   out.lod.shadowsMaxLod = "impostor";
   for (const id of TREE_SPECIES) out.species[id].weight = id === "oak" ? 1 : 0;
