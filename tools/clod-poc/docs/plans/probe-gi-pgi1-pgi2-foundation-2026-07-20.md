@@ -42,11 +42,14 @@ This document therefore calls the combined work a foundation rather than claimin
 
 ## Verification
 
+Focused isolated verification completed on 2026-07-20: strict TypeScript and 9 Vitest files / 19 tests passed.
+
 ```powershell
 npm --prefix tools/clod-poc run typecheck
 npm --prefix tools/clod-poc test -- `
   src/lighting/probe_gi/config.test.ts `
   src/lighting/probe_gi/clipmap_origin.test.ts `
+  src/lighting/probe_gi/canonical_providers.test.ts `
   src/lighting/probe_gi/record_packing.test.ts `
   src/lighting/probe_gi/relocation.test.ts `
   src/lighting/probe_gi/publication.test.ts `
