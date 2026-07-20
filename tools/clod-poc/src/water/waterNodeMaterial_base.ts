@@ -58,6 +58,8 @@ import { buildWaterStaticGridNodes } from "./water_node_static_grid.js";
 import { buildWaterAtlasGridNodes } from "./water_node_atlas_grid.js";
 import { buildWaterGlitter, buildWaterSuspendedScatter } from "./water_node_optics.js";
 import { buildWaterFoamNodes } from "./water_foam_nodes.js";
+import { buildWaterNoiseNormals } from "./water_node_normal_models.js";
+import { waterNormalModelId } from "./water_normal_models.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // three 0.184's TSL node graph types are intentionally loose: extension methods
@@ -109,6 +111,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uCameraPos = uniform(u.uCameraPos.value) as TslNode;
   const uSunDir = uniform(u.uSunDir.value) as TslNode;
   const uWorldBounds = uniform(u.uWorldBounds.value) as TslNode;
+  const uNormalModel = uniform(waterNormalModelId(params.visual.normalModel)) as TslNode;
   const uRiverFlowNormalStrength = uniform(riverMaterial.flowNormalStrength) as TslNode;
   const uRiverCrossCurrentStrength = uniform(riverMaterial.crossCurrentStrength) as TslNode;
   const uRiverRapidNormalBoost = uniform(riverMaterial.rapidNormalBoost) as TslNode;
@@ -256,7 +259,26 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       .mul(float(0.45).add(rapidMask.mul(uRiverRapidNormalBoost)));
     const gradX: TslNode = mix(gAx, gBx, blend).add(channelGrad.x).mul(uRippleAmp);
     const gradZ: TslNode = mix(gAz, gBz, blend).add(channelGrad.y).mul(uRippleAmp);
-    const normal: TslNode = normalize(vec3(gradX.negate(), float(1), gradZ.negate()));
+    const legacyNormal: TslNode = normalize(vec3(gradX.negate(), float(1), gradZ.negate()));
+    const cameraDistance: TslNode = uCameraPos.sub(worldPos).length();
+    const noiseNormals = buildWaterNoiseNormals({
+      worldXZ: worldPos.xz,
+      time: uTime,
+      cameraDistance,
+      rapidMask,
+      phaseBlend: blend,
+      advectA,
+      advectB,
+      rippleAmp: uRippleAmp,
+      rippleScaleA: uRippleScaleA,
+      rippleScaleB: uRippleScaleB,
+      rippleStrengthA: uRippleStrengthA,
+      rippleStrengthB: uRippleStrengthB,
+    });
+    const normal: TslNode = uNormalModel.equal(2).select(
+      legacyNormal,
+      uNormalModel.equal(1).select(noiseNormals.glacial, noiseNormals.fable5),
+    );
 
     const viewDir: TslNode = normalize(uCameraPos.sub(worldPos));
     const sunDir: TslNode = normalize(uSunDir);
@@ -538,6 +560,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     body.sync(v.bodies);
     uFoam.value.copy(u.uFoamColor.value);
     uAlpha.value = v.alpha;
+    uNormalModel.value = waterNormalModelId(v.normalModel);
     uRippleCycle.value = v.rippleCycle;
     uFresnelPower.value = v.fresnel.power;
     uRippleAmp.value = v.rippleAmp;
