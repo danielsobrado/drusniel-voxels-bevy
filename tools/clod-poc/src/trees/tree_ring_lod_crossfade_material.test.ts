@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cloneTreeSettings } from "./tree_config.js";
+import { treeLodCrossfadeHalfBandM } from "./tree_lod_transition.js";
 import {
   treeRingCrossfadeKeeps,
   treeRingCrossfadeState,
@@ -22,9 +23,15 @@ describe("GPU tree ring LOD crossfade material", () => {
   it("keeps far and impostor pixels complementary through the compute overlap band", () => {
     const settings = configuredSettings();
     const threshold = settings.distanceM * settings.lod.farFraction;
-    const band = settings.lod.crossfadeBandM;
+    const halfBand = treeLodCrossfadeHalfBandM(settings);
 
-    for (const distance of [threshold - band, threshold - band / 2, threshold, threshold + band / 2, threshold + band]) {
+    for (const distance of [
+      threshold - halfBand,
+      threshold - halfBand / 2,
+      threshold,
+      threshold + halfBand / 2,
+      threshold + halfBand,
+    ]) {
       const far = treeRingCrossfadeState(distance, "far", settings);
       const impostor = treeRingCrossfadeState(distance, "impostor", settings);
       expect(far.fade + impostor.fade).toBeCloseTo(1, 8);
