@@ -9,6 +9,7 @@ describe("water reference presets", () => {
 
     applyWaterReferencePreset(visual, "fable5");
 
+    expect(visual.normalModel).toBe("fable5");
     expect(visual.rippleAmp).toBe(0.10);
     expect(visual.fresnel.normalFlatten).toBe(0.97);
     expect(visual.glitter.tightExponent).toBe(160);
@@ -20,6 +21,7 @@ describe("water reference presets", () => {
 
     applyWaterReferencePreset(visual, "glacial");
 
+    expect(visual.normalModel).toBe("glacial");
     expect(visual.rippleAmp).toBe(0.20);
     expect(visual.fresnel.normalFlatten).toBe(0.92);
     expect(visual.glitter.tightExponent).toBe(320);
@@ -28,10 +30,12 @@ describe("water reference presets", () => {
 
   it("leaves custom values unchanged", () => {
     const visual = cloneWaterConfig(DEFAULT_WATER_CONFIG).visual;
+    visual.normalModel = "legacy";
     visual.rippleAmp = 0.713;
 
     applyWaterReferencePreset(visual, "custom");
 
+    expect(visual.normalModel).toBe("legacy");
     expect(visual.rippleAmp).toBe(0.713);
   });
 });
