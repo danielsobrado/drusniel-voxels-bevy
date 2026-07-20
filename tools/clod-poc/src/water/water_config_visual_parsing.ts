@@ -5,6 +5,7 @@ import {
   type WaterBodyVisualPreset,
   type WaterBodyVisualPresets,
 } from "./water_body_presets.js";
+import { resolveWaterFoamAlbedo } from "./water_foam_albedo.js";
 import {
   readBoolean,
   readColorTuple,
@@ -63,7 +64,9 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
   return {
     shallowColor: parsedBase.shallowColor,
     deepColor: parsedBase.deepColor,
-    foamColor: readColorTuple(visual.foam_color ?? visual.foamColor, defaults.foamColor),
+    foamColor: resolveWaterFoamAlbedo(
+      readColorTuple(visual.foam_color ?? visual.foamColor, defaults.foamColor),
+    ),
     alpha: readNumber(visual.alpha, defaults.alpha),
     rippleCycle: readNumber(visual.ripple_cycle ?? visual.rippleCycle, defaults.rippleCycle),
     fresnelPower: readNumber(visual.fresnel_power ?? visual.fresnelPower, defaults.fresnelPower),
