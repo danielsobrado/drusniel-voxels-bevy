@@ -10,6 +10,7 @@ import {
   HYDROLOGY_BODY_RIVER,
   type HydrologySample,
 } from "./hydrologyGrid.js";
+import { createRuntimeGravelBedTerrainResolver } from "./runtime_gravel_bed_terrain.js";
 import type { TerrainHeightSampler } from "./water_field_types.js";
 
 interface Segment {
@@ -299,6 +300,24 @@ function sampleGraphWater(
     : drySample(terrainY, drySentinelDepthM);
 }
 
+function createGraphTerrainCarver(
+  graph: HydrologyGraph,
+  segmentIndex: SegmentIndex,
+  shoreDistance: Float32Array,
+  terrain: TerrainHeightSampler,
+  drySentinelDepthM: number,
+): GraphHydrologySampler["carveHeight"] {
+  const applyGravelBed = createRuntimeGravelBedTerrainResolver(terrain);
+  return (x, z, baseHeight, config) => {
+    const terrainY = carveCanonicalHeight(graph, segmentIndex, x, z, baseHeight, config);
+    return applyGravelBed(
+      x,
+      z,
+      sampleGraphWater(graph, segmentIndex, shoreDistance, terrainY, x, z, drySentinelDepthM),
+    ).terrainY;
+  };
+}
+
 /** Uses the graph and its persisted erosion field as the only generated-base authority. */
 export function createGraphHydrologySampler(
   graph: HydrologyGraph,
@@ -309,7 +328,13 @@ export function createGraphHydrologySampler(
   const segmentIndex = graphSegmentIndex(graph);
   const shoreDistance = lakeShoreDistanceField(graph);
   return {
-    carveHeight: (x, z, baseHeight, config) => carveCanonicalHeight(graph, segmentIndex, x, z, baseHeight, config),
+    carveHeight: createGraphTerrainCarver(
+      graph,
+      segmentIndex,
+      shoreDistance,
+      terrain,
+      drySentinelDepthM,
+    ),
     sample(x, z) {
       const fallback = terrain.surfaceHeight(x, z);
       const terrainY = canonicalBaseHeight(graph, x, z, fallback);
@@ -329,7 +354,13 @@ export function createCarvedGraphHydrologySampler(
   const segmentIndex = graphSegmentIndex(graph);
   const shoreDistance = lakeShoreDistanceField(graph);
   return {
-    carveHeight: (x, z, baseHeight, config) => carveCanonicalHeight(graph, segmentIndex, x, z, baseHeight, config),
+    carveHeight: createGraphTerrainCarver(
+      graph,
+      segmentIndex,
+      shoreDistance,
+      terrain,
+      drySentinelDepthM,
+    ),
     sample(x, z) {
       const fallback = terrain.surfaceHeight(x, z);
       const terrainY = carveCanonicalHeight(graph, segmentIndex, x, z, fallback, carve);

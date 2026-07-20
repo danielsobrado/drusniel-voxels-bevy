@@ -6,6 +6,7 @@ import {
   HYDROLOGY_BODY_RIVER,
   type HydrologySample,
 } from "./hydrologyGrid.js";
+import { createRuntimeGravelBedTerrainResolver } from "./runtime_gravel_bed_terrain.js";
 
 const BASIN_SIZE_M = 768;
 const LAKE_RADIUS_MIN_M = 42;
@@ -643,8 +644,13 @@ export function carveInfiniteHydrologyHeight(
 export function createTracedHydrologyCarver(
   sampler: TerrainHeightSampler,
 ): { carveHeight(x: number, z: number, baseHeight: number, config: InfiniteHydrologyCarveConfig): number } {
+  const applyGravelBed = createRuntimeGravelBedTerrainResolver(sampler);
   return {
-    carveHeight: (x, z, baseHeight, config) => carveInfiniteHydrologyHeight(x, z, baseHeight, sampler, config),
+    carveHeight: (x, z, baseHeight, config) => applyGravelBed(
+      x,
+      z,
+      sampleInfiniteHydrologyAtBaseHeight(x, z, baseHeight, sampler, { carve: config }),
+    ).terrainY,
   };
 }
 
@@ -744,15 +750,15 @@ function riverCandidate(terrainY: number, hits: readonly ChannelHit[]): Hydrolog
   };
 }
 
-export function sampleInfiniteHydrology(
+function sampleInfiniteHydrologyAtBaseHeight(
   x: number,
   z: number,
+  baseY: number,
   sampler: TerrainHeightSampler,
-  options: InfiniteHydrologyOptions = {},
+  options: InfiniteHydrologyOptions,
 ): HydrologySample {
   const dryDepthM = Math.max(1, options.drySentinelDepthM ?? DRY_DEPTH_M);
   const carve = options.carve ?? null;
-  const baseY = sampler.surfaceHeight(x, z);
   const channelHits = collectChannelHits(x, z, sampler);
   const basinHits = collectBasinHits(x, z, sampler);
   const terrainY = carve
@@ -764,4 +770,19 @@ export function sampleInfiniteHydrology(
   if (river) return river;
   if (lake) return lake;
   return drySample(terrainY, dryDepthM);
+}
+
+export function sampleInfiniteHydrology(
+  x: number,
+  z: number,
+  sampler: TerrainHeightSampler,
+  options: InfiniteHydrologyOptions = {},
+): HydrologySample {
+  return sampleInfiniteHydrologyAtBaseHeight(
+    x,
+    z,
+    sampler.surfaceHeight(x, z),
+    sampler,
+    options,
+  );
 }
