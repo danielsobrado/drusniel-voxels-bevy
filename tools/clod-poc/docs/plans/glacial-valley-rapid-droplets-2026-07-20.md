@@ -23,14 +23,14 @@ Existing cascade mist, cascade splash, and foam drift behavior remains intact.
 
 ## Configuration
 
-The existing river cascade particle runtime now owns:
+`config/river_ambience.yaml` is the production authority for the complete cascade-particle state, including:
 
-- `rapidDropletStrength`;
-- `rapidDropletThreshold`;
-- `rapidDropletsPerEmitter`;
-- `rapidDropletGravity`.
+- `rapid_droplet_strength`;
+- `rapid_droplet_threshold`;
+- `rapid_droplets_per_emitter`;
+- `rapid_droplet_gravity`.
 
-The lil-gui river particle folder exposes the same values. URL parameters remain development overrides because this pre-existing particle runtime has not yet been moved to YAML authority.
+The lil-gui river particle folder exposes the same values. URL parameters remain temporary development overrides seeded from YAML.
 
 ## Diagnostics
 
