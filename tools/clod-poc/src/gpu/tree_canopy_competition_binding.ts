@@ -1,4 +1,7 @@
-import { activeForestLightingGpuTexture } from "../forest_lighting/index.js";
+import {
+  activeForestLightingGpuTexture,
+  registerForestLightingGpuDevice,
+} from "../forest_lighting/index.js";
 
 export interface TreeCanopyCompetitionParams {
   readonly worldCells: number;
@@ -16,7 +19,8 @@ export class TreeCanopyCompetitionBinding {
   };
   private rebinds = 0;
 
-  constructor(private readonly device: GPUDevice) {
+  constructor(device: GPUDevice) {
+    registerForestLightingGpuDevice(device);
     this.fallbackTexture = device.createTexture({
       label: "tree canopy competition fallback",
       size: { width: 1, height: 1 },
@@ -35,21 +39,24 @@ export class TreeCanopyCompetitionBinding {
 
   refresh(): boolean {
     const source = activeForestLightingGpuTexture();
-    const valid = source !== null
-      && Number.isFinite(source.worldCells)
-      && source.worldCells > 1
-      && Number.isFinite(source.resolution)
-      && source.resolution > 1;
-    const nextTexture = valid ? source.detailTexture : this.fallbackTexture;
-    const changed = nextTexture !== this.texture;
-    if (changed) {
-      this.texture = nextTexture;
-      this.rebinds++;
+    if (
+      source === null
+      || !Number.isFinite(source.worldCells)
+      || source.worldCells <= 1
+      || !Number.isFinite(source.resolution)
+      || source.resolution <= 1
+    ) {
+      return this.applySource(this.fallbackTexture, {
+        worldCells: 1,
+        resolution: 1,
+        enabled: false,
+      });
     }
-    this.state = valid
-      ? { worldCells: source.worldCells, resolution: source.resolution, enabled: true }
-      : { worldCells: 1, resolution: 1, enabled: false };
-    return changed;
+    return this.applySource(source.detailTexture, {
+      worldCells: source.worldCells,
+      resolution: source.resolution,
+      enabled: true,
+    });
   }
 
   view(): GPUTextureView {
@@ -66,5 +73,15 @@ export class TreeCanopyCompetitionBinding {
 
   destroy(): void {
     this.fallbackTexture.destroy();
+  }
+
+  private applySource(texture: GPUTexture, state: TreeCanopyCompetitionParams): boolean {
+    const changed = texture !== this.texture;
+    if (changed) {
+      this.texture = texture;
+      this.rebinds++;
+    }
+    this.state = state;
+    return changed;
   }
 }
