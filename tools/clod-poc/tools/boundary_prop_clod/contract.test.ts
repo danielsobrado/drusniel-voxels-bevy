@@ -23,6 +23,8 @@ function passingEvidence(): BoundaryPropClodEvidence {
       failed: 0,
       safetyPending: 0,
       safetyInflight: 0,
+      refinementPending: 0,
+      refinementInflight: 0,
       activeRoots: 12,
     },
   };
@@ -63,7 +65,12 @@ describe("boundary prop CLOD contract", () => {
     const evidence: BoundaryPropClodEvidence = {
       ...base,
       counters: { ...base.counters, clod_far_gap_holes: 2 },
-      stream: { ...base.stream, pending: 1, activeRoots: 0 },
+      stream: {
+        ...base.stream,
+        pending: 1,
+        refinementPending: 2,
+        activeRoots: 0,
+      },
     };
 
     const result = evaluateBoundaryPropClodEvidence(evidence);
@@ -71,6 +78,7 @@ describe("boundary prop CLOD contract", () => {
     expect(result.passed).toBe(false);
     expect(result.failures).toContain("clod_far_gap_holes=2");
     expect(result.failures).toContain("stream pending=1");
+    expect(result.failures).toContain("stream refinement pending=2");
     expect(result.failures).toContain("no active streamed CLOD roots after convergence");
   });
 });
