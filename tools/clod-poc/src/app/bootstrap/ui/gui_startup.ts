@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { createClodPocGui } from "../../../ui/gui/gui_root.js";
 import { createSceneGui } from "../../../ui/gui/scene_gui.js";
+import { createCustomPropsGui } from "../../../ui/gui/custom_props_gui.js";
 import { createSunLightGui } from "../../../ui/gui/sun_light_gui.js";
 import { shadowProxyDebugStateToConfig } from "../../../shadows/shadowProxyDebug.js";
 import { createClodShadowOverlayController } from "../../../clod_shadow_overlay_controller.js";
@@ -74,6 +75,7 @@ export function runGuiStartup(
     updateLighting,
     visibleStoneClasses,
     onStoneScatterComplete,
+    customProps,
   } = input.runtime;
   const { applyColorAdjustmentsToTerrain } = input.terrainView;
   const { updateInfo, applyClodPerfMode } = infoPanel;
@@ -212,6 +214,12 @@ export function runGuiStartup(
     },
   });
   createSceneGui(guiResult.gui);
+  if (customProps) {
+    createCustomPropsGui(guiResult.gui, {
+      initiallyEnabled: customProps.initiallyEnabled,
+      setEnabled: (enabled) => customProps.propController.setEnabled(enabled),
+    });
+  }
   createSunLightGui(guiResult.gui);
   session.clodShadowStatsController = guiResult.clodShadowStatsController;
   clodShadowOverlayController.update();
