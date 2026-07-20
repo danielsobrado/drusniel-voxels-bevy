@@ -14,19 +14,23 @@ const MAXIMUM_HEIGHT_CACHE_ENTRIES = 4_096;
 export function createCanonicalProbeGiProviders(
   queryOverride?: ComposedEnvironmentQuery | null,
 ): ProbeGiProviders {
-  const resolveQuery = (): ComposedEnvironmentQuery | null => queryOverride ?? readActiveEnvironmentQuery();
+  const resolveQuery = (): ComposedEnvironmentQuery | null => queryOverride === undefined
+    ? readActiveEnvironmentQuery()
+    : queryOverride;
   const heightCache = new Map<string, number | null>();
-  let heightCacheRevision = Number.NaN;
-  const terrainRevision = (): number => Math.max(
-    getDigEditRevision(),
-    getVoxelEditRevision(),
-    voxelEditStore.revision(),
-  );
+  let heightCacheRevisionKey = "";
+  const revisionParts = (): readonly [number, number, number] => [
+    nonNegativeRevision(getDigEditRevision()),
+    nonNegativeRevision(getVoxelEditRevision()),
+    nonNegativeRevision(voxelEditStore.revision()),
+  ];
+  const terrainRevision = (): number => combineRevisions(revisionParts());
   const heightAt = (x: number, z: number, hintM: number): number | null => {
-    const revision = terrainRevision();
-    if (revision !== heightCacheRevision) {
+    const revisions = revisionParts();
+    const revisionKey = revisions.join(":");
+    if (revisionKey !== heightCacheRevisionKey) {
       heightCache.clear();
-      heightCacheRevision = revision;
+      heightCacheRevisionKey = revisionKey;
     }
     const key = `${x},${z},${hintM}`;
     if (heightCache.has(key)) return heightCache.get(key) ?? null;
@@ -63,4 +67,17 @@ export function createCanonicalProbeGiProviders(
       },
     },
   };
+}
+
+function nonNegativeRevision(value: number): number {
+  return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
+
+function combineRevisions(revisions: readonly [number, number, number]): number {
+  let hash = 2_166_136_261;
+  for (const revision of revisions) {
+    hash ^= revision >>> 0;
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
 }
