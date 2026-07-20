@@ -3,7 +3,7 @@ import {
   type DressingClassId,
   type PersistentDressingClassId,
 } from "./class_registry.js";
-import { stableIdKey } from "./stable_id.js";
+import { parseStableIdKey, stableIdKey } from "./stable_id.js";
 import type { DressingStableId, EnvironmentalPropDelta, SerializedTransform } from "./types.js";
 
 export interface DressingDeltaInput {
@@ -17,6 +17,11 @@ export interface DressingDeltaInput {
 export class DressingPersistenceBridge {
   private readonly deltas = new Map<string, EnvironmentalPropDelta>();
   private readonly exclusions = new Set<string>();
+  private revisionValue = 0;
+
+  get revision(): number {
+    return this.revisionValue;
+  }
 
   restore(deltas: readonly EnvironmentalPropDelta[]): void {
     const nextDeltas = new Map<string, EnvironmentalPropDelta>();
@@ -31,6 +36,7 @@ export class DressingPersistenceBridge {
     this.exclusions.clear();
     for (const [id, delta] of nextDeltas) this.deltas.set(id, delta);
     for (const id of nextExclusions) this.exclusions.add(id);
+    this.revisionValue++;
   }
 
   record(input: DressingDeltaInput): void {
@@ -44,21 +50,28 @@ export class DressingPersistenceBridge {
     });
   }
 
-  private recordSerialized(delta: EnvironmentalPropDelta): void {
-    const validated = validateSerializedDelta(delta);
-    this.deltas.set(validated.stableId, validated);
-    if (validated.state === "destroyed" || validated.state === "harvested") this.exclusions.add(validated.stableId);
-    else this.exclusions.delete(validated.stableId);
-  }
-
   isExcluded(stableId: DressingStableId): boolean {
     return this.exclusions.has(stableIdKey(stableId));
+  }
+
+  exclusionSnapshot(): DressingStableId[] {
+    return [...this.exclusions].sort().map(parseStableIdKey);
   }
 
   snapshot(): EnvironmentalPropDelta[] {
     return [...this.deltas.values()].sort((a, b) => a.stableId.localeCompare(b.stableId)).map(cloneDelta);
   }
+
+  private recordSerialized(delta: EnvironmentalPropDelta): void {
+    const validated = validateSerializedDelta(delta);
+    this.deltas.set(validated.stableId, validated);
+    if (validated.state === "destroyed" || validated.state === "harvested") this.exclusions.add(validated.stableId);
+    else this.exclusions.delete(validated.stableId);
+    this.revisionValue++;
+  }
 }
+
+export const dressingPersistenceBridge = new DressingPersistenceBridge();
 
 function validateSerializedDelta(delta: EnvironmentalPropDelta): EnvironmentalPropDelta {
   if (!isPersistentDressingClass(delta.classId as DressingClassId)) {
