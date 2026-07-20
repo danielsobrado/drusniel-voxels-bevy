@@ -7,6 +7,8 @@ import { parsePropPlacements, resolvePropPlacementScene } from "../../props/prop
 import type { PropStats } from "../../props/prop_stats.js";
 import { createPropController, type PropController } from "../../systems/prop_controller.js";
 import type { PropEditStore } from "../../project/prop_edit_store.js";
+import { propPlacementSceneToProjectProps } from "../../project/project_props.js";
+import { surfaceHeight } from "../../terrain/terrain.js";
 import type { VegetationGpuBackend } from "../../runtime/vegetation/vegetation_gpu_backend.js";
 
 export interface CustomPropsStartupInput {
@@ -27,6 +29,55 @@ export interface CustomPropsStartupResult {
   propController: PropController;
   propStats: { current: PropStats | null };
   stopPropStoreSync: () => void;
+}
+
+interface TerrainAnchoredPropQaInput {
+  assetId: string;
+  x: number;
+  z: number;
+  rotationY?: number;
+  scale?: number;
+  seed?: number;
+  variationId?: number;
+}
+
+interface CustomPropQaHooks {
+  getCustomPropPlacementSnapshot: (() => PropPlacementScene | null) | null;
+  replaceTerrainAnchoredCustomProps: ((instances: readonly TerrainAnchoredPropQaInput[]) => PropPlacementScene | null) | null;
+}
+
+function installCustomPropQaHooks(input: CustomPropsStartupInput, propController: PropController): void {
+  const hooks = input.getHooks() as (ClodHooks & CustomPropQaHooks) | null;
+  if (!hooks) return;
+
+  hooks.getCustomPropPlacementSnapshot = () => propController.getPlacementSceneSnapshot();
+  hooks.replaceTerrainAnchoredCustomProps = (instances) => {
+    const available = new Set(propController.availablePrefabIds());
+    const invalid = instances.find((instance) => !available.has(instance.assetId));
+    if (invalid) throw new Error(`Unknown custom prop asset: ${invalid.assetId}`);
+
+    const placementScene: PropPlacementScene = {
+      schemaVersion: 1,
+      sceneId: "qa-terrain-anchored",
+      instances: instances.map((instance, index) => ({
+        assetId: instance.assetId,
+        position: [instance.x, surfaceHeight(instance.x, instance.z), instance.z],
+        rotationY: instance.rotationY ?? 0,
+        scale: instance.scale ?? 1,
+        seed: instance.seed ?? index,
+        variationId: instance.variationId ?? index,
+        flags: 0,
+        revision: 0,
+      })),
+    };
+
+    if (input.propEditStore) {
+      input.propEditStore.restore(propPlacementSceneToProjectProps(placementScene));
+    } else {
+      propController.replacePlacementScene(placementScene);
+    }
+    return propController.getPlacementSceneSnapshot();
+  };
 }
 
 export async function runCustomPropsStartup(
@@ -72,6 +123,7 @@ export async function runCustomPropsStartup(
     if (!input.propEditStore) return;
     propController.replacePlacementScene(input.propEditStore.toPlacementScene("active"));
   }) ?? (() => undefined);
+  installCustomPropQaHooks(input, propController);
   return { propController, propStats, stopPropStoreSync };
 }
 
