@@ -16,7 +16,7 @@ describe("parseCustomPropsConfig", () => {
     expect(settings.occlusion).toEqual({
       enabled: true,
       cellSizeM: 4,
-      buildOccludersPerFrame: 8,
+      buildCellsPerFrame: 256,
       footprintPaddingM: 0.35,
       minimumHeightM: 1.5,
       mistClipStrength: 0.85,
@@ -66,7 +66,7 @@ gpu:
 large_prop_occlusion:
   enabled: false
   cell_size_m: -2
-  build_occluders_per_frame: 0
+  build_cells_per_frame: 0
   footprint_padding_m: -1
   minimum_height_m: -3
   mist_clip_strength: 9
@@ -75,7 +75,7 @@ large_prop_occlusion:
     expect(settings.occlusion).toEqual({
       enabled: false,
       cellSizeM: 0.25,
-      buildOccludersPerFrame: 1,
+      buildCellsPerFrame: 1,
       footprintPaddingM: 0,
       minimumHeightM: 0,
       mistClipStrength: 1,
