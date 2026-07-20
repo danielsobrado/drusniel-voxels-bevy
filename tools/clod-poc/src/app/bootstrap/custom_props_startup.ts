@@ -29,6 +29,11 @@ export interface CustomPropsStartupResult {
   propController: PropController;
   propStats: { current: PropStats | null };
   stopPropStoreSync: () => void;
+  initiallyEnabled: boolean;
+}
+
+export function customPropsInitiallyEnabled(searchParams?: URLSearchParams): boolean {
+  return searchParams?.get("customProps") === "1";
 }
 
 function installCustomPropQaHooks(input: CustomPropsStartupInput, propController: PropController): void {
@@ -71,9 +76,10 @@ export async function runCustomPropsStartup(
   const externalSettings = await loadDefaultExternalPropCatalog(input.customPropsConfig);
   if (!input.enabled || externalSettings.props.length === 0) return null;
 
+  const initiallyEnabled = customPropsInitiallyEnabled(input.searchParams);
   const settings: CustomPropsSettings = {
     ...externalSettings,
-    enabled: true,
+    enabled: initiallyEnabled,
     debug: { ...externalSettings.debug },
     gpu: { ...externalSettings.gpu },
   };
@@ -109,7 +115,7 @@ export async function runCustomPropsStartup(
     propController.replacePlacementScene(input.propEditStore.toPlacementScene("active"));
   }) ?? (() => undefined);
   installCustomPropQaHooks(input, propController);
-  return { propController, propStats, stopPropStoreSync };
+  return { propController, propStats, stopPropStoreSync, initiallyEnabled };
 }
 
 export function resolveCustomPropsEnabled(
