@@ -148,7 +148,11 @@ export function createHillaireFroxelAerialNode(input: HillaireFroxelAerialNodeIn
         .mul(rayleighDensity.mul(hillaire.rayleighExtinction).mul(clampedDistance));
       const tauMie = mieDensity.mul(hillaire.mieExtinction).mul(clampedDistance);
       const tauTotal = tauRayleigh.add(tauMie);
-      const transmittance = exp(tauTotal.negate());
+      const transmittance = vec3(
+        exp(tauTotal.x.negate()),
+        exp(tauTotal.y.negate()),
+        exp(tauTotal.z.negate()),
+      );
       const cosTheta = dirW.dot(sunDir);
       // 4pi-normalized phases (mean 1 over the sphere) keep in-scatter energy-conserving:
       // removed light is replaced by (1 - T) * inscatterColor, never darkened twice.
