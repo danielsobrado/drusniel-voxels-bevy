@@ -15,6 +15,7 @@ export const DEFAULT_WATER_VISUAL: WaterVisualConfig = {
   deepColor: [0.012, 0.06, 0.17],
   foamColor: [0.90, 0.95, 0.96],
   alpha: 0.90,
+  normalModel: "fable5",
   rippleCycle: 0.45,
   fresnelPower: 5.0,
   rippleAmp: 0.10,
