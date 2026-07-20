@@ -68,6 +68,7 @@ export function cloneWaterConfig(config: WaterConfig): WaterConfig {
       reflection: {
         ...config.visual.reflection,
         clipmapTiers: { ...config.visual.reflection.clipmapTiers },
+        farSummary: { ...config.visual.reflection.farSummary },
       },
     },
     debug: { ...config.debug },
