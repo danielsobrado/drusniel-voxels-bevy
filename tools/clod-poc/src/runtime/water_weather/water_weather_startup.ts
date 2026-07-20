@@ -5,7 +5,8 @@ import type { BorderCoastOceanConfig } from "../../terrain/border_coast_config.j
 import type { WaterConfig } from "../../water/waterConfig.js";
 import type { HydrologySystem } from "../../water/index.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";
-import { runWaterStartup, type WaterStartupResult } from "./water_startup.js";
+import type { WaterStartupResult } from "./water_startup.js";
+import { runWaterStartupWithFarReflection } from "./water_far_reflection_startup.js";
 import { runWeatherStartup, type WeatherStartupResult } from "./weather_startup.js";
 
 export interface WaterWeatherStartupInput {
@@ -27,7 +28,7 @@ export interface WaterWeatherStartupResult extends WaterStartupResult, WeatherSt
 export async function runWaterWeatherStartup(
   input: WaterWeatherStartupInput,
 ): Promise<WaterWeatherStartupResult> {
-  const water = await runWaterStartup(input);
+  const water = await runWaterStartupWithFarReflection(input);
 
   const weather = runWeatherStartup({
     scene: input.scene,
