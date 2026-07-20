@@ -6,6 +6,7 @@ export interface CalmWaterRiseRingSettings {
   readonly strength: number;
   readonly spawnRadiusM: number;
   readonly scanIntervalS: number;
+  readonly scanGrid: number;
   readonly cellSpacingM: number;
   readonly cellsPerFrame: number;
   readonly maxEmittersPerScan: number;
@@ -26,6 +27,7 @@ const FALLBACK_SETTINGS: Readonly<CalmWaterRiseRingSettings> = Object.freeze({
   strength: 0.55,
   spawnRadiusM: 64,
   scanIntervalS: 0.45,
+  scanGrid: 19,
   cellSpacingM: 7,
   cellsPerFrame: 8,
   maxEmittersPerScan: 6,
@@ -73,6 +75,7 @@ export function sanitizeCalmWaterRiseRingSettings(
     strength: clamp(source.strength, 0, 3, fallback.strength),
     spawnRadiusM: clamp(source.spawnRadiusM, 8, 180, fallback.spawnRadiusM),
     scanIntervalS: clamp(source.scanIntervalS, 0.1, 4, fallback.scanIntervalS),
+    scanGrid: integer(source.scanGrid, 5, 33, fallback.scanGrid) | 1,
     cellSpacingM: clamp(source.cellSpacingM, 2, 24, fallback.cellSpacingM),
     cellsPerFrame: integer(source.cellsPerFrame, 1, 32, fallback.cellsPerFrame),
     maxEmittersPerScan: integer(source.maxEmittersPerScan, 1, 24, fallback.maxEmittersPerScan),
@@ -102,6 +105,7 @@ export function parseCalmWaterRiseRingSettings(
       strength: numberAt(source, "strength", fallback.strength),
       spawnRadiusM: numberAt(source, "spawn_radius_m", fallback.spawnRadiusM),
       scanIntervalS: numberAt(source, "scan_interval_s", fallback.scanIntervalS),
+      scanGrid: numberAt(source, "scan_grid", fallback.scanGrid),
       cellSpacingM: numberAt(source, "cell_spacing_m", fallback.cellSpacingM),
       cellsPerFrame: numberAt(source, "cells_per_frame", fallback.cellsPerFrame),
       maxEmittersPerScan: numberAt(source, "max_emitters_per_scan", fallback.maxEmittersPerScan),
