@@ -29,12 +29,12 @@ function applyQueryOverrides(options: ReturnType<typeof loadBundledSunLightOptio
 
 function stableFrameKey(input: {
   terrainRevision: number;
-  propRevision: number;
+  propKey: string;
   tileX: number;
   tileZ: number;
   sunBin: string;
 }): string {
-  return `${input.terrainRevision}|${input.propRevision}|${input.tileX},${input.tileZ}|${input.sunBin}`;
+  return `${input.terrainRevision}|${input.propKey}|${input.tileX},${input.tileZ}|${input.sunBin}`;
 }
 
 function safeTerrainFieldConfig(): ReturnType<typeof getTerrainFieldConfig> | null {
@@ -111,7 +111,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
       }
 
       const nextPropHeightState = readSunLightPropHeightState();
-      if (nextPropHeightState.revision !== propHeightState.revision) {
+      if (nextPropHeightState.key !== propHeightState.key) {
         const regions = changedSunLightPropRegions(propHeightState.payload, nextPropHeightState.payload);
         propHeightState = nextPropHeightState;
         provider.setPropOcclusion(propHeightState.payload);
@@ -132,7 +132,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
       const sunBin = sunBinKey(toSunBin(sunVec, options.directionBins));
       const frameKey = stableFrameKey({
         terrainRevision,
-        propRevision: propHeightState.revision,
+        propKey: propHeightState.key,
         tileX: centerTile.tileX,
         tileZ: centerTile.tileZ,
         sunBin,
