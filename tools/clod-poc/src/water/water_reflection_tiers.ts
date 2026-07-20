@@ -1,17 +1,32 @@
 import type { WaterReflectionClipmapTiersConfig, WaterVisualConfig } from "./waterConfig.js";
 
+export function waterFarSummaryReflectionActive(
+  visual: WaterVisualConfig,
+  levelCellSizeM: number | null,
+): boolean {
+  const tiers = visual.reflection.clipmapTiers;
+  if (!tiers.enabled || !visual.reflection.farSummary.enabled || !isPositiveFinite(levelCellSizeM)) return false;
+  const fullMaxCellSizeM = nonNegativeFinite(tiers.fullQualityMaxCellSizeM);
+  const midMaxCellSizeM = Math.max(fullMaxCellSizeM, nonNegativeFinite(tiers.midQualityMaxCellSizeM));
+  return levelCellSizeM > fullMaxCellSizeM && levelCellSizeM <= midMaxCellSizeM;
+}
+
 export function resolveWaterReflectionTierVisual(
   visual: WaterVisualConfig,
   levelCellSizeM: number | null,
 ): WaterVisualConfig {
   const reflection = visual.reflection;
   const tiers = reflection.clipmapTiers;
+  if (!tiers.enabled || !isPositiveFinite(levelCellSizeM)) return visual;
+
+  if (waterFarSummaryReflectionActive(visual, levelCellSizeM)) {
+    return disableSsrForLevel(visual);
+  }
+
   if (
-    !tiers.enabled
-    || reflection.mode !== "ssr"
+    reflection.mode !== "ssr"
     || !reflection.ssrEnabled
     || reflection.maxSteps <= 0
-    || !isPositiveFinite(levelCellSizeM)
   ) {
     return visual;
   }
