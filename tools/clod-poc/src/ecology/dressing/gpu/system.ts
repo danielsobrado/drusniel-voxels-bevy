@@ -5,6 +5,7 @@ import type { HydrologySystem } from "../../../water/index.js";
 import { getDigEditRevision } from "../../../terrain/terrain.js";
 import type { DressingConfig, DressingQuality } from "../config.js";
 import { cloneDressingDiagnostics, createDressingDiagnostics, type DressingDiagnostics } from "../diagnostics.js";
+import type { DressingPersistenceBridge } from "../persistence_bridge.js";
 import {
   DRESSING_GPU_DEFAULT_CAPACITY_PER_GROUP,
 } from "./layouts.js";
@@ -22,6 +23,7 @@ export interface GpuDressingSystemOptions {
   readonly hydrologySystem?: HydrologySystem | null;
   readonly gpuDevice: GPUDevice;
   readonly gpuBackend: VegetationGpuBackend;
+  readonly persistenceBridge: DressingPersistenceBridge;
   readonly unboundedWorld?: boolean;
 }
 
@@ -43,6 +45,7 @@ export class GpuDressingSystem implements DressingSystemLike {
   private frame = 0;
   private lastDispatchFrame = Number.NEGATIVE_INFINITY;
   private lastDigEditRevision = getDigEditRevision();
+  private lastPersistenceRevision: number;
 
   constructor(
     private readonly options: GpuDressingSystemOptions,
@@ -50,6 +53,7 @@ export class GpuDressingSystem implements DressingSystemLike {
   ) {
     const unsupported = dressingGpuComputeUnsupportedReason(options.gpuDevice);
     if (unsupported) throw new Error(unsupported);
+    this.lastPersistenceRevision = options.persistenceBridge.revision;
     this.diagnostics = createDressingDiagnostics(options.config.enabled);
     this.resources = createDressingGpuDrawResources(
       options.scene,
@@ -69,6 +73,7 @@ export class GpuDressingSystem implements DressingSystemLike {
       DRESSING_GPU_DEFAULT_CAPACITY_PER_GROUP,
       options.worldSeed,
       options.hydrologySystem ? packHydrologyData(options.hydrologySystem) : null,
+      options.persistenceBridge,
     ).then((compute) => {
       if (this.disposed) {
         compute.destroy();
@@ -90,9 +95,12 @@ export class GpuDressingSystem implements DressingSystemLike {
     const moved = Math.hypot(center.x - this.lastCenterX, center.z - this.lastCenterZ) >= refreshDistance;
     const digRevision = getDigEditRevision();
     const editsChanged = digRevision !== this.lastDigEditRevision;
+    const persistenceRevision = this.options.persistenceBridge.revision;
+    const persistenceChanged = persistenceRevision !== this.lastPersistenceRevision;
     const periodicRefresh = frame - this.lastDispatchFrame >= DRESSING_GPU_IDLE_REFRESH_FRAMES;
-    if (!moved && !editsChanged && !periodicRefresh) return;
+    if (!moved && !editsChanged && !persistenceChanged && !periodicRefresh) return;
     this.lastDigEditRevision = digRevision;
+    this.lastPersistenceRevision = persistenceRevision;
     this.pendingCenter = { x: center.x, z: center.z };
     if (this.compute) this.dispatch(center.x, center.z);
   }
@@ -128,6 +136,7 @@ export class GpuDressingSystem implements DressingSystemLike {
     this.lastCenterZ = centerZ;
     this.pendingCenter = null;
     this.lastDispatchFrame = this.frame;
+    this.lastPersistenceRevision = stats.persistentExclusionRevision;
     this.diagnostics.dressing_candidates_generated = stats.candidateCount;
     this.diagnostics.dressing_gpu_ms = stats.submitMs;
     this.diagnostics.dressing_main_thread_ms = performance.now() - started;
@@ -143,10 +152,15 @@ export class GpuDressingSystem implements DressingSystemLike {
     for (const [name, value] of Object.entries(this.diagnostics)) {
       if (name !== "perClass" && typeof value === "number") counters[name] = value;
     }
+    const computeStats = this.compute?.stats();
     counters["dressing_gpu_authority"] = 1;
     counters["dressing_cpu_candidate_generation"] = 0;
     counters["dressing_gpu_readbacks"] = 0;
-    counters["dressing_environment_query_gpu_mirror"] = this.compute?.stats().canonicalHeightAuthorityActive ? 1 : 0;
-    counters["dressing_canopy_authority_active"] = this.compute?.stats().canopyAuthorityActive ? 1 : 0;
+    counters["dressing_environment_query_gpu_mirror"] = computeStats?.canonicalHeightAuthorityActive ? 1 : 0;
+    counters["dressing_canopy_authority_active"] = computeStats?.canopyAuthorityActive ? 1 : 0;
+    counters["dressing_persistent_exclusion_gpu_active"] = computeStats ? 1 : 0;
+    counters["dressing_persistent_exclusion_count"] = computeStats?.persistentExclusionCount ?? 0;
+    counters["dressing_persistent_exclusion_revision"] = computeStats?.persistentExclusionRevision ?? this.options.persistenceBridge.revision;
+    counters["dressing_persistent_exclusion_overflow"] = computeStats?.persistentExclusionOverflow ? 1 : 0;
   }
 }
