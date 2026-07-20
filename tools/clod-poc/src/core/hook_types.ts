@@ -1,3 +1,4 @@
+import type { PropPlacementScene } from "../props/prop_types.js";
 import type { PlayableSliceSnapshot } from "../qa/playable_slice_snapshot.js";
 import type { WorldManifest } from "../world/world_manifest.js";
 import type {
@@ -100,6 +101,16 @@ export interface PlacedConstructionPieceHookInfo {
   readonly id: string;
   readonly typeId: string;
   readonly position: readonly [number, number, number];
+}
+
+export interface TerrainAnchoredCustomPropInput {
+  readonly assetId: string;
+  readonly x: number;
+  readonly z: number;
+  readonly rotationY?: number;
+  readonly scale?: number;
+  readonly seed?: number;
+  readonly variationId?: number;
 }
 
 export interface EnvironmentalPropExclusionQuery {
@@ -220,6 +231,8 @@ export interface ClodHooks {
   placeConstructionPiece: ((input: PlaceConstructionPieceInput) => Promise<PlaceConstructionPieceResult>) | null;
   breakConstructionPiece: ((input: BreakConstructionPieceInput) => BreakConstructionPieceResult) | null;
   listPlacedConstructionPieces: ((limit?: number) => readonly PlacedConstructionPieceHookInfo[]) | null;
+  getCustomPropPlacementSnapshot: (() => PropPlacementScene | null) | null;
+  replaceTerrainAnchoredCustomProps: ((instances: readonly TerrainAnchoredCustomPropInput[]) => PropPlacementScene | null) | null;
   queryEnvironmentalPropExclusion: ((input: EnvironmentalPropExclusionQuery) => EnvironmentalPropExclusionResult | null) | null;
   flushSaveRuntime: (() => Promise<void>) | null;
   getPlayableSliceSnapshot: (() => PlayableSliceSnapshot) | null;
