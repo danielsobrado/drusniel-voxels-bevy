@@ -1,5 +1,11 @@
 import type * as THREE from "three";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
+import {
+  largePropOcclusionPayloadRegion,
+  type LargePropOcclusionHeightPayload,
+  type LargePropOcclusionRegion,
+} from "../../props/large_prop_occlusion_height.js";
+import { readActiveLargePropOcclusionField } from "../../props/large_prop_occlusion_runtime.js";
 import { getTerrainFieldConfig } from "../terrain.js";
 import { worldToSunVisibilityTile } from "./sun_visibility_tile.js";
 import { createTerrainEditChangeTracker, createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
@@ -15,6 +21,11 @@ interface LightUpdateArgs {
   options?: unknown;
 }
 
+interface PropHeightState {
+  readonly revision: number;
+  readonly payload: LargePropOcclusionHeightPayload | null;
+}
+
 function applyQueryOverrides(options: ReturnType<typeof loadBundledSunLightOptions>): void {
   const searchParams = new URLSearchParams(location.search);
   if (searchParams.has("sunLightCache")) options.active = searchParams.get("sunLightCache") !== "0";
@@ -24,11 +35,12 @@ function applyQueryOverrides(options: ReturnType<typeof loadBundledSunLightOptio
 
 function stableFrameKey(input: {
   terrainRevision: number;
+  propRevision: number;
   tileX: number;
   tileZ: number;
   sunBin: string;
 }): string {
-  return `${input.terrainRevision}|${input.tileX},${input.tileZ}|${input.sunBin}`;
+  return `${input.terrainRevision}|${input.propRevision}|${input.tileX},${input.tileZ}|${input.sunBin}`;
 }
 
 function safeTerrainFieldConfig(): ReturnType<typeof getTerrainFieldConfig> | null {
@@ -39,14 +51,50 @@ function safeTerrainFieldConfig(): ReturnType<typeof getTerrainFieldConfig> | nu
   }
 }
 
+function readPropHeightState(): PropHeightState {
+  const field = readActiveLargePropOcclusionField();
+  if (!field) return { revision: 0, payload: null };
+  const stats = field.stats();
+  return {
+    revision: stats.activeRevision,
+    payload: field.giHeightPayload(),
+  };
+}
+
+function changedPropRegions(
+  previous: LargePropOcclusionHeightPayload | null,
+  next: LargePropOcclusionHeightPayload | null,
+): LargePropOcclusionRegion[] {
+  const regions: LargePropOcclusionRegion[] = [];
+  const previousRegion = largePropOcclusionPayloadRegion(previous);
+  const nextRegion = largePropOcclusionPayloadRegion(next);
+  if (previousRegion) regions.push(previousRegion);
+  if (nextRegion && !sameRegion(previousRegion, nextRegion)) regions.push(nextRegion);
+  return regions;
+}
+
+function sameRegion(
+  a: LargePropOcclusionRegion | null,
+  b: LargePropOcclusionRegion | null,
+): boolean {
+  return a !== null
+    && b !== null
+    && a.minX === b.minX
+    && a.minZ === b.minZ
+    && a.maxX === b.maxX
+    && a.maxZ === b.maxZ;
+}
+
 export function createLightUpdate(args: LightUpdateArgs) {
   const options = loadBundledSunLightOptions();
   applyQueryOverrides(options);
   const provider = createTerrainSummaryLightHeightProvider(args.terrainSummary);
   const changeTracker = createTerrainEditChangeTracker();
+  let propHeightState = readPropHeightState();
+  provider.setPropOcclusion(propHeightState.payload);
   // Tile builds cost seconds of CPU each; the worker keeps them off the main thread.
-  // The worker samples a heightMax snapshot, so it must be reconfigured whenever the
-  // main-thread heights can have changed (terrain revision bumps, manual refresh).
+  // The worker samples immutable terrain and committed prop-height snapshots, so it must
+  // be reconfigured whenever either source revision changes.
   const remote = options.active ? createSunLightRemoteTileBuilder() : null;
   const configureRemote = (): void => {
     remote?.configure({
@@ -56,6 +104,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
         worldSize: args.terrainSummary.worldSize,
         heightMax: args.terrainSummary.heightMax,
       },
+      propOcclusion: propHeightState.payload,
       options,
     });
   };
@@ -69,6 +118,8 @@ export function createLightUpdate(args: LightUpdateArgs) {
   globals.__drusnielSunLightOptions = options;
   globals.__drusnielSunLightStats = () => cache.stats();
   globals.__drusnielSunLightRefresh = () => {
+    propHeightState = readPropHeightState();
+    provider.setPropOcclusion(propHeightState.payload);
     cache.markAllStale();
     invalidateSunLightGpuAtlas();
     configureRemote();
@@ -98,6 +149,18 @@ export function createLightUpdate(args: LightUpdateArgs) {
         lastTerrainRevision = terrainRevision;
         lastStableFrameKey = "";
       }
+
+      const nextPropHeightState = readPropHeightState();
+      if (nextPropHeightState.revision !== propHeightState.revision) {
+        const regions = changedPropRegions(propHeightState.payload, nextPropHeightState.payload);
+        propHeightState = nextPropHeightState;
+        provider.setPropOcclusion(propHeightState.payload);
+        if (regions.length > 0) cache.invalidateRegions(regions);
+        configureRemote();
+        lastStableFrameKey = "";
+      }
+
+      publishPropSunCounters(propHeightState);
       if (!options.active) {
         invalidateSunLightGpuAtlas();
         overlay.update([], options);
@@ -109,6 +172,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
       const sunBin = sunBinKey(toSunBin(sunVec, options.directionBins));
       const frameKey = stableFrameKey({
         terrainRevision,
+        propRevision: propHeightState.revision,
         tileX: centerTile.tileX,
         tileZ: centerTile.tileZ,
         sunBin,
@@ -144,4 +208,14 @@ export function createLightUpdate(args: LightUpdateArgs) {
       lastAtlasSignature = "";
     },
   };
+}
+
+function publishPropSunCounters(state: PropHeightState): void {
+  const counters = (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod?.stats?.counters;
+  if (!counters) return;
+  counters["sun_light_prop_occlusion_revision"] = state.revision;
+  counters["sun_light_prop_occlusion_cells"] = state.payload?.cellX.length ?? 0;
+  counters["sun_light_prop_occlusion_readbacks"] = 0;
 }
