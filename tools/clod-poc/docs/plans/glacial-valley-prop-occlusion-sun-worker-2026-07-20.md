@@ -47,7 +47,14 @@ Worker parity tests compare complete built tile byte arrays for:
 
 The light update reads only committed field revisions. Pending prop-field builds do not change lighting, so the old valid light input remains authoritative until the field swaps.
 
-When the committed prop revision changes:
+Authority identity combines:
+
+- a monotonically increasing runtime registration generation;
+- the controller-local committed field revision.
+
+This prevents a disposed and recreated prop controller from silently reusing revision `1` and bypassing sun-cache invalidation.
+
+When the committed prop authority key changes:
 
 1. the main-thread height provider swaps to the new sparse payload;
 2. old and new aggregate prop bounds become invalidation regions;
@@ -64,6 +71,8 @@ Fog-only revision changes reconfigure the worker but do not invalidate sun tiles
 ## Diagnostics
 
 ```text
+large_prop_occlusion_generation
+sun_light_prop_occlusion_generation
 sun_light_prop_occlusion_revision
 sun_light_prop_occlusion_cells
 sun_light_prop_occlusion_readbacks
@@ -77,6 +86,7 @@ The readback counter must remain zero.
 npm --prefix tools/clod-poc test -- `
   src/props/large_prop_occlusion_field.test.ts `
   src/props/large_prop_occlusion_height.test.ts `
+  src/props/large_prop_occlusion_runtime.test.ts `
   src/terrain/sun_visibility/sun_light_prop_occlusion.test.ts `
   src/terrain/sun_visibility/sun_light_worker_parity.test.ts `
   src/terrain/sun_visibility/sun_light_worker_client.test.ts
@@ -97,6 +107,7 @@ Use `scene=infinite-islands`, enable custom props and the far sun cache, then pl
 - moving it invalidates both the old and new shadow regions;
 - unrelated distant light tiles stay resident;
 - the old committed prop field remains live while a replacement field builds;
+- disposing and recreating the prop controller still invalidates the previous authority;
 - worker and forced main-thread fallback produce matching captures;
 - config-ID races never adopt stale worker tiles;
 - the sun atlas updates after affected cache content changes;
