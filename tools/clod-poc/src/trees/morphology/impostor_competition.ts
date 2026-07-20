@@ -1,35 +1,12 @@
 export type TreeMorphologyEvidenceMode = "off" | "age" | "competition";
 
-export interface TreeImpostorCompetitionResponse {
-  readonly effectiveAge: number;
-  readonly crownWidthScale: number;
-  readonly crownHeightScale: number;
-  readonly foliageRetention: number;
-  readonly health: number;
-}
+export const TREE_IMPOSTOR_USES_RECORD_MORPHOLOGY = true;
 
 export function resolveTreeMorphologyEvidenceMode(
   searchParams: URLSearchParams | undefined,
 ): TreeMorphologyEvidenceMode {
   const value = searchParams?.get("treeMorphologyEvidence");
   return value === "age" || value === "competition" ? value : "off";
-}
-
-export function applyTreeImpostorCompetition(
-  age: number,
-  health: number,
-  foliageRetention: number,
-  competition: number,
-): TreeImpostorCompetitionResponse {
-  const pressure = clamp01(competition);
-  const effectiveAge = clamp01(age - pressure * 0.12);
-  return {
-    effectiveAge,
-    crownWidthScale: 1 - pressure * 0.16,
-    crownHeightScale: 1 - pressure * 0.06,
-    foliageRetention: clamp01(foliageRetention * (1 - pressure * 0.14)),
-    health: clamp01(health * (1 - pressure * 0.10)),
-  };
 }
 
 export function treeMorphologyEvidenceColor(
