@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const forest = vi.hoisted(() => ({
   active: vi.fn(),
@@ -42,6 +42,10 @@ describe("tree canopy competition binding", () => {
     forest.register.mockReset();
     forest.active.mockReturnValue(null);
     vi.stubGlobal("GPUTextureUsage", { TEXTURE_BINDING: 1, COPY_DST: 2 });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("starts fail-open and registers the shared forest GPU device", () => {
