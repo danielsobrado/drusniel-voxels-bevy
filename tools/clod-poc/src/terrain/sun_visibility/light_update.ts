@@ -1,11 +1,5 @@
 import type * as THREE from "three";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
-import {
-  largePropOcclusionPayloadRegion,
-  type LargePropOcclusionHeightPayload,
-  type LargePropOcclusionRegion,
-} from "../../props/large_prop_occlusion_height.js";
-import { readActiveLargePropOcclusionField } from "../../props/large_prop_occlusion_runtime.js";
 import { getTerrainFieldConfig } from "../terrain.js";
 import { worldToSunVisibilityTile } from "./sun_visibility_tile.js";
 import { createTerrainEditChangeTracker, createTerrainSummaryLightHeightProvider } from "./far_light_height.js";
@@ -13,17 +7,17 @@ import { createSunLightCacheRuntime } from "./far_light_cache_runtime.js";
 import { loadBundledSunLightOptions } from "./sun_light_config_loader.js";
 import { createSunLightDebugOverlay } from "./sun_light_debug_overlay.js";
 import { invalidateSunLightGpuAtlas, updateSunLightGpuAtlas } from "./sun_light_gpu_atlas.js";
+import {
+  changedSunLightPropRegions,
+  publishSunLightPropCounters,
+  readSunLightPropHeightState,
+} from "./sun_light_prop_occlusion.js";
 import { sunBinKey, toSunBin } from "./sun_bins.js";
 import { createSunLightRemoteTileBuilder } from "./sun_light_worker_client.js";
 
 interface LightUpdateArgs {
   terrainSummary: TerrainSummaryField;
   options?: unknown;
-}
-
-interface PropHeightState {
-  readonly revision: number;
-  readonly payload: LargePropOcclusionHeightPayload | null;
 }
 
 function applyQueryOverrides(options: ReturnType<typeof loadBundledSunLightOptions>): void {
@@ -51,46 +45,12 @@ function safeTerrainFieldConfig(): ReturnType<typeof getTerrainFieldConfig> | nu
   }
 }
 
-function readPropHeightState(): PropHeightState {
-  const field = readActiveLargePropOcclusionField();
-  if (!field) return { revision: 0, payload: null };
-  const stats = field.stats();
-  return {
-    revision: stats.activeRevision,
-    payload: field.giHeightPayload(),
-  };
-}
-
-function changedPropRegions(
-  previous: LargePropOcclusionHeightPayload | null,
-  next: LargePropOcclusionHeightPayload | null,
-): LargePropOcclusionRegion[] {
-  const regions: LargePropOcclusionRegion[] = [];
-  const previousRegion = largePropOcclusionPayloadRegion(previous);
-  const nextRegion = largePropOcclusionPayloadRegion(next);
-  if (previousRegion) regions.push(previousRegion);
-  if (nextRegion && !sameRegion(previousRegion, nextRegion)) regions.push(nextRegion);
-  return regions;
-}
-
-function sameRegion(
-  a: LargePropOcclusionRegion | null,
-  b: LargePropOcclusionRegion | null,
-): boolean {
-  return a !== null
-    && b !== null
-    && a.minX === b.minX
-    && a.minZ === b.minZ
-    && a.maxX === b.maxX
-    && a.maxZ === b.maxZ;
-}
-
 export function createLightUpdate(args: LightUpdateArgs) {
   const options = loadBundledSunLightOptions();
   applyQueryOverrides(options);
   const provider = createTerrainSummaryLightHeightProvider(args.terrainSummary);
   const changeTracker = createTerrainEditChangeTracker();
-  let propHeightState = readPropHeightState();
+  let propHeightState = readSunLightPropHeightState();
   provider.setPropOcclusion(propHeightState.payload);
   // Tile builds cost seconds of CPU each; the worker keeps them off the main thread.
   // The worker samples immutable terrain and committed prop-height snapshots, so it must
@@ -118,7 +78,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
   globals.__drusnielSunLightOptions = options;
   globals.__drusnielSunLightStats = () => cache.stats();
   globals.__drusnielSunLightRefresh = () => {
-    propHeightState = readPropHeightState();
+    propHeightState = readSunLightPropHeightState();
     provider.setPropOcclusion(propHeightState.payload);
     cache.markAllStale();
     invalidateSunLightGpuAtlas();
@@ -150,9 +110,9 @@ export function createLightUpdate(args: LightUpdateArgs) {
         lastStableFrameKey = "";
       }
 
-      const nextPropHeightState = readPropHeightState();
+      const nextPropHeightState = readSunLightPropHeightState();
       if (nextPropHeightState.revision !== propHeightState.revision) {
-        const regions = changedPropRegions(propHeightState.payload, nextPropHeightState.payload);
+        const regions = changedSunLightPropRegions(propHeightState.payload, nextPropHeightState.payload);
         propHeightState = nextPropHeightState;
         provider.setPropOcclusion(propHeightState.payload);
         if (regions.length > 0) cache.invalidateRegions(regions);
@@ -160,7 +120,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
         lastStableFrameKey = "";
       }
 
-      publishPropSunCounters(propHeightState);
+      publishSunLightPropCounters(propHeightState);
       if (!options.active) {
         invalidateSunLightGpuAtlas();
         overlay.update([], options);
@@ -208,14 +168,4 @@ export function createLightUpdate(args: LightUpdateArgs) {
       lastAtlasSignature = "";
     },
   };
-}
-
-function publishPropSunCounters(state: PropHeightState): void {
-  const counters = (globalThis as typeof globalThis & {
-    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
-  }).window?.__drusnielClod?.stats?.counters;
-  if (!counters) return;
-  counters["sun_light_prop_occlusion_revision"] = state.revision;
-  counters["sun_light_prop_occlusion_cells"] = state.payload?.cellX.length ?? 0;
-  counters["sun_light_prop_occlusion_readbacks"] = 0;
 }
