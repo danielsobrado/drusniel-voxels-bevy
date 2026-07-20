@@ -186,7 +186,7 @@ export function createCommandGuardedTerrainEditService(
       const point = new THREE.Vector3(...intent.command.targetPosition);
       const origin = deps.getAuthorityOrigin?.() ?? null;
       const allowFarCommit = deps.editAuthority?.allowFarCommit ?? false;
-      if (!origin && !allowFarCommit) return "not_ready";
+      // Orbit/editor edits have no player origin; preserve the base authority contract at the target.
       const actor = origin ?? point;
       const maxDistanceM = allowFarCommit
         ? Number.MAX_SAFE_INTEGER
