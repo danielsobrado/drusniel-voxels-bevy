@@ -117,8 +117,15 @@ function buildMaterial(
   const yaw: TslNode = record.rotationNormalY.x;
   const c: TslNode = cos(yaw);
   const s: TslNode = sin(yaw);
-  const localCrownOffset: TslNode = record.morphology1.xy.mul(uRadius.x)
-    .add(record.morphology0.yz.mul(uCenterY).mul(0.49));
+  const crownBiasOffset: TslNode = vec2(
+    record.morphology1.x.mul(uRadius.x).mul(crownWidth),
+    record.morphology1.y.mul(uRadius.z).mul(crownWidth),
+  );
+  const leanOffset: TslNode = record.morphology0.yz
+    .mul(uCenterY)
+    .mul(ageHeightScale)
+    .mul(0.49);
+  const localCrownOffset: TslNode = crownBiasOffset.add(leanOffset);
   const worldCrownOffset: TslNode = vec2(
     c.mul(localCrownOffset.x).add(s.mul(localCrownOffset.y)),
     s.mul(localCrownOffset.x).negate().add(c.mul(localCrownOffset.y)),
