@@ -13,6 +13,14 @@ describe("parseCustomPropsConfig", () => {
     expect(ruin?.category).toBe("large_static");
     expect(ruin?.lod.billboardFrom).toBe(180);
     expect(ruin?.lightingProxy?.affectGi).toBe(true);
+    expect(settings.occlusion).toEqual({
+      enabled: true,
+      cellSizeM: 4,
+      buildOccludersPerFrame: 8,
+      footprintPaddingM: 0.35,
+      minimumHeightM: 1.5,
+      mistClipStrength: 0.85,
+    });
   });
 
   it("falls back to readback-safe defaults for an empty document", () => {
@@ -20,6 +28,7 @@ describe("parseCustomPropsConfig", () => {
     expect(settings.enabled).toBe(DEFAULT_CUSTOM_PROPS_SETTINGS.enabled);
     expect(settings.props).toHaveLength(0);
     expect(settings.culling.hysteresisM).toBe(8);
+    expect(settings.occlusion).toEqual(DEFAULT_CUSTOM_PROPS_SETTINGS.occlusion);
     expect(settings.gpu).toEqual(DEFAULT_CUSTOM_PROPS_SETTINGS.gpu);
     expect(settings.gpu.debugShowGpuCounts).toBe(false);
   });
@@ -49,6 +58,27 @@ gpu:
       maxVisible: 1234,
       workgroupSize: 128,
       debugShowGpuCounts: false,
+    });
+  });
+
+  it("sanitizes large-prop occlusion settings", () => {
+    const settings = parseCustomPropsConfig(`
+large_prop_occlusion:
+  enabled: false
+  cell_size_m: -2
+  build_occluders_per_frame: 0
+  footprint_padding_m: -1
+  minimum_height_m: -3
+  mist_clip_strength: 9
+`);
+
+    expect(settings.occlusion).toEqual({
+      enabled: false,
+      cellSizeM: 0.25,
+      buildOccludersPerFrame: 1,
+      footprintPaddingM: 0,
+      minimumHeightM: 0,
+      mistClipStrength: 1,
     });
   });
 
