@@ -28,16 +28,16 @@ describe("water glitter config", () => {
     });
   });
 
-  it("deep-clones glitter state and preserves legacy HQ defaults", () => {
+  it("deep-clones glitter state and preserves stable defaults", () => {
     const cloned = cloneWaterConfig(DEFAULT_WATER_CONFIG);
     expect(cloned.visual.glitter).not.toBe(DEFAULT_WATER_CONFIG.visual.glitter);
     expect(DEFAULT_WATER_CONFIG.visual.glitter).toEqual({
       enabled: true,
-      tightExponent: 384,
-      tightGain: 1.15,
-      broadExponent: 96,
-      broadGain: 0.28,
-      lowSunGain: 0.35,
+      tightExponent: 160,
+      tightGain: 0.28,
+      broadExponent: 48,
+      broadGain: 0.06,
+      lowSunGain: 0.20,
     });
   });
 });
