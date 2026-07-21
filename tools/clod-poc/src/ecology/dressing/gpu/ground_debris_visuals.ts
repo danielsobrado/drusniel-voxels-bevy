@@ -54,10 +54,7 @@ export function groundDebrisVisibility(
   return 1 - clamp01((distance - profileValue.fadeStartM) / span);
 }
 
-export function groundDebrisWetMix(
-  wetness: number,
-  profileValue: GroundDebrisVisualProfile,
-): number {
+export function groundDebrisWetMix(wetness: number): number {
   return clamp01(Number.isFinite(wetness) ? wetness : 0);
 }
 
