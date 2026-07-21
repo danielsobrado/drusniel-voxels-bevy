@@ -115,7 +115,15 @@ function parseCommand(raw: unknown, path: string): QaCommandDefinition {
 }
 
 function parseArtifact(raw: unknown, placeholders: readonly QaPlaceholder[], path: string): QaCommandArtifact {
-  const value = object(raw, path, ["path", "required", "deterministic", "kind", "ignore_json_keys", "numeric_tolerance"]);
+  const value = object(raw, path, [
+    "path",
+    "required",
+    "deterministic",
+    "kind",
+    "ignore_json_keys",
+    "numeric_tolerance",
+    "numeric_tolerances",
+  ]);
   const artifactPath = text(value.path, `${path}.path`);
   validateTemplate(artifactPath, placeholders, `${path}.path`);
   if (!artifactPath.startsWith("${OUTPUT_DIR}/") && artifactPath !== "${OUTPUT_DIR}") {
@@ -123,6 +131,14 @@ function parseArtifact(raw: unknown, placeholders: readonly QaPlaceholder[], pat
   }
   const kind = text(value.kind, `${path}.kind`);
   if (!new Set(["file", "directory", "json"]).has(kind)) throw new Error(`${path}.kind is invalid`);
+  const toleranceObject = value.numeric_tolerances === undefined
+    ? {}
+    : object(value.numeric_tolerances, `${path}.numeric_tolerances`);
+  const numericTolerances: Record<string, number> = {};
+  for (const [jsonPath, tolerance] of Object.entries(toleranceObject)) {
+    if (!jsonPath.startsWith("$.")) throw new Error(`${path}.numeric_tolerances.${jsonPath} must start with $.`);
+    numericTolerances[jsonPath] = nonNegative(tolerance, `${path}.numeric_tolerances.${jsonPath}`);
+  }
   return {
     path: artifactPath,
     required: booleanValue(value.required, `${path}.required`),
@@ -130,6 +146,7 @@ function parseArtifact(raw: unknown, placeholders: readonly QaPlaceholder[], pat
     kind: kind as QaCommandArtifact["kind"],
     ignore_json_keys: strings(value.ignore_json_keys, `${path}.ignore_json_keys`),
     numeric_tolerance: nonNegative(value.numeric_tolerance, `${path}.numeric_tolerance`),
+    numeric_tolerances: numericTolerances,
   };
 }
 
