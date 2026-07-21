@@ -14,6 +14,7 @@
     "qa:validate": "npm run qa:orchestrator -- --mode validate",
     "qa:capture": "tsx tools/qa-capture-clod.ts",
     "qa:baseline": "tsx tools/qa-baseline.ts",
+    "qa:affected": "tsx tools/qa-affected.ts",
     "visual:validate": "tsx tools/visual-regression.ts --validate-only",
     "visual:regression": "tsx tools/visual-regression.ts",
     "visual:regression:smoke": "tsx tools/visual-regression.ts --tags smoke",
