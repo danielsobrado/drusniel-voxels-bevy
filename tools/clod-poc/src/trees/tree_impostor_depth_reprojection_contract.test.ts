@@ -6,13 +6,13 @@ import geometrySource from "./tree_gpu_ring_geometry.ts?raw";
 import wrapperSource from "./tree_ring_impostor_node_material.ts?raw";
 
 describe("tree impostor depth reprojection contract", () => {
-  it("keeps runtime depth decode aligned with the bake camera", () => {
+  it("encodes depth relative to each centered age and variant layer", () => {
+    expect(bakerSource).toContain("mesh.position.copy(bounds.center).multiplyScalar(-1)");
     expect(bakerSource).toContain("createTreeImpostorNormalDepthBakeMaterial(\n    0.01,\n    context.variantBounds.maxRadius * 6,");
-    expect(bakerSource).toContain("camera.position.copy(direction).multiplyScalar(radius * 3)");
-    expect(bakerSource).toContain("camera.near = 0.01");
-    expect(bakerSource).toContain("camera.far = radius * 6");
-    expect(captureSource).toContain("material.opacityNode = linearDepth");
-    expect(captureSource).toContain("gl_FragColor = vec4(packedNormal, vTreeImpostorLinearDepth)");
+    expect(captureSource).toContain("const relativeDepth: TslNode = dot(positionWorld, captureDirection)");
+    expect(captureSource).toContain("material.opacityNode = encodedDepth");
+    expect(captureSource).toContain("float relativeDepth = dot(worldPosition.xyz, captureDirection)");
+    expect(captureSource).toContain("gl_FragColor = vec4(packedNormal, vTreeImpostorRelativeDepth)");
   });
 
   it("coverage-weights depth across view and age layers", () => {
@@ -20,6 +20,7 @@ describe("tree impostor depth reprojection contract", () => {
     expect(depthSource).toContain("coverage: texture(atlas.albedo ?? atlas.texture, atlasUv).w");
     expect(depthSource).toContain("const cw00: TslNode = s00.coverage.mul(w00)");
     expect(depthSource).toContain("const lowerWeight: TslNode = float(1).sub(layerBlend).mul(lower.coverage)");
+    expect(depthSource).toContain("clamp(sample.depth, 0, 1).mul(2).sub(1).mul(range.extentM)");
     expect(depthSource).toContain("cameraRay.mul(offsetM.mul(coverageWeight).mul(instanceScale))");
   });
 
