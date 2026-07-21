@@ -15,6 +15,8 @@ import {
   DRESSING_CLASS_DEFINITIONS,
   type DressingClassId,
 } from "../class_registry.js";
+import { createGroundDebrisGeometry } from "./ground_debris_geometry.js";
+import { applyGroundDebrisMaterial } from "./ground_debris_material.js";
 import {
   DRESSING_GPU_GROUP_COUNT,
   DRESSING_GPU_INDIRECT_WORDS,
@@ -156,12 +158,14 @@ function createDressingGpuMaterial(
   material.name = `dressing-gpu-material-${classId}`;
   material.positionNode = positionScale.xyz.add(rotated);
   material.normalNode = normal;
-  material.color = new THREE.Color(CLASS_COLORS[classId]);
-  material.roughness = classId === "wet_stone_cluster" ? 0.34 : classId.includes("lichen") ? 0.95 : 0.78;
-  material.metalness = 0;
-  material.side = THREE.DoubleSide;
-  material.transparent = false;
-  material.alphaTest = 0;
+  if (!applyGroundDebrisMaterial(material, classId, { positionScale, rotationEnvironment })) {
+    material.color = new THREE.Color(CLASS_COLORS[classId]);
+    material.roughness = classId === "wet_stone_cluster" ? 0.34 : classId.includes("lichen") ? 0.95 : 0.78;
+    material.metalness = 0;
+    material.side = THREE.DoubleSide;
+    material.transparent = false;
+    material.alphaTest = 0;
+  }
   return material;
 }
 
@@ -190,6 +194,8 @@ function createIndirectGeometry(
 }
 
 function createDressingGeometry(classId: DressingClassId, lod: number): THREE.BufferGeometry {
+  const debrisGeometry = createGroundDebrisGeometry(classId, lod);
+  if (debrisGeometry) return debrisGeometry;
   if (lod === 2) return farCardGeometry(classId);
   const family = DRESSING_CLASS_DEFINITIONS[classId].geometryFamily;
   const low = lod === 1;
