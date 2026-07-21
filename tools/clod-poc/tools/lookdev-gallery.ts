@@ -167,23 +167,24 @@ async function captureToneMap(
   const failures: string[] = [];
   try {
     await bootPage(page, config, args, expectedBuild, toneMap);
+    if (messages.errors.length > 0) throw new Error(messages.errors[0]);
     await page.addStyleTag({ content: "body > *:not(canvas) { visibility: hidden !important; }" });
     for (const pose of poses) {
       messages.errors.length = 0;
       messages.warnings.length = 0;
-      await page.evaluate(async ({ nextPose, diagnostic }) => {
+      await page.evaluate(async ({ nextPose, diagnostic, warmupFrames }) => {
         const hook = window.__drusnielQa;
         if (!hook) throw new Error("window.__drusnielQa is missing");
         await hook.unfreeze();
         await hook.setDiagnosticBuffer(diagnostic);
         await hook.setPose({ p: nextPose.position, yaw: nextPose.yaw, pitch: nextPose.pitch, fov: nextPose.fov });
-        await hook.settle(${CAPTURE_WARMUP_FRAMES});
-      }, { nextPose: pose, diagnostic: pose.diagnostic });
+        await hook.settle(warmupFrames);
+      }, { nextPose: pose, diagnostic: pose.diagnostic, warmupFrames: CAPTURE_WARMUP_FRAMES });
       const convergence = await waitForQaConvergence(page, `lookdev:${toneMap}:${pose.id}`, config.readyTimeoutMs, config.stablePolls);
-      await page.evaluate(async () => {
+      await page.evaluate(async (settleFrames) => {
         await window.__drusnielQa?.freeze();
-        await window.__drusnielQa?.settle(${FINAL_SETTLE_FRAMES});
-      });
+        await window.__drusnielQa?.settle(settleFrames);
+      }, FINAL_SETTLE_FRAMES);
       if (messages.errors.length > 0) failures.push(`${toneMap}/${pose.id}: ${messages.errors[0]}`);
       const file = `${toneMap}-${pose.id}.png`;
       const imagePath = resolve(args.output, file);
