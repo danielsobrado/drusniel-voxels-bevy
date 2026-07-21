@@ -8,11 +8,14 @@ import {
   vec2,
   vec3,
 } from "three/tsl";
+import { buildSunLightGpuAtlasNodes } from "../../../terrain/sun_visibility/sun_light_gpu_atlas_nodes.js";
 import type { DressingClassId } from "../class_registry.js";
 import { groundDebrisVisualProfile } from "./ground_debris_visuals.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
+
+const MIN_SUN_VISIBILITY_RESPONSE = 0.78;
 
 interface GroundDebrisRecordNodes {
   readonly positionScale: TslNode;
@@ -41,9 +44,15 @@ export function applyGroundDebrisMaterial(
     1,
   );
   const keep: TslNode = record.rotationEnvironment.w.lessThan(visibility);
+  const sunVisibility = buildSunLightGpuAtlasNodes(record.positionScale.xz).visibility;
+  const sunResponse: TslNode = mix(
+    float(MIN_SUN_VISIBILITY_RESPONSE),
+    float(1),
+    sunVisibility,
+  );
 
   material.color.setRGB(1, 1, 1);
-  material.colorNode = mix(base, wet, wetness).mul(variation);
+  material.colorNode = mix(base, wet, wetness).mul(variation).mul(sunResponse);
   material.roughnessNode = mix(
     float(profile.dryRoughness),
     float(profile.wetRoughness),
