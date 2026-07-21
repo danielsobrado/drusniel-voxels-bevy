@@ -1,3 +1,4 @@
+import type * as THREE from "three";
 import type { HydrologySystem } from "../../water/index.js";
 import { surfaceNormal, terrainWeights } from "../../terrain/terrain.js";
 import { sampleActiveForestCanopyEcology } from "../../forest_lighting/forest_lighting_texture.js";
@@ -7,6 +8,7 @@ import {
   type DressingSystemOptions,
 } from "./dressing_system_base.js";
 import { resolveDressingCanopyEcology } from "./dressing_canopy_environment.js";
+import { GroundDebrisCpuResources } from "./ground_debris_cpu_resources.js";
 import type { DressingEnvironmentSample } from "./types.js";
 
 interface DressingSystemInternals {
@@ -22,11 +24,16 @@ interface DressingSystemInternals {
 
 export class CpuDressingSystem extends DressingSystemBase {
   private canonicalOptions: DressingSystemOptions | null = null;
+  private readonly groundDebrisResources = new GroundDebrisCpuResources();
+  private readonly scene: THREE.Scene;
+  private lastVisualCenterX = Number.POSITIVE_INFINITY;
+  private lastVisualCenterZ = Number.POSITIVE_INFINITY;
 
   constructor(options: DressingSystemOptions) {
     const deferredConfig = { ...options.config, enabled: false };
     const deferredOptions = { ...options, config: deferredConfig };
     super(deferredOptions);
+    this.scene = options.scene;
     deferredConfig.enabled = options.config.enabled;
     this.canonicalOptions = options;
     if (options.config.enabled) {
@@ -34,7 +41,28 @@ export class CpuDressingSystem extends DressingSystemBase {
         ? { x: 0, z: 0 }
         : { x: options.worldCells * 0.5, z: options.worldCells * 0.5 };
       (this as unknown as DressingSystemInternals).rebuild(center.x, center.z);
+      this.groundDebrisResources.apply(this.scene);
+      this.lastVisualCenterX = center.x;
+      this.lastVisualCenterZ = center.z;
     }
+  }
+
+  override update(center: { readonly x: number; readonly z: number }): void {
+    const refreshDistance = (this.canonicalOptions?.config.clusterSizeM ?? Number.POSITIVE_INFINITY) * 0.5;
+    const resourcesMayChange = Math.hypot(
+      center.x - this.lastVisualCenterX,
+      center.z - this.lastVisualCenterZ,
+    ) >= refreshDistance;
+    super.update(center);
+    if (!resourcesMayChange) return;
+    this.groundDebrisResources.apply(this.scene);
+    this.lastVisualCenterX = center.x;
+    this.lastVisualCenterZ = center.z;
+  }
+
+  override dispose(): void {
+    super.dispose();
+    this.groundDebrisResources.dispose();
   }
 
   protected override sampleEnvironment(x: number, z: number): DressingEnvironmentSample {
