@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { GrassController } from "../runtime/vegetation/grass_controller.js";
 import type { TerrainMaterialHandle } from "../rendering/terrain_material.js";
 import type { TerrainMaterialController } from "../terrain/material/terrain_material_controller.js";
+import { updateGroundDebrisBiomeState } from "../ecology/dressing/gpu/ground_debris_biome_state.js";
 import { installBiomeVisualAcceptanceApi } from "./biome_visual_acceptance_api.js";
 import {
   createBiomeVisualMaterialBinding,
@@ -44,6 +45,7 @@ export function installBiomeVisualMaterialRouting(
   const uniqueMaterials = new Set<THREE.Material>();
   let frame = 1;
   let current = resolveBiomeVisualMaterialState(readActiveBiomeVisualState());
+  updateGroundDebrisBiomeState(current);
   let lastSignature = biomeVisualMaterialStateSignature(current);
 
   const bindMaterial = (material: THREE.Material, domain: BiomeMaterialDomain): void => {
@@ -110,6 +112,7 @@ export function installBiomeVisualMaterialRouting(
     if (frame++ % MATERIAL_SCAN_INTERVAL_FRAMES === 0) scanActiveMaterials();
 
     const next = resolveBiomeVisualMaterialState(readActiveBiomeVisualState());
+    updateGroundDebrisBiomeState(next);
     const signature = biomeVisualMaterialStateSignature(next);
     if (signature === lastSignature) return;
 
