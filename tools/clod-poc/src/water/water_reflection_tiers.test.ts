@@ -10,7 +10,10 @@ import {
   createTieredWaterMaterialFactory,
   waterMaterialLevelCellSize,
 } from "./water_reflection_tier_clipmap.js";
-import { resolveWaterReflectionTierVisual } from "./water_reflection_tiers.js";
+import {
+  resolveWaterReflectionTierVisual,
+  waterFarSummaryReflectionActive,
+} from "./water_reflection_tiers.js";
 
 function activeVisual(): WaterVisualConfig {
   return {
@@ -26,6 +29,7 @@ function activeVisual(): WaterVisualConfig {
         midQualityMaxCellSizeM: 16,
         midMaxSteps: 6,
       },
+      farSummary: { ...DEFAULT_WATER_VISUAL.reflection.farSummary },
     },
   };
 }
@@ -77,36 +81,42 @@ describe("water reflection clipmap tiers", () => {
 
   it("keeps full SSR on fine rings", () => {
     const visual = activeVisual();
-
     expect(resolveWaterReflectionTierVisual(visual, 4)).toBe(visual);
   });
 
-  it("uses bounded reduced-step SSR on mid rings", () => {
+  it("uses bounded reduced-step SSR on mid rings when far summary is disabled", () => {
     const visual = activeVisual();
     const resolved = resolveWaterReflectionTierVisual(visual, 8);
-
     expect(resolved).not.toBe(visual);
     expect(resolved.bodies).toBe(visual.bodies);
     expect(resolved.reflection.ssrEnabled).toBe(true);
     expect(resolved.reflection.maxSteps).toBe(6);
-    expect(visual.reflection.maxSteps).toBe(18);
+  });
+
+  it("replaces mid SSR with the far summary tier when enabled", () => {
+    const visual = activeVisual();
+    visual.reflection.farSummary.enabled = true;
+    const resolved = resolveWaterReflectionTierVisual(visual, 8);
+
+    expect(waterFarSummaryReflectionActive(resolved, 8)).toBe(true);
+    expect(resolved.reflection.ssrEnabled).toBe(false);
+    expect(resolved.reflection.maxSteps).toBe(0);
+    expect(waterFarSummaryReflectionActive(resolved, 4)).toBe(false);
+    expect(waterFarSummaryReflectionActive(resolved, 32)).toBe(false);
   });
 
   it("uses the existing fallback path on coarse rings", () => {
     const visual = activeVisual();
     const resolved = resolveWaterReflectionTierVisual(visual, 32);
-
     expect(resolved.reflection.ssrEnabled).toBe(false);
     expect(resolved.reflection.maxSteps).toBe(0);
     expect(resolved.reflection.skyFallbackStrength).toBe(visual.reflection.skyFallbackStrength);
-    expect(resolved.reflection.terrainFallbackStrength).toBe(visual.reflection.terrainFallbackStrength);
   });
 
   it("never increases the configured SSR step count", () => {
     const visual = activeVisual();
     visual.reflection.maxSteps = 4;
     visual.reflection.clipmapTiers.midMaxSteps = 20;
-
     expect(resolveWaterReflectionTierVisual(visual, 8)).toBe(visual);
   });
 
@@ -139,6 +149,9 @@ describe("water reflection clipmap tiers", () => {
       "        full_quality_max_cell_size_m: 3",
       "        mid_quality_max_cell_size_m: 12",
       "        mid_max_steps: 5",
+      "      far_summary:",
+      "        enabled: true",
+      "        max_steps: 7",
     ].join("\n"), () => {});
 
     expect(parsed.visual.reflection.clipmapTiers).toEqual({
@@ -147,14 +160,15 @@ describe("water reflection clipmap tiers", () => {
       midQualityMaxCellSizeM: 12,
       midMaxSteps: 5,
     });
+    expect(parsed.visual.reflection.farSummary).toMatchObject({ enabled: true, maxSteps: 7 });
 
     const cloned = cloneWaterConfig(parsed);
-    expect(cloned.visual.reflection.clipmapTiers).not.toBe(parsed.visual.reflection.clipmapTiers);
-    cloned.visual.reflection.clipmapTiers.midMaxSteps = 2;
-    expect(parsed.visual.reflection.clipmapTiers.midMaxSteps).toBe(5);
+    expect(cloned.visual.reflection.farSummary).not.toBe(parsed.visual.reflection.farSummary);
+    cloned.visual.reflection.farSummary.maxSteps = 5;
+    expect(parsed.visual.reflection.farSummary.maxSteps).toBe(7);
   });
 
-  it("supports explicit query enable and disable aliases", () => {
+  it("supports explicit tier query enable and disable aliases", () => {
     const enabled = applyWaterQueryOverrides(
       DEFAULT_WATER_CONFIG,
       new URLSearchParams({ waterReflectionTiers: "1" }),

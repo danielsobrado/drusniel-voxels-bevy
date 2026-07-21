@@ -13,6 +13,7 @@ import {
   type RefinedClodReadinessInput,
 } from "./far_clipmap_controller.js";
 import { FarReflectionSource, type FarReflectionSourceConfig } from "./far_reflection_source.js";
+import { readConfiguredFarReflectionSource } from "./far_reflection_source_config_runtime.js";
 import {
   publishFarReflectionSourceCounters,
   registerActiveFarReflectionSource,
@@ -64,9 +65,8 @@ export function createCurrentSnapFarClipmapController(
   const base = createBaseFarClipmapController(scene, config, activeSource, options) as InspectableFarClipmapController;
   if (!Array.isArray(base.rings)) throw new Error("far clipmap ring readiness contract unavailable");
 
-  const reflection = options.reflectionSource?.enabled
-    ? new FarReflectionSource(options.reflectionSource)
-    : null;
+  const reflectionConfig = options.reflectionSource ?? readConfiguredFarReflectionSource();
+  const reflection = reflectionConfig?.enabled ? new FarReflectionSource(reflectionConfig) : null;
   const unregisterReflection = reflection
     ? registerActiveFarReflectionSource(reflection)
     : () => undefined;

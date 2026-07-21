@@ -5,6 +5,7 @@ import type {
   WaterMaterialHandle,
   WaterMaterialParams,
 } from "./water_material_types.js";
+import { decorateWaterFarReflection } from "./water_far_reflection_decorator.js";
 import {
   decorateWaterSsrMissRouting,
   withoutConstantWaterSsrMissFallback,
@@ -15,5 +16,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     ...params,
     visual: withoutConstantWaterSsrMissFallback(params.visual),
   };
-  return decorateWaterSsrMissRouting(createWaterNodeMaterialBase(baseParams), params);
+  const routed = decorateWaterSsrMissRouting(createWaterNodeMaterialBase(baseParams), params);
+  return decorateWaterFarReflection(routed, params);
 }
