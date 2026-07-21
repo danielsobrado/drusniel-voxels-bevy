@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   decodeTreeImpostorDepthOffset,
   encodeTreeImpostorRelativeDepth,
+  markTreeImpostorCenterRelativeDepth,
+  TREE_IMPOSTOR_DEPTH_ENCODING,
   TREE_IMPOSTOR_DEPTH_EXTENT_DIVISOR,
   TREE_IMPOSTOR_DEPTH_FAR_RADIUS_MULTIPLIER,
   TREE_IMPOSTOR_DEPTH_GRID_SEGMENTS,
@@ -20,6 +22,16 @@ describe("tree impostor depth contract", () => {
       farM: 60,
       extentM: (60 - 0.01) / 4,
     });
+  });
+
+  it("versions only explicitly stamped current atlases", () => {
+    const current: { depthEncoding?: string } = {};
+    const legacy: { depthEncoding?: string } = {};
+
+    markTreeImpostorCenterRelativeDepth(current);
+
+    expect(current.depthEncoding).toBe(TREE_IMPOSTOR_DEPTH_ENCODING);
+    expect(legacy.depthEncoding).toBeUndefined();
   });
 
   it("round-trips center-relative depth", () => {
