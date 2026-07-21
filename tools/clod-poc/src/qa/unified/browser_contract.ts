@@ -1,5 +1,6 @@
 import type { CamPose, EngineStats } from "../../core/hooks.js";
 import type { SequenceClockConfig, SequenceClockState } from "../sequence/sequence_clock.js";
+import type { QaBuildIdentity } from "./build_identity.js";
 
 export interface QaEnvironment {
   userAgent: string;
@@ -7,12 +8,20 @@ export interface QaEnvironment {
   viewport: [number, number];
   devicePixelRatio: number;
   gpu: Record<string, unknown> | null;
+  build: QaBuildIdentity;
 }
 
 export interface QaWorldState {
   freeze?: boolean;
   proceduralDebug?: string | null;
   farClipmapDebug?: "final" | "biome" | "height" | "ownership" | null;
+  timeOfDayHours?: number;
+  sunElevationDeg?: number;
+  sunAzimuthDeg?: number;
+  windTimeS?: number;
+  cloudTimeS?: number;
+  particleTimeS?: number;
+  precipitation?: string;
 }
 
 export interface DrusnielQaHook {
@@ -21,6 +30,7 @@ export interface DrusnielQaHook {
   readinessBlockers(): string[];
   error(): string | null;
   environment(): QaEnvironment;
+  worldState(): Readonly<QaWorldState>;
   getPose(): CamPose;
   getCameraMatrices(): { viewProjection: number[]; viewProjectionInverse: number[]; near: number; far: number };
   setPose(pose: CamPose): Promise<void>;
