@@ -5,7 +5,7 @@ import { sampleActiveForestCanopyEcology } from "../../forest_lighting/forest_li
 import { treePcg2d01 } from "../../vegetation/gpu_authority/pcg2d.js";
 import {
   DressingSystem as DressingSystemBase,
-  type DressingSystemOptions,
+  type DressingSystemOptions as DressingSystemBaseOptions,
 } from "./dressing_system_base.js";
 import { resolveDressingCanopyEcology } from "./dressing_canopy_environment.js";
 import { GroundDebrisCpuResources } from "./ground_debris_cpu_resources.js";
@@ -22,18 +22,25 @@ interface DressingSystemInternals {
   ): readonly [number, number] | undefined;
 }
 
+export interface CpuDressingSystemOptions extends DressingSystemBaseOptions {
+  readonly useWebGpuMaterials?: boolean;
+}
+
 export class CpuDressingSystem extends DressingSystemBase {
-  private canonicalOptions: DressingSystemOptions | null = null;
-  private readonly groundDebrisResources = new GroundDebrisCpuResources();
+  private canonicalOptions: CpuDressingSystemOptions | null = null;
+  private readonly groundDebrisResources: GroundDebrisCpuResources;
   private readonly scene: THREE.Scene;
   private lastVisualCenterX = Number.POSITIVE_INFINITY;
   private lastVisualCenterZ = Number.POSITIVE_INFINITY;
 
-  constructor(options: DressingSystemOptions) {
+  constructor(options: CpuDressingSystemOptions) {
     const deferredConfig = { ...options.config, enabled: false };
     const deferredOptions = { ...options, config: deferredConfig };
     super(deferredOptions);
     this.scene = options.scene;
+    this.groundDebrisResources = new GroundDebrisCpuResources({
+      useWebGpuMaterials: options.useWebGpuMaterials,
+    });
     deferredConfig.enabled = options.config.enabled;
     this.canonicalOptions = options;
     if (options.config.enabled) {

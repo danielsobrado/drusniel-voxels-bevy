@@ -27,6 +27,7 @@ export function createDressingIntegration(options: DressingIntegrationOptions): 
   const parsed = parseDressingConfig(dressingConfigText);
   const disabledByQuery = options.enabled === false || options.searchParams?.get("dressing") === "0";
   const forceCpu = options.searchParams?.get("dressingGpu") === "0";
+  const useWebGpuMaterials = Boolean(options.gpuDevice && options.gpuBackend);
   const config = disabledByQuery ? { ...parsed, enabled: false } : parsed;
   validateDressingStartup(config);
   return new DressingSystem({
@@ -39,5 +40,6 @@ export function createDressingIntegration(options: DressingIntegrationOptions): 
     config,
     gpuDevice: forceCpu ? null : options.gpuDevice,
     gpuBackend: forceCpu ? null : options.gpuBackend,
+    useWebGpuMaterials,
   });
 }
