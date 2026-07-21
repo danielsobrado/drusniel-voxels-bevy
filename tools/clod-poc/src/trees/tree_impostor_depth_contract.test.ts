@@ -9,6 +9,7 @@ import {
   TREE_IMPOSTOR_DEPTH_GRID_SEGMENTS,
   TREE_IMPOSTOR_DEPTH_NEAR_M,
   treeImpostorDepthRange,
+  type TreeImpostorDepthEncoding,
 } from "./tree_impostor_depth_contract.js";
 
 describe("tree impostor depth contract", () => {
@@ -25,8 +26,8 @@ describe("tree impostor depth contract", () => {
   });
 
   it("versions only explicitly stamped current atlases", () => {
-    const current: { depthEncoding?: string } = {};
-    const legacy: { depthEncoding?: string } = {};
+    const current: { depthEncoding?: TreeImpostorDepthEncoding } = {};
+    const legacy: { depthEncoding?: TreeImpostorDepthEncoding } = {};
 
     markTreeImpostorCenterRelativeDepth(current);
 
