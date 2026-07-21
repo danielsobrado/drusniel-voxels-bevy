@@ -21,7 +21,14 @@ describe("tree impostor depth reprojection contract", () => {
     expect(depthSource).toContain("const cw00: TslNode = s00.coverage.mul(w00)");
     expect(depthSource).toContain("const lowerWeight: TslNode = float(1).sub(layerBlend).mul(lower.coverage)");
     expect(depthSource).toContain("clamp(sample.depth, 0, 1).mul(2).sub(1).mul(range.extentM)");
-    expect(depthSource).toContain("cameraRay.mul(offsetM.mul(coverageWeight).mul(instanceScale))");
+  });
+
+  it("scales depth with the same live morphology as the card", () => {
+    expect(depthSource).toContain('attribute("treeHeight01", "float")');
+    expect(depthSource).toContain("mix(0.72, 1.08, smoothstep(0, 1, age))");
+    expect(depthSource).toContain("clamp(record.morphology1.z, 0.82, 1.18)");
+    expect(depthSource).toContain("clamp(record.morphology1.w, 0.82, 1.2)");
+    expect(depthSource).toContain("yawCos.mul(localDepth.x).add(yawSin.mul(localDepth.z))");
   });
 
   it("applies one identical transform to color and prepass", () => {
