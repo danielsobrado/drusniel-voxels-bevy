@@ -1,8 +1,8 @@
-# Glacial Valley ground-debris CPU ring-edge fade — 2026-07-21
+# Glacial Valley ground-debris classic CPU ring-edge fade — 2026-07-21
 
 ## Goal
 
-Hide the hard camera-local boundary of the CPU/WebGL dressing fallback without transparent blending, per-frame instance updates, or a second placement ring.
+Hide the hard camera-local boundary of the classic WebGL CPU dressing fallback without transparent blending, per-frame instance updates, or a second placement ring.
 
 ## Dependency
 
@@ -14,9 +14,17 @@ Required merge order:
 #285 -> #287 -> this PR
 ```
 
+## Renderer boundary
+
+This implementation uses `MeshStandardMaterial.onBeforeCompile`, which is the classic WebGL shader-decoration path.
+
+It must not be claimed as the WebGPU CPU-fallback solution. WebGPU requires a separate NodeMaterial decorator using the same pure fade policy and is intentionally left for a later measured slice.
+
+The material remains valid when the hook is not consumed, but the fade acceptance in this PR applies to WebGL only.
+
 ## Implementation
 
-Each shared CPU debris material receives one `onBeforeCompile` decoration.
+Each shared classic CPU debris material receives one `onBeforeCompile` decoration.
 
 Vertex stage:
 
@@ -27,7 +35,7 @@ Fragment stage:
 - computes camera distance in world XZ;
 - resolves the class profile's existing `fadeStartM` and `fadeEndM`;
 - derives one deterministic hash from a 0.5 m world-space cell;
-- discards instances/fragments when the stable hash exceeds visibility;
+- discards fragments when the stable hash exceeds visibility;
 - runs before the existing Three dithering fragment chunk.
 
 The fade is world anchored and has no time input, so movement does not cause crawling noise.
@@ -61,14 +69,14 @@ Every class reaches zero before or at the CPU dressing radius.
 
 ## Failure policy
 
-Shader injection fails loudly when Three removes or renames either required anchor:
+Shader injection fails loudly when Three removes or renames either required classic shader anchor:
 
 ```text
 #include <worldpos_vertex>
 #include <dithering_fragment>
 ```
 
-Silent fallback to a hard ring edge is not accepted.
+Silent fallback to a hard WebGL ring edge is not accepted.
 
 ## Required tests
 
@@ -84,7 +92,7 @@ npm --prefix tools/clod-poc run build
 
 ## Headed acceptance
 
-Run `scene=infinite-islands` with `dressingGpu=0` in WebGL and WebGPU CPU-fallback modes.
+Run `scene=infinite-islands` with `dressingGpu=0` under the classic WebGL renderer.
 
 Walk straight and diagonally across each class's outer radius and verify:
 
@@ -97,6 +105,8 @@ Walk straight and diagonally across each class's outer radius and verify:
 - render p95 regression over PR #287 remains `<= 0.05 ms`;
 - gameplay readbacks remain zero.
 
+A WebGPU CPU-fallback capture is only a regression smoke check in this PR: it must continue rendering, but fade parity is not claimed until a NodeMaterial implementation exists.
+
 ## Honest boundary
 
-The fade operates per fragment, not per instance compaction. Fully faded CPU instances still exist in the InstancedMesh until the normal movement rebuild. The current radius and small class geometry make this acceptable for the fallback path; CPU-side compaction should only be added after measurement.
+The fade operates per fragment, not per instance compaction. Fully faded CPU instances still exist in the InstancedMesh until the normal movement rebuild. The current radius and small class geometry make this acceptable for the classic fallback path; CPU-side compaction should only be added after measurement.
