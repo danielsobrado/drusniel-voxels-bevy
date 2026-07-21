@@ -4,6 +4,7 @@ import captureSource from "./tree_impostor_capture_material.ts?raw";
 import depthSource from "./tree_impostor_depth_reprojection.ts?raw";
 import samplingSource from "./tree_impostor_depth_sampling.ts?raw";
 import geometrySource from "./tree_gpu_ring_geometry.ts?raw";
+import assetsSource from "./tree_system_assets_runtime.ts?raw";
 import wrapperSource from "./tree_ring_impostor_node_material.ts?raw";
 
 describe("tree impostor depth reprojection contract", () => {
@@ -32,6 +33,16 @@ describe("tree impostor depth reprojection contract", () => {
     expect(depthSource).toContain("yawCos.mul(localDepth.x).add(yawSin.mul(localDepth.z))");
   });
 
+  it("versions committed atlases and fails open for legacy inputs", () => {
+    expect(assetsSource).toContain("if (atlas?.ready) markTreeImpostorCenterRelativeDepth(atlas)");
+    expect(depthSource).toContain("atlas.depthEncoding !== TREE_IMPOSTOR_DEPTH_ENCODING");
+    expect(geometrySource).toContain("atlas.depthEncoding === TREE_IMPOSTOR_DEPTH_ENCODING");
+    expect(assetsSource.indexOf("markTreeImpostorCenterRelativeDepth(atlas)"))
+      .toBeGreaterThan(assetsSource.indexOf("await waitForTreeRendererSubmittedWork(renderer)"));
+    expect(assetsSource.indexOf("markTreeImpostorCenterRelativeDepth(atlas)"))
+      .toBeLessThan(assetsSource.indexOf("this.setImpostorAtlases(result.atlases, bakeContentKey)"));
+  });
+
   it("applies one identical transform to color and prepass", () => {
     expect(wrapperSource).toContain("material.positionNode = depthReprojection.apply(material.positionNode)");
     expect(wrapperSource).toContain("positionNode: depthReprojection.apply(nodes.positionNode as TslNode)");
@@ -40,7 +51,7 @@ describe("tree impostor depth reprojection contract", () => {
   });
 
   it("tessellates baked GPU impostors without changing fallback geometry", () => {
-    expect(geometrySource).toContain("createTreeImpostorDepthGridGeometry(\n    createTreeBakedImpostorGeometry(species, settings, atlas),");
+    expect(geometrySource).toContain("createTreeImpostorDepthGridGeometry(geometry)");
     expect(geometrySource).toContain("return { geometry: fallback, bakedImpostor: false }");
   });
 });
