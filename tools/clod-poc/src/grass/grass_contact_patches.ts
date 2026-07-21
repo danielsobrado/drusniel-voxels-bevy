@@ -14,6 +14,7 @@ import {
   uniform,
 } from "three/tsl";
 import configText from "../../config/grass_contact.yaml?raw";
+import { dressingGrassContactInfluence } from "../ecology/dressing/gpu/dressing_grass_contact_field.js";
 
 export const GRASS_CONTACT_PATCH_CAPACITY = 32;
 
@@ -209,8 +210,11 @@ export function grassContactPatchInfluence(worldXZ: TslNode): GrassContactInflue
   );
   const sample: TslNode = field.element(fieldIndex);
   const active: TslNode = inside.select(float(1), float(0)).mul(uEnabled);
-  const suppress: TslNode = sample.x.mul(active);
-  const trample: TslNode = sample.y.mul(active);
+  const stoneSuppress: TslNode = sample.x.mul(active);
+  const stoneTrample: TslNode = sample.y.mul(active);
+  const dressing = dressingGrassContactInfluence(worldXZ);
+  const suppress: TslNode = max(stoneSuppress, dressing.suppress);
+  const trample: TslNode = max(stoneTrample, dressing.trample);
   const splay: TslNode = sample.zw.mul(active);
   return {
     suppress,
