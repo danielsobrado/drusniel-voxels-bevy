@@ -57,11 +57,24 @@ export {
   createCurrentSnapFarClipmapController as createFarClipmapController,
   applyCurrentSnapReadiness,
 } from "./far_clipmap_current_snap_controller.js";
+export type { CurrentSnapFarClipmapControllerOptions } from "./far_clipmap_current_snap_controller.js";
 export type {
   FarClipmapController,
   FarClipmapOwnershipSnapshot,
   FarClipmapStats,
   RefinedClodReadinessInput,
 } from "./far_clipmap_controller.js";
+
+export { FarReflectionSource } from "./far_reflection_source.js";
+export type {
+  FarReflectionSourceConfig,
+  FarReflectionSourceSnapshot,
+  FarReflectionSourceStats,
+  FarReflectionSourceSubmitInput,
+} from "./far_reflection_source.js";
+export {
+  readActiveFarReflectionSource,
+  readActiveFarReflectionSourceGeneration,
+} from "./far_reflection_source_runtime.js";
 
 export { publishFarClipmapStatsToCounters } from "./far_clipmap_counters.js";
