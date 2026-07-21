@@ -24,6 +24,12 @@ export interface QaBatteryReport {
   failures: string[];
 }
 
+interface ExecutionPlanItem {
+  commandId: string;
+  sceneId: string;
+  target: "clod-poc" | "bevy";
+}
+
 export async function runQaBattery(
   orchestration: QaOrchestrationRegistry,
   scenes: UnifiedQaRegistry,
@@ -39,17 +45,24 @@ export async function runQaBattery(
   const failures: string[] = [];
   mkdirSync(options.outputDir, { recursive: true });
 
-  for (const item of plan) {
+  const staticItems = plan.filter((item) => orchestration.commands.get(item.commandId)?.lane === "static");
+  const runtimeItems = plan.filter((item) => orchestration.commands.get(item.commandId)?.lane !== "static");
+  const staticResults = await Promise.all(staticItems.map((item) => executePlanItem(orchestration, item, options)));
+  commands.push(...staticResults);
+  for (let index = 0; index < staticItems.length; index++) {
+    const item = staticItems[index]!;
+    const result = staticResults[index]!;
+    if (result.status !== "PASS") failures.push(`${result.command_id}/${result.scene_id}: ${result.status}`);
+    const command = orchestration.commands.get(item.commandId)!;
+    if (result.status !== "PASS" && !command.continue_on_failure) {
+      return finishBatteryReport(battery, options, selectedTargets, selectedScenes, commands, failures);
+    }
+  }
+
+  for (const item of runtimeItems) {
     const command = orchestration.commands.get(item.commandId);
     if (!command) throw new Error(`execution plan references unknown command ${item.commandId}`);
-    const context: QaCommandContext = {
-      repositoryRoot: options.repositoryRoot,
-      outputDir: options.outputDir,
-      runIndex: options.runIndex,
-      sceneId: item.sceneId,
-      target: item.target,
-    };
-    const result = await runQaCommand(command, context);
+    const result = await executePlanItem(orchestration, item, options);
     commands.push(result);
     if (result.status !== "PASS") {
       failures.push(`${result.command_id}/${result.scene_id}: ${result.status}`);
@@ -57,13 +70,41 @@ export async function runQaBattery(
     }
   }
 
+  return finishBatteryReport(battery, options, selectedTargets, selectedScenes, commands, failures);
+}
+
+async function executePlanItem(
+  orchestration: QaOrchestrationRegistry,
+  item: ExecutionPlanItem,
+  options: QaBatteryRunOptions,
+): Promise<QaCommandResult> {
+  const command = orchestration.commands.get(item.commandId);
+  if (!command) throw new Error(`execution plan references unknown command ${item.commandId}`);
+  const context: QaCommandContext = {
+    repositoryRoot: options.repositoryRoot,
+    outputDir: options.outputDir,
+    runIndex: options.runIndex,
+    sceneId: item.sceneId,
+    target: item.target,
+  };
+  return await runQaCommand(command, context);
+}
+
+function finishBatteryReport(
+  battery: QaBatteryDefinition,
+  options: QaBatteryRunOptions,
+  selectedTargets: readonly string[],
+  selectedScenes: readonly UnifiedQaScene[],
+  commands: QaCommandResult[],
+  failures: string[],
+): QaBatteryReport {
   const report: QaBatteryReport = {
     schema_version: 1,
     battery_id: battery.id,
     run_index: options.runIndex,
     status: failures.length === 0 ? "PASS" : "FAIL",
     generated_utc: new Date().toISOString(),
-    targets: selectedTargets,
+    targets: [...selectedTargets],
     scenes: selectedScenes.map((scene) => scene.id),
     commands,
     failures,
@@ -77,8 +118,8 @@ export function buildExecutionPlan(
   battery: QaBatteryDefinition,
   scenes: readonly UnifiedQaScene[],
   targets: readonly ("clod-poc" | "bevy")[],
-): Array<{ commandId: string; sceneId: string; target: "clod-poc" | "bevy" }> {
-  const plan: Array<{ commandId: string; sceneId: string; target: "clod-poc" | "bevy" }> = [];
+): ExecutionPlanItem[] {
+  const plan: ExecutionPlanItem[] = [];
   const seen = new Set<string>();
   for (const laneId of battery.lanes) {
     const lane = orchestration.lanes.get(laneId);
@@ -107,7 +148,7 @@ function selectBatteryScenes(
 }
 
 function pushUnique(
-  plan: Array<{ commandId: string; sceneId: string; target: "clod-poc" | "bevy" }>,
+  plan: ExecutionPlanItem[],
   seen: Set<string>,
   commandId: string,
   sceneId: string,
