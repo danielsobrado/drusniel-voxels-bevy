@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import {
+  attribute,
   clamp,
   float,
   max,
@@ -12,6 +13,13 @@ import type { EnvironmentLighting } from "../environment/environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import type { TreeSettings } from "./tree_config.js";
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import { createTreeImpostorDepthReprojectionNode } from "./tree_impostor_depth_reprojection.js";
+import {
+  createTreeImpostorWindUniforms,
+  treeImpostorWindActive,
+  treeImpostorWindDisplacementNode,
+  updateTreeImpostorWindUniforms,
+} from "./tree_impostor_wind.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import type { TreeHydrologyWater, TreeRingInstanceBuffers } from "./tree_node_material.js";
 import { treeMorphologyRecordNodes } from "./morphology/node_deformation.js";
@@ -19,7 +27,6 @@ import {
   resolveTreeMorphologyEvidenceMode,
   type TreeMorphologyEvidenceMode,
 } from "./morphology/impostor_competition.js";
-import { createTreeImpostorDepthReprojectionNode } from "./tree_impostor_depth_reprojection.js";
 import {
   createTreeRingImpostorNodeMaterialHandle as createBaseHandle,
 } from "./tree_ring_impostor_node_material_base.js";
@@ -54,12 +61,28 @@ export function createTreeRingImpostorNodeMaterialHandle(
   const competition: TslNode = clamp(detailNode.w.mul(uCompetitionEnabled), 0, 1);
   const age: TslNode = clamp(record.morphology0.x, 0, 1);
   const depthReprojection = createTreeImpostorDepthReprojectionNode(atlas, buffers);
+  const windUniforms = createTreeImpostorWindUniforms(settings);
+  let windActive = treeImpostorWindActive(settings);
+  const windDisplacement: TslNode = treeImpostorWindDisplacementNode(windUniforms, {
+    worldXZ: record.positionScale.xz,
+    height01: attribute("treeHeight01", "float"),
+    instanceScale: max(record.positionScale.w, float(0.001)),
+    yaw: record.rotationNormalY.x,
+    age01: age,
+    stiffness: record.morphology2.w,
+  });
+  const applyImpostorPosition = (sourcePosition: TslNode): TslNode => {
+    const depthPosition = depthReprojection.active
+      ? depthReprojection.apply(sourcePosition)
+      : sourcePosition;
+    return depthPosition.add(windDisplacement);
+  };
 
   const decorate = (materialValue: THREE.Material): void => {
     const material = materialValue as NodeMaterialShape;
     let changed = false;
-    if (depthReprojection.active && material.positionNode) {
-      material.positionNode = depthReprojection.apply(material.positionNode);
+    if (material.positionNode) {
+      material.positionNode = applyImpostorPosition(material.positionNode);
       changed = true;
     }
     if (material.colorNode) {
@@ -77,23 +100,40 @@ export function createTreeRingImpostorNodeMaterialHandle(
   decorate(base.regularMaterial);
   for (const material of Object.values(base.debugMaterials) as THREE.Material[]) decorate(material);
 
-  const originalUpdateForestLighting = base.updateForestLighting?.bind(base);
+  const originalSetTime = base.setTime.bind(base);
   const originalPrepassNodesFor = base.prepassNodesFor?.bind(base);
+  const originalUpdateSettings = base.updateSettings.bind(base);
+  const originalUpdateForestLighting = base.updateForestLighting?.bind(base);
   const originalDispose = base.dispose.bind(base);
-  publishEvidenceCounters(evidenceMode, false, depthReprojection.active);
+  publishEvidenceCounters(evidenceMode, false, depthReprojection.active, windActive);
 
   return {
     ...base,
+    setTime(timeSeconds: number) {
+      originalSetTime(timeSeconds);
+      windUniforms.time.value = Number.isFinite(timeSeconds) ? timeSeconds : 0;
+    },
     prepassNodesFor: originalPrepassNodesFor
       ? (lod) => {
           const nodes = originalPrepassNodesFor(lod);
-          if (!nodes || !depthReprojection.active) return nodes;
+          if (!nodes) return nodes;
           return {
             ...nodes,
-            positionNode: depthReprojection.apply(nodes.positionNode as TslNode),
+            positionNode: applyImpostorPosition(nodes.positionNode as TslNode),
           };
         }
       : undefined,
+    updateSettings(next: TreeSettings) {
+      originalUpdateSettings(next);
+      updateTreeImpostorWindUniforms(windUniforms, next);
+      windActive = treeImpostorWindActive(next);
+      publishEvidenceCounters(
+        evidenceMode,
+        uCompetitionEnabled.value > 0.5,
+        depthReprojection.active,
+        windActive,
+      );
+    },
     updateForestLighting(state: ForestLightingMaterialState | null) {
       originalUpdateForestLighting?.(state);
       const enabled = state?.settings.enabled === true
@@ -101,7 +141,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
       uCompetitionEnabled.value = enabled ? 1 : 0;
       uForestWorldSize.value = state?.worldCells ?? 1;
       detailNode.value = state?.textureHandle.detailTexture ?? neutralDetail;
-      publishEvidenceCounters(evidenceMode, enabled, depthReprojection.active);
+      publishEvidenceCounters(evidenceMode, enabled, depthReprojection.active, windActive);
     },
     dispose() {
       neutralDetail.dispose();
@@ -146,6 +186,7 @@ function publishEvidenceCounters(
   mode: TreeMorphologyEvidenceMode,
   authorityActive: boolean,
   depthReprojectionActive: boolean,
+  windActive: boolean,
 ): void {
   const counters = (globalThis as typeof globalThis & {
     window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
@@ -157,5 +198,9 @@ function publishEvidenceCounters(
   counters["tree_morphology_record_authority"] = 1;
   counters["tree_impostor_depth_reprojection_active"] = depthReprojectionActive ? 1 : 0;
   counters["tree_impostor_depth_prepass_parity"] = depthReprojectionActive ? 1 : 0;
+  counters["tree_impostor_wind_active"] = windActive ? 1 : 0;
+  counters["tree_impostor_wind_phase_parity"] = 1;
+  counters["tree_impostor_wind_prepass_parity"] = 1;
+  counters["tree_impostor_whole_card_flutter"] = 0;
   counters["tree_impostor_evidence_mode"] = mode === "age" ? 1 : mode === "competition" ? 2 : 0;
 }
