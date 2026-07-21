@@ -1,6 +1,12 @@
 export const TREE_IMPOSTOR_DEPTH_ENCODING = "center-relative-v2" as const;
 export type TreeImpostorDepthEncoding = typeof TREE_IMPOSTOR_DEPTH_ENCODING | "view-linear-v1";
 
+declare module "./tree_impostor_baker.js" {
+  interface TreeImpostorAtlas {
+    depthEncoding?: TreeImpostorDepthEncoding;
+  }
+}
+
 export const TREE_IMPOSTOR_DEPTH_NEAR_M = 0.01;
 export const TREE_IMPOSTOR_DEPTH_FAR_RADIUS_MULTIPLIER = 6;
 export const TREE_IMPOSTOR_DEPTH_EXTENT_DIVISOR = 4;
@@ -10,6 +16,12 @@ export interface TreeImpostorDepthRange {
   readonly nearM: number;
   readonly farM: number;
   readonly extentM: number;
+}
+
+export function markTreeImpostorCenterRelativeDepth(
+  atlas: { depthEncoding?: TreeImpostorDepthEncoding },
+): void {
+  atlas.depthEncoding = TREE_IMPOSTOR_DEPTH_ENCODING;
 }
 
 export function treeImpostorDepthRange(radiusM: number): TreeImpostorDepthRange {
