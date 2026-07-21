@@ -111,8 +111,18 @@ function createPebble(
   const detailScale = lod === 2 ? 0.78 : lod === 1 ? 0.90 : 1;
   geometry.scale(radiusX * detailScale, radiusY * detailScale, radiusZ * detailScale);
   geometry.translate(0, radiusY * detailScale, 0);
+  ensureIndexedGeometry(geometry);
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
+}
+
+function ensureIndexedGeometry(geometry: THREE.BufferGeometry): void {
+  if (geometry.getIndex()) return;
+  const count = geometry.getAttribute("position")?.count ?? 0;
+  if (count <= 0) return;
+  const indices = new Uint32Array(count);
+  for (let i = 0; i < count; i += 1) indices[i] = i;
+  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
 }

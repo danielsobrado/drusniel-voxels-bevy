@@ -77,7 +77,7 @@ export function buildWaterFarReflectionNode(input: {
           .and(grid.x.lessThan(uResolution.sub(1)))
           .and(grid.y.lessThan(uResolution.sub(1)));
         If(inside, () => {
-          const cell = floor(grid);
+          const cell: TslNode = floor(grid);
           const index = cell.y.mul(uResolution).add(cell.x).toUint();
           const sample = source.element(index);
           const verticalDelta = point.y.sub(sample.x);

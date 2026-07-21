@@ -89,7 +89,7 @@ export function applyGroundDebrisMaterial(
   material.color.setRGB(1, 1, 1);
   material.colorNode = seasonalColor.mul(variation).mul(sunResponse);
   material.roughnessNode = roughness;
-  material.maskNode = material.maskNode ? material.maskNode.and(keep) : keep;
+  material.maskNode = material.maskNode ? (material.maskNode as TslNode).and(keep) : keep;
   material.metalness = 0;
   material.side = THREE.DoubleSide;
   material.transparent = false;

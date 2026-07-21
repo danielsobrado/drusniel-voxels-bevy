@@ -62,7 +62,11 @@ export class DressingGrassContactCompute {
       size: DRESSING_CLASSES.length * POLICY_FLOATS_PER_CLASS * Float32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(this.policyBuffer, 0, packClassPolicies());
+    device.queue.writeBuffer(
+      this.policyBuffer,
+      0,
+      packClassPolicies().buffer as ArrayBuffer,
+    );
     this.bindGroup = device.createBindGroup({
       label: "dressing grass-contact bind group",
       layout,

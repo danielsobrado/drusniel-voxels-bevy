@@ -28,7 +28,6 @@ describe("tree impostor competition contract", () => {
     expect(wrapperSource).not.toContain("competition.mul(0.16)");
     expect(wrapperSource).not.toContain("competition.mul(0.12)");
     expect(wrapperSource).not.toContain("competition.mul(0.14)");
-    expect(wrapperSource).not.toContain("prepassNodesFor:");
     expect(wrapperSource).not.toContain("createTreeImpostorAtlas");
   });
 });

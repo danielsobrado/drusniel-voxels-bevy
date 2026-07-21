@@ -1,19 +1,20 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const CONFIG_SOURCE = readFileSync(new URL("../../config/water.yaml", import.meta.url), "utf8");
-const FOAM_NODES_SOURCE = readFileSync(new URL("./water_foam_nodes.ts", import.meta.url), "utf8");
-const DISTANCE_SOURCE = readFileSync(new URL("./water_foam_distance.ts", import.meta.url), "utf8");
-const DISTANCE_NODES_SOURCE = readFileSync(new URL("./water_foam_distance_nodes.ts", import.meta.url), "utf8");
-const HQ_SOURCE = readFileSync(new URL("./waterNodeMaterial_base.ts", import.meta.url), "utf8");
-const PERF_SOURCE = readFileSync(new URL("./waterPerfNodeMaterial.ts", import.meta.url), "utf8");
-const WEBGL_SOURCE = readFileSync(new URL("./water_glsl_fragment.ts", import.meta.url), "utf8");
-const UNIFORMS_SOURCE = readFileSync(new URL("./water_uniform_state.ts", import.meta.url), "utf8");
-const MATERIAL_SOURCE = readFileSync(new URL("./waterMaterial.ts", import.meta.url), "utf8");
-const MODEL_SOURCE = readFileSync(new URL("./water_foam_model.ts", import.meta.url), "utf8");
-const DEBUG_SOURCE = readFileSync(
+const readUtf8 = (url: URL): string => readFileSync(url, "utf8").replace(/\r\n/g, "\n");
+
+const CONFIG_SOURCE = readUtf8(new URL("../../config/water.yaml", import.meta.url));
+const FOAM_NODES_SOURCE = readUtf8(new URL("./water_foam_nodes.ts", import.meta.url));
+const DISTANCE_SOURCE = readUtf8(new URL("./water_foam_distance.ts", import.meta.url));
+const DISTANCE_NODES_SOURCE = readUtf8(new URL("./water_foam_distance_nodes.ts", import.meta.url));
+const HQ_SOURCE = readUtf8(new URL("./waterNodeMaterial_base.ts", import.meta.url));
+const PERF_SOURCE = readUtf8(new URL("./waterPerfNodeMaterial.ts", import.meta.url));
+const WEBGL_SOURCE = readUtf8(new URL("./water_glsl_fragment.ts", import.meta.url));
+const UNIFORMS_SOURCE = readUtf8(new URL("./water_uniform_state.ts", import.meta.url));
+const MATERIAL_SOURCE = readUtf8(new URL("./waterMaterial.ts", import.meta.url));
+const MODEL_SOURCE = readUtf8(new URL("./water_foam_model.ts", import.meta.url));
+const DEBUG_SOURCE = readUtf8(
   new URL("../runtime/water_weather/water_controller_debug.ts", import.meta.url),
-  "utf8",
 );
 
 describe("shared water foam camera-distance fade", () => {
@@ -91,6 +92,6 @@ describe("shared water foam camera-distance fade", () => {
   });
 
   it("versions the active runtime contract", () => {
-    expect(MODEL_SOURCE).toContain("WATER_FOAM_MODEL_REVISION = 4");
+    expect(MODEL_SOURCE).toContain("WATER_FOAM_MODEL_REVISION = 5");
   });
 });

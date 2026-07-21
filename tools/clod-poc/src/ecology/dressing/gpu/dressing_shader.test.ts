@@ -17,7 +17,8 @@ describe("dressing GPU shader", () => {
     expect(shader).toContain("fn generate_persistent");
     expect(shader).toContain("fn generate_terrain");
     expect(shader).toContain("fn build_indirect_args");
-    expect(shader).not.toContain("DRESSING_WORKGROUP_SIZE: u32 = 64u");
+    expect(shader).toContain("const DRESSING_WORKGROUP_SIZE: u32 = 64u");
+    expect(composeDressingGpuShader(32)).toContain("const DRESSING_WORKGROUP_SIZE: u32 = 32u");
   });
 
   it("avoids Dawn-reserved identifiers and ambiguous bitwise precedence", () => {

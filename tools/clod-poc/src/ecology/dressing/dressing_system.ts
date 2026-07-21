@@ -14,7 +14,7 @@ export class DressingSystem implements DressingSystemLike {
   private delegate: DressingSystemLike;
   private disposed = false;
 
-  constructor(private readonly options: DressingSystemOptions) {
+  constructor(options: DressingSystemOptions) {
     if (options.config.enabled && options.gpuDevice && options.gpuBackend) {
       try {
         let gpu: GpuDressingSystem;

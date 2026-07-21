@@ -127,6 +127,8 @@ export function treeImpostorWindDisplacementNode(
 export function sampleTreeImpostorWindDisplacement(input: TreeImpostorWindSampleInput): [number, number] {
   const direction = normalizedWindDirection(input.settings.direction);
   if (!input.settings.enabled) return [0, 0];
+  const heightWeight = smoothstep01(clamp01(input.height01));
+  if (heightWeight <= 0) return [0, 0];
   const phase = treeWindPhase(input.x, input.z);
   const time = finiteOr(input.timeSeconds, 0) * finiteOr(input.settings.speed, 0);
   const waveArgument = time
@@ -135,7 +137,6 @@ export function sampleTreeImpostorWindDisplacement(input: TreeImpostorWindSample
   const wave = Math.sin(waveArgument) * finiteOr(input.settings.strength, 0);
   const gust = Math.sin(time * TREE_WIND_GUST_TIME_SCALE + phase * TREE_WIND_GUST_PHASE_SCALE)
     * finiteOr(input.settings.gustStrength, 0);
-  const heightWeight = smoothstep01(clamp01(input.height01));
   const anchoredWeight = heightWeight ** TREE_IMPOSTOR_WIND_HEIGHT_POWER;
   const stiffness = clampNumber(finiteOr(input.stiffness, 1), 0.65, 1.35);
   const windScale = 1 / stiffness * lerp(0.85, 1.10, clamp01(input.age01));

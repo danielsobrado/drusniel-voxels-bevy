@@ -98,6 +98,14 @@ function settings(props: PropAssetDef[]): CustomPropsSettings {
       hysteresisM: 2,
     },
     shadows: { maxShadowProps: 16 },
+    occlusion: {
+      enabled: true,
+      cellSizeM: 4,
+      buildCellsPerFrame: 256,
+      footprintPaddingM: 0.35,
+      minimumHeightM: 1.5,
+      mistClipStrength: 0.85,
+    },
     gpu: {
       enabled: true,
       preferWebGpu: true,

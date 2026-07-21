@@ -233,10 +233,9 @@ export class CalmWaterRiseRingOverlay {
     const grid = this.settings.scanGrid;
     const half = Math.floor(grid / 2);
     const total = grid * grid;
-    const end = Math.min(total, scan.cursor + this.settings.cellsPerFrame);
-    while (scan.cursor < end && this.lastEmitters < this.settings.maxEmittersPerScan) {
+    let remaining = this.settings.cellsPerFrame;
+    while (remaining > 0 && scan.cursor < total && this.lastEmitters < this.settings.maxEmittersPerScan) {
       const cursor = scan.cursor++;
-      this.lastScannedCells += 1;
       const gridX = cursor % grid - half;
       const gridZ = Math.floor(cursor / grid) - half;
       const cellX = scan.baseX + gridX;
@@ -246,6 +245,8 @@ export class CalmWaterRiseRingOverlay {
       const x = (cellX + 0.5 + jitterX) * this.settings.cellSpacingM;
       const z = (cellZ + 0.5 + jitterZ) * this.settings.cellSpacingM;
       if (Math.hypot(x - scan.centerX, z - scan.centerZ) > this.settings.spawnRadiusM) continue;
+      remaining -= 1;
+      this.lastScannedCells += 1;
       const sample = this.sampleReader.sampleRiver(x, z);
       if (!sample) continue;
       const signal = calmWaterRiseRingSignal(sample, this.settings);

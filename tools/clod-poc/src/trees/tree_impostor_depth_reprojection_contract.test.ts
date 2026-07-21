@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
-import bakerSource from "./tree_impostor_baker.ts?raw";
-import captureSource from "./tree_impostor_capture_material.ts?raw";
-import depthSource from "./tree_impostor_depth_reprojection.ts?raw";
-import samplingSource from "./tree_impostor_depth_sampling.ts?raw";
-import geometrySource from "./tree_gpu_ring_geometry.ts?raw";
-import assetsSource from "./tree_system_assets_runtime.ts?raw";
-import wrapperSource from "./tree_ring_impostor_node_material.ts?raw";
+import bakerSourceRaw from "./tree_impostor_baker.ts?raw";
+import captureSourceRaw from "./tree_impostor_capture_material.ts?raw";
+import depthSourceRaw from "./tree_impostor_depth_reprojection.ts?raw";
+import samplingSourceRaw from "./tree_impostor_depth_sampling.ts?raw";
+import geometrySourceRaw from "./tree_gpu_ring_geometry.ts?raw";
+import assetsSourceRaw from "./tree_system_assets_runtime.ts?raw";
+import wrapperSourceRaw from "./tree_ring_impostor_node_material.ts?raw";
+
+const bakerSource = bakerSourceRaw.replace(/\r\n/g, "\n");
+const captureSource = captureSourceRaw.replace(/\r\n/g, "\n");
+const depthSource = depthSourceRaw.replace(/\r\n/g, "\n");
+const samplingSource = samplingSourceRaw.replace(/\r\n/g, "\n");
+const geometrySource = geometrySourceRaw.replace(/\r\n/g, "\n");
+const assetsSource = assetsSourceRaw.replace(/\r\n/g, "\n");
+const wrapperSource = wrapperSourceRaw.replace(/\r\n/g, "\n");
 
 describe("tree impostor depth reprojection contract", () => {
   it("encodes depth relative to each centered age and variant layer", () => {

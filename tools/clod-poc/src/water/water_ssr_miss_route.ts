@@ -191,7 +191,7 @@ function directionalAtmosphere(direction: TslNode): TslNode {
   );
 }
 
-function approximateSsrHit(world: TslNode, reflectDir: TslNode): TslNode {
+function approximateSsrHit(_world: TslNode, reflectDir: TslNode): TslNode {
   if (!getWaterScreenResources().available) return float(0);
   const dirV: TslNode = cameraViewMatrix.mul(vec4(reflectDir, 0)).xyz;
   const hit: TslNode = float(0).toVar();

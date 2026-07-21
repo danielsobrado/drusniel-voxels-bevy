@@ -45,7 +45,7 @@ export function decorateWaterFarReflection(
   const worldPos: TslNode = positionWorld;
   const phaseA = worldPos.x.mul(uRippleScaleA).add(worldPos.z.mul(uRippleScaleA.mul(0.71))).add(uTime.mul(uRippleSpeed));
   const phaseB = worldPos.z.mul(uRippleScaleB).sub(worldPos.x.mul(uRippleScaleB.mul(0.63))).sub(uTime.mul(uRippleSpeed.mul(0.83)));
-  const marchNormal = normalize(vec3(
+  const marchNormal = normalize((vec3 as (...args: TslNode[]) => TslNode)(
     cos(phaseA).mul(uRippleStrengthA).add(sin(phaseB).mul(uRippleStrengthB)).mul(0.28),
     1,
     sin(phaseA).mul(uRippleStrengthA).add(cos(phaseB).mul(uRippleStrengthB)).mul(0.28),

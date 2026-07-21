@@ -6,6 +6,8 @@ import { parseSunLightOptions } from "../sun_light_options.js";
 function provider() {
   return {
     terrainRevision: () => 1,
+    propOcclusionRevision: () => 0,
+    setPropOcclusion: () => undefined,
     heightAt: () => 0,
     readHeight: () => ({ height: 0, present: true, revision: 1 }),
     tileRevision: () => 1,

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const SOURCE = readFileSync(new URL("./water_gui.ts", import.meta.url), "utf8");
+const SOURCE = readFileSync(new URL("./water_gui.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
 describe("water reference preset GUI contract", () => {
   it("marks the reference look custom after manual tuning", () => {

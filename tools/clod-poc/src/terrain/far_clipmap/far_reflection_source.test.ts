@@ -26,13 +26,13 @@ function propPayload(revision = 2): LargePropOcclusionHeightPayload {
   return {
     revision,
     cellSizeM: 1,
-    cellX: new Int32Array([0]),
-    cellZ: new Int32Array([0]),
+    cellX: new Int32Array([1]),
+    cellZ: new Int32Array([1]),
     topY: new Float32Array([9]),
     minX: 0,
     minZ: 0,
-    maxX: 1,
-    maxZ: 1,
+    maxX: 2,
+    maxZ: 2,
   };
 }
 

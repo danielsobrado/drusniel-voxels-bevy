@@ -21,7 +21,7 @@ describe("tree impostor lighting parity", () => {
 
   it("uses the shared scene-style sun wrap in the GPU-ring material", () => {
     const source = readFileSync(
-      new URL("./tree_ring_impostor_node_material.ts", import.meta.url),
+      new URL("./tree_ring_impostor_node_material_base.ts", import.meta.url),
       "utf8",
     );
 

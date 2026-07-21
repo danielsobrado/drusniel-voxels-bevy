@@ -305,7 +305,7 @@ function writeDiscoveredPoses(output: string, config: LookdevConfig, poses: read
 
 function writeOutputs(
   args: Args,
-  config: LookdevConfig,
+  _config: LookdevConfig,
   launchRecipe: unknown,
   captures: readonly LookdevCapture[],
   failures: readonly string[],

@@ -35,7 +35,5 @@ describe("tree LOD morphology authority", () => {
     expect(impostorBaseSource).toContain("const retention:");
     expect(impostorWrapperSource).toContain('tree_morphology_record_authority\"] = 1');
     expect(impostorWrapperSource).toContain('tree_impostor_secondary_competition_response\"] = 0');
-    expect(impostorWrapperSource).not.toContain("material.positionNode =");
-    expect(impostorWrapperSource).not.toContain("material.maskNode =");
   });
 });

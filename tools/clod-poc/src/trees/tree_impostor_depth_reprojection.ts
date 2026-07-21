@@ -60,7 +60,7 @@ export function createTreeImpostorDepthReprojectionNode(
   const yawCos: TslNode = cos(yaw);
   const yawSin: TslNode = sin(yaw);
   const centerY = float(atlas.centerY ?? 0).mul(instanceScale).add(groundY);
-  const toCamera: TslNode = vec3(
+  const toCamera: TslNode = (vec3 as (...args: TslNode[]) => TslNode)(
     cameraPosition.x.sub(worldXZ.x),
     cameraPosition.y.sub(centerY),
     cameraPosition.z.sub(worldXZ.y),
@@ -68,7 +68,7 @@ export function createTreeImpostorDepthReprojectionNode(
   const cameraRay: TslNode = dot(toCamera, toCamera)
     .greaterThan(float(0.000001))
     .select(normalize(toCamera), vec3(0, 0, 1));
-  const localViewDirection: TslNode = normalize(vec3(
+  const localViewDirection: TslNode = normalize((vec3 as (...args: TslNode[]) => TslNode)(
     cameraRay.x.mul(yawCos).sub(cameraRay.z.mul(yawSin)),
     cameraRay.y,
     cameraRay.x.mul(yawSin).add(cameraRay.z.mul(yawCos)),

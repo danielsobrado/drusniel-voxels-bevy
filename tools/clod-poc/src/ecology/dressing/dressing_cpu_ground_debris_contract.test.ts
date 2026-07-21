@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import cpuSource from "./dressing_system_cpu.ts?raw";
+import cpuSourceRaw from "./dressing_system_cpu.ts?raw";
+
+const cpuSource = cpuSourceRaw.replace(/\r\n/g, "\n");
 
 describe("CPU ground-debris integration contract", () => {
   it("applies shared resources after initial and movement-triggered rebuilds", () => {
-    expect(cpuSource).toContain("private readonly groundDebrisResources = new GroundDebrisCpuResources()");
+    expect(cpuSource).toContain("private readonly groundDebrisResources: GroundDebrisCpuResources");
+    expect(cpuSource).toContain("this.groundDebrisResources = new GroundDebrisCpuResources(");
     expect(cpuSource).toContain("this.groundDebrisResources.apply(this.scene)");
     expect(cpuSource).toContain("resourcesMayChange");
     expect(cpuSource).toContain("super.update(center)");

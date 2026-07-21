@@ -26,6 +26,9 @@ describe("water foam albedo", () => {
 
   it("fails closed for invalid or black authoring colours", () => {
     expect(resolveWaterFoamAlbedo([Number.NaN, 0, 0])).toEqual([0, 0, 0]);
-    expect(resolveWaterFoamAlbedo([0, 0, 0])).toEqual([0.592, 0.608, 0.592]);
+    const black = resolveWaterFoamAlbedo([0, 0, 0]);
+    expect(black[0]).toBeCloseTo(0.592, 6);
+    expect(black[1]).toBeCloseTo(0.608, 6);
+    expect(black[2]).toBeCloseTo(0.592, 6);
   });
 });

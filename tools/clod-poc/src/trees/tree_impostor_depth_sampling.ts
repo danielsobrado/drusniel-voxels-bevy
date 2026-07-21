@@ -132,7 +132,7 @@ function treeImpostorDepthAtlasUv(
   );
   const maxUv = vec2(
     frameX.add(1).mul(resolution).sub(padding).div(atlasWidth),
-    yOffset.add(frameY.add(1).mul(resolution).sub(padding).div(atlasHeight),
+    yOffset.add(frameY.add(1).mul(resolution).sub(padding)).div(atlasHeight),
   );
   return minUv.add(clamp(baseUv, vec2(0), vec2(1)).mul(maxUv.sub(minUv)));
 }
@@ -142,7 +142,7 @@ function treeImpostorOctEncode(direction: TslNode): TslNode {
   const projected: TslNode = direction.xy.div(l1);
   const signX: TslNode = direction.x.greaterThanEqual(float(0)).select(float(1), float(-1));
   const signY: TslNode = direction.y.greaterThanEqual(float(0)).select(float(1), float(-1));
-  const folded: TslNode = vec2(
+  const folded: TslNode = (vec2 as (...args: TslNode[]) => TslNode)(
     float(1).sub(abs(projected.y)).mul(signX),
     float(1).sub(abs(projected.x)).mul(signY),
   );

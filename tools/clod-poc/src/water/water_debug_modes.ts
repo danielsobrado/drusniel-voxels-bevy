@@ -18,6 +18,7 @@ export const WATER_DEBUG_LABELS: Record<WaterDebugMode, string> = {
   reflection: "reflection",
   ssrHit: "SSR hit",
   suspendedScatter: "suspended scatter",
+  farReflectionHit: "far reflection hit",
 };
 
 const MATERIAL_DEBUG_MODES = [
