@@ -7,6 +7,7 @@ import { GpuDressingSystem, type DressingSystemLike } from "./gpu/system.js";
 export interface DressingSystemOptions extends DressingSystemBaseOptions {
   readonly gpuDevice?: GPUDevice | null;
   readonly gpuBackend?: VegetationGpuBackend | null;
+  readonly useWebGpuMaterials?: boolean;
 }
 
 export class DressingSystem implements DressingSystemLike {
