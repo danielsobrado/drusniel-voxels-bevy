@@ -7,7 +7,6 @@ import {
   float,
   floor,
   max,
-  mix,
   normalize,
   sin,
   smoothstep,
@@ -210,7 +209,7 @@ function treeImpostorDepthAtlasUv(
   );
   const maxUv = vec2(
     frameX.add(1).mul(resolution).sub(padding).div(atlasWidth),
-    yOffset.add(frameY.add(1).mul(resolution).sub(padding).div(atlasHeight),
+    yOffset.add(frameY.add(1).mul(resolution)).sub(padding).div(atlasHeight),
   );
   return minUv.add(clamp(baseUv, vec2(0), vec2(1)).mul(maxUv.sub(minUv)));
 }
