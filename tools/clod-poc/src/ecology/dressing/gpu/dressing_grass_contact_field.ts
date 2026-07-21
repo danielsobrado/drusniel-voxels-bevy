@@ -31,6 +31,7 @@ const initializedBackends = new WeakSet<object>();
 const uCenter = uniform(new THREE.Vector2());
 const uEnabled = uniform(0);
 
+let gpuResourcesReady = false;
 let registrationGeneration = 0;
 let activeRegistrationGeneration = 0;
 let activeContentRevision = 0;
@@ -70,7 +71,12 @@ export function ensureDressingGrassContactGpuResources(
   }
   const buffer = backend.get(fieldAttribute).buffer;
   if (!buffer) throw new Error("dressing grass-contact GPU buffer was not created by the WebGPU backend");
+  gpuResourcesReady = true;
   return { attribute: fieldAttribute, buffer, capacity: DRESSING_GRASS_CONTACT_FIELD_CAPACITY };
+}
+
+export function dressingGrassContactGpuResourcesReady(): boolean {
+  return gpuResourcesReady;
 }
 
 export function registerDressingGrassContactField(): DressingGrassContactRegistration {
