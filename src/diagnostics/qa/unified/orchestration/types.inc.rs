@@ -32,6 +32,8 @@ pub struct CommandArtifact {
     pub ignore_json_keys: Vec<String>,
     #[serde(default)]
     pub numeric_tolerance: f64,
+    #[serde(default)]
+    pub numeric_tolerances: BTreeMap<String, f64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -179,6 +181,7 @@ pub struct ArtifactPath {
     pub kind: ArtifactKind,
     pub ignore_json_keys: Vec<String>,
     pub numeric_tolerance: f64,
+    pub numeric_tolerances: BTreeMap<String, f64>,
 }
 
 #[derive(Clone, Debug)]
