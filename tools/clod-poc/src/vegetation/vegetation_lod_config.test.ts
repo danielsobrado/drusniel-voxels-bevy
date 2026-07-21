@@ -56,7 +56,7 @@ vegetation_lod:
     const vegetation = parseVegetationLodConfig(`
 vegetation_lod:
   canopy_handoff:
-    start_m: 430
+    start_m: 270
     end_m: 760
 `);
     const trees = applyVegetationLodToTrees(structuredClone(DEFAULT_TREE_SETTINGS), vegetation);

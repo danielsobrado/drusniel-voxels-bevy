@@ -1,20 +1,18 @@
 import type { TreeSettings } from "./tree_config.js";
 
 /**
- * Keeps the default gameplay tree path conservative for terrain visibility while
- * preserving configured LOD crossfades whenever a positive band is present.
- * Impostor baking follows the tree config: without baked atlases the impostor
- * band renders opaque box/octahedron proxies, which read as floating black
- * shapes at distance.
+ * Keeps the default gameplay tree path temporally stable. All distance rings and
+ * impostor baking remain enabled, but LODs use hard hysteresis and a completed
+ * bake rebuilds the active consumer instead of replacing its live GPU resources.
  */
 export function stabilizeRuntimeTreeSettings(settings: TreeSettings): TreeSettings {
   return {
     ...settings,
     lod: {
       ...settings.lod,
-      crossfadeEnabled: settings.lod.crossfadeEnabled && settings.lod.crossfadeBandM > 0,
-      crossfadeBandM: Math.max(0, settings.lod.crossfadeBandM),
-      ditherEnabled: settings.lod.ditherEnabled && settings.lod.crossfadeBandM > 0,
+      crossfadeEnabled: false,
+      crossfadeBandM: 0,
+      ditherEnabled: false,
     },
     gpu: {
       ...settings.gpu,
@@ -25,6 +23,7 @@ export function stabilizeRuntimeTreeSettings(settings: TreeSettings): TreeSettin
     },
     impostors: {
       ...settings.impostors,
+      swapOnBake: false,
       fallbackToPlaceholder: false,
     },
   };

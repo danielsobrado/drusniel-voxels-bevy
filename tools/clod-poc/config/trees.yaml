@@ -1,7 +1,7 @@
 trees:
   enabled: true
   seed: 7331
-  distance_m: 900
+  distance_m: 420
   refresh_distance_m: 20
   max_new_patches_per_frame: 1
   max_instances: 6000
@@ -37,10 +37,10 @@ trees:
   lod:
     near_fraction: 0.062
     mid_fraction: 0.24
-    far_fraction: 0.4666666666666667
+    far_fraction: 0.62
     hysteresis_m: 8
     crossfade_enabled: true
-    crossfade_band_m: 28
+    crossfade_band_m: 20
     dither_enabled: true
     shadows_max_lod: impostor
     budgets:
