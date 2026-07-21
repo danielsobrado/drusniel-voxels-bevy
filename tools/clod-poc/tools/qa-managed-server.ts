@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 const SERVER_TIMEOUT_MS = 120_000;
 const SERVER_POLL_MS = 250;
@@ -28,7 +28,7 @@ export async function ensureQaServer(
   }
 
   const require = createRequire(import.meta.url);
-  const viteBin = require.resolve("vite/bin/vite.js");
+  const viteBin = resolve(dirname(require.resolve("vite/package.json")), "bin/vite.js");
   const port = portFor(baseUrl);
   const child = spawn(process.execPath, [
     viteBin,
