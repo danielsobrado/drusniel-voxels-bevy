@@ -7,6 +7,7 @@ import type { QaBuildIdentity } from "../src/qa/unified/build_identity.js";
 
 export interface ExpectedQaBuildIdentity {
   commitSha: string;
+  branch: string;
   workingTreeDirty: boolean;
   packageLockSha256: string;
 }
@@ -22,6 +23,7 @@ export function currentQaBuildIdentity(
   }).trim();
   return {
     commitSha: run(["rev-parse", "HEAD"]),
+    branch: run(["branch", "--show-current"]),
     workingTreeDirty: run(["status", "--porcelain", "--untracked-files=normal"]) !== "",
     packageLockSha256: createHash("sha256")
       .update(readFileSync(resolve(clodRoot, "package-lock.json")))
