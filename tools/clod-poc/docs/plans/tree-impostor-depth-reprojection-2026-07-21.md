@@ -52,6 +52,18 @@ relative_depth_m = (encoded_depth * 2 - 1) * depth_extent_m
 
 This is independent of the per-layer camera distance, so younger or smaller variant layers do not require additional metadata and cannot inherit an offset from the largest species layer.
 
+## Encoding compatibility
+
+The new alpha contract is versioned as:
+
+```text
+center-relative-v2
+```
+
+Only atlases produced by the current successful bake lifecycle are stamped with that version. The stamp happens after cancellation/content-key checks and renderer submission synchronization, immediately before the atlas set is committed.
+
+Injected or retained legacy atlases remain unversioned. Both material displacement and card tessellation reject those atlases and preserve the original flat-card path. They are never guessed from pixel values.
+
 ## Runtime sampling
 
 Depth uses the same contracts as albedo and normals:
@@ -62,7 +74,9 @@ Depth uses the same contracts as albedo and normals:
 - the same structural variant page;
 - the same three age layers and interpolation bands.
 
-Empty or weak-coverage texels fade toward zero displacement. Missing normal-depth atlases fail open to the unchanged flat card.
+Vertex-stage normal-depth and coverage samples explicitly use mip level zero, avoiding derivative-dependent implicit LOD in the position graph.
+
+Empty or weak-coverage texels fade toward zero displacement. Missing, invalid, or legacy normal-depth atlases fail open to the unchanged flat card.
 
 ## Live morphology parity
 
@@ -79,14 +93,14 @@ The resulting position node is shared by the color material and vegetation prepa
 
 ## Geometry budget
 
-Only baked WebGPU impostor cards are tessellated.
+Only versioned baked WebGPU impostor cards are tessellated.
 
 ```text
 before: 4 vertices, 2 triangles
 now:    16 vertices, 18 triangles
 ```
 
-The card remains below the existing 240-vertex impostor budget. Far meshes, placeholders, unbaked fallbacks, CPU patch geometry, and crown-proxy shadows are unchanged.
+The card remains below the existing 240-vertex impostor budget. Far meshes, placeholders, unbaked or legacy fallbacks, CPU patch geometry, and crown-proxy shadows are unchanged.
 
 ## Diagnostics
 
@@ -95,7 +109,7 @@ tree_impostor_depth_reprojection_active
 tree_impostor_depth_prepass_parity
 ```
 
-Both counters are `1` only when the selected baked atlas has normal-depth data.
+Both counters are `1` only when the selected baked atlas has normal-depth data with the current encoding stamp.
 
 ## Required verification
 
@@ -104,6 +118,7 @@ npm --prefix tools/clod-poc test -- `
   src/trees/tree_impostor_depth_contract.test.ts `
   src/trees/tree_impostor_depth_geometry.test.ts `
   src/trees/tree_impostor_depth_reprojection_contract.test.ts `
+  src/trees/tree_gpu_ring_geometry.test.ts `
   src/trees/tree_impostor_baker.test.ts `
   src/trees/tree_impostor_capture_material.test.ts `
   src/trees/tree_ring_impostor_node_material.test.ts `
@@ -113,7 +128,7 @@ npm --prefix tools/clod-poc run typecheck
 npm --prefix tools/clod-poc run build
 ```
 
-Dawn must compile the regular, debug, and prepass TSL graphs with vertex-stage atlas sampling enabled.
+Dawn must compile the regular, debug, and prepass TSL graphs with vertex-stage atlas sampling and explicit level-zero sampling enabled.
 
 ## Headed acceptance
 
@@ -126,7 +141,8 @@ Capture:
 3. dense overlapping impostor forest;
 4. frozen far-to-impostor boundary;
 5. depth/prepass diagnostic view;
-6. depth reprojection disabled control from the parent branch.
+6. depth reprojection disabled control from the parent branch;
+7. injected legacy-atlas control.
 
 Verify:
 
@@ -135,7 +151,7 @@ Verify:
 - elevated views do not pull crowns toward the camera incorrectly;
 - color and prepass silhouettes remain coincident;
 - the far-to-impostor boundary does not gain holes or double surfaces;
-- fallback atlases remain unchanged;
+- legacy and missing-depth atlases remain flat and stable;
 - frame p95 regression stays within 5%;
 - no GPU readback is introduced.
 
@@ -145,4 +161,4 @@ This is low-tessellation vertex reprojection, not per-fragment depth writing or 
 
 Far and impostor shadows continue to use the existing crown proxies. WebGL runtime impostors do not consume the new depth; only WebGL bake encoding is kept compatible with the atlas contract.
 
-Do not hide inverted depth, prepass mismatch, or excessive cost by reducing the depth extent, disabling normal-depth, widening LOD transition bands, or lowering acceptance thresholds.
+Do not hide inverted depth, prepass mismatch, legacy corruption, or excessive cost by reducing the depth extent, disabling normal-depth, widening LOD transition bands, or lowering acceptance thresholds.
