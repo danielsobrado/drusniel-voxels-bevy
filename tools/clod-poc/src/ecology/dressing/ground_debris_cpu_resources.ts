@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { DressingClassId } from "./class_registry.js";
+import { createGroundDebrisCpuNodeMaterial } from "./ground_debris_cpu_node_material.js";
 import { createGroundDebrisGeometry } from "./gpu/ground_debris_geometry.js";
 import {
   GROUND_DEBRIS_CLASSES,
@@ -11,17 +12,21 @@ export interface GroundDebrisCpuMaterialState {
   readonly roughness: number;
 }
 
+export interface GroundDebrisCpuResourcesOptions {
+  readonly useWebGpuMaterials?: boolean;
+}
+
 export class GroundDebrisCpuResources {
   private readonly geometries = new Map<DressingClassId, THREE.BufferGeometry>();
-  private readonly materials = new Map<DressingClassId, THREE.MeshStandardMaterial>();
+  private readonly materials = new Map<DressingClassId, THREE.Material>();
   private disposed = false;
 
-  constructor() {
+  constructor(options: GroundDebrisCpuResourcesOptions = {}) {
     for (const classId of GROUND_DEBRIS_CLASSES) {
       const geometry = createGroundDebrisGeometry(classId, 0);
       if (!geometry) throw new Error(`missing CPU ground-debris geometry: ${classId}`);
       this.geometries.set(classId, geometry);
-      this.materials.set(classId, createGroundDebrisCpuMaterial(classId));
+      this.materials.set(classId, createGroundDebrisCpuMaterial(classId, options.useWebGpuMaterials === true));
     }
   }
 
@@ -66,7 +71,16 @@ export function groundDebrisCpuMaterialState(classId: DressingClassId): GroundDe
   };
 }
 
-function createGroundDebrisCpuMaterial(classId: DressingClassId): THREE.MeshStandardMaterial {
+function createGroundDebrisCpuMaterial(
+  classId: DressingClassId,
+  useWebGpuMaterials: boolean,
+): THREE.Material {
+  if (useWebGpuMaterials) {
+    const nodeMaterial = createGroundDebrisCpuNodeMaterial(classId);
+    if (!nodeMaterial) throw new Error(`missing WebGPU CPU ground-debris material profile: ${classId}`);
+    return nodeMaterial;
+  }
+
   const state = groundDebrisCpuMaterialState(classId);
   if (!state) throw new Error(`missing CPU ground-debris material profile: ${classId}`);
   const material = new THREE.MeshStandardMaterial({
