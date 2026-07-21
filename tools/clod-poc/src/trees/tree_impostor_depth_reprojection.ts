@@ -74,13 +74,10 @@ export function createTreeImpostorDepthReprojectionNode(
   ));
   const sample = treeImpostorDepthAgeSample(atlas, uv(), localViewDirection, variantIndex, age);
   const range = treeImpostorDepthRange(atlas.radius);
-  const distanceM: TslNode = float(range.nearM).add(
-    clamp(sample.depth, 0, 1).mul(range.farM - range.nearM),
-  );
   const offsetM: TslNode = clamp(
-    float(range.captureDistanceM).sub(distanceM),
-    -range.maxOffsetM,
-    range.maxOffsetM,
+    clamp(sample.depth, 0, 1).mul(2).sub(1).mul(range.extentM),
+    -range.extentM,
+    range.extentM,
   );
   const coverageWeight: TslNode = smoothstep(
     DEPTH_COVERAGE_FADE_START,
