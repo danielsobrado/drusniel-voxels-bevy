@@ -1,3 +1,4 @@
+import { disposeAfterGpuIdle } from "../rendering/deferred_gpu_dispose.js";
 import * as THREE from "three";
 import type { EnvironmentQuery } from "../environment_query/types.js";
 import { trackedMeshBasicMaterial } from "../rendering/material_churn/tracked_material_factory.js";
@@ -126,8 +127,13 @@ function makeDecalMesh(name: string, opacity: number): THREE.Mesh {
 }
 
 function replaceDecals(mesh: THREE.Mesh, geometry: ResidueGeometry): void {
-  mesh.geometry.dispose();
+  // This runs from the frame loop, so the previous geometry's buffers can still be
+  // referenced by the in-flight main render pass. Swap first, then release the old one
+  // after the queue drains; disposing it inline raises "[Buffer] used in submit while
+  // destroyed" against renderContext_1.
+  const previous = mesh.geometry;
   mesh.geometry = new THREE.BufferGeometry();
+  disposeAfterGpuIdle(() => previous.dispose());
   mesh.geometry.setAttribute("position", new THREE.BufferAttribute(geometry.positions, 3));
   mesh.geometry.setAttribute("color", new THREE.BufferAttribute(geometry.colors, 3));
   mesh.geometry.setDrawRange(0, geometry.drawCount);

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { disposeAfterGpuIdle } from "../rendering/deferred_gpu_dispose.js";
 import { TREE_SPECIES, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeGeometryMap } from "./tree_geometry.js";
 import { TREE_STRUCTURAL_VARIANTS } from "./tree_instances.js";
@@ -369,8 +370,10 @@ async function bakeSpeciesAtlas(
     const albedo = cleanedAlbedo ?? albedoTarget.texture;
     const normalDepth = cleanedNormalDepth ?? normalDepthTarget.texture;
     if (!keepRenderTargets) {
-      albedoTarget.dispose();
-      normalDepthTarget.dispose();
+      disposeAfterGpuIdle(() => {
+        albedoTarget.dispose();
+        normalDepthTarget.dispose();
+      });
     }
     return createAtlas(context, albedo, normalDepth, keepRenderTargets ? { albedoTarget, normalDepthTarget } : null);
   } catch (error) {
@@ -380,8 +383,12 @@ async function bakeSpeciesAtlas(
     normalDepthTarget.dispose();
     throw error;
   } finally {
-    albedoMaterial.dispose();
-    normalDepthMaterial.dispose();
+    // These materials back the bake's render passes; release them only once the queue has
+    // drained so an in-flight submit never references freed buffers.
+    disposeAfterGpuIdle(() => {
+      albedoMaterial.dispose();
+      normalDepthMaterial.dispose();
+    });
   }
 }
 
@@ -446,7 +453,11 @@ async function captureSpeciesChannel(
           await budget.yieldIfExpired();
         }
       } finally {
-        geometry.dispose();
+        // bakeAtlasTile submits render passes that reference this geometry's buffers, and
+        // the loop awaits between tiles. Disposing here frees them while those submits are
+        // still in flight, which the backend reports as "[Buffer] used in submit while
+        // destroyed" and which blanks the frame. Release once the GPU has drained.
+        disposeAfterGpuIdle(() => geometry.dispose());
       }
     }
   }
@@ -553,13 +564,16 @@ function createAtlas(
     centerY: context.variantBounds.centerY,
     ready: true,
     dispose() {
-      if (renderTargets) {
-        renderTargets.albedoTarget.dispose();
-        renderTargets.normalDepthTarget.dispose();
-      } else {
-        albedo.dispose();
-        normalDepth.dispose();
-      }
+      // Atlases are swapped out while frames that sample them may still be in flight.
+      disposeAfterGpuIdle(() => {
+        if (renderTargets) {
+          renderTargets.albedoTarget.dispose();
+          renderTargets.normalDepthTarget.dispose();
+        } else {
+          albedo.dispose();
+          normalDepth.dispose();
+        }
+      });
     },
   };
 }

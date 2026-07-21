@@ -4,6 +4,7 @@ import {
   clamp,
   dot,
   float,
+  floor,
   fract,
   instanceIndex,
   max,
@@ -19,8 +20,7 @@ import type { TreeMaterialHandle } from "./tree_material.js";
 import type { TreeRingInstanceBuffers } from "./tree_node_material.js";
 import {
   TREE_RING_CELL_SIZE_M,
-  TREE_RING_JITTER_X_SALT,
-  TREE_RING_JITTER_Z_SALT,
+  TREE_RING_INSTANCE_VEC4S,
 } from "./tree_ring_placement.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -121,14 +121,21 @@ function createTreeRingCrossfadeKeepNode(
   lod: TreeLod,
   uniforms: CrossfadeUniforms,
 ): TslNode {
-  const cellStore: TslNode = storage(buffers.cell, "vec4", buffers.capacity).toReadOnly();
-  const cell: TslNode = cellStore.element(instanceIndex);
-  const worldCell: TslNode = cell.xy;
-  const jitter: TslNode = vec2(
-    treeRingHash(worldCell, uniforms.seed, TREE_RING_JITTER_X_SALT),
-    treeRingHash(worldCell, uniforms.seed, TREE_RING_JITTER_Z_SALT),
-  );
-  const worldXZ: TslNode = worldCell.add(jitter).mul(TREE_RING_CELL_SIZE_M);
+  // The ring buffer holds TREE_RING_INSTANCE_VEC4S vec4s per tree record; position_scale
+  // is field 0 and already carries the jittered world position. Reading it with a stride
+  // of one returned a neighbouring record's fields as this tree's cell, and the compute
+  // reassigns slots via atomicAdd every dispatch, so both the LOD distance and the dither
+  // noise were recomputed from data that moved each frame — the per-frame blink.
+  const records: TslNode = storage(
+    buffers.cell,
+    "vec4",
+    buffers.capacity * TREE_RING_INSTANCE_VEC4S,
+  ).toReadOnly();
+  const positionScale: TslNode = records.element(instanceIndex.mul(TREE_RING_INSTANCE_VEC4S));
+  const worldXZ: TslNode = positionScale.xz;
+  // Recover the placement cell so the dither hash stays stable per tree: the compute
+  // derives world position as (cell + jitter) * cellSize with jitter in [0,1).
+  const worldCell: TslNode = floor(worldXZ.div(TREE_RING_CELL_SIZE_M));
   const distance: TslNode = vec2(cameraPosition.x, cameraPosition.z).sub(worldXZ).length();
   const noise: TslNode = treeRingHash(worldCell, uniforms.seed, TREE_RING_LOD_DITHER_SALT);
   const thresholds: readonly [TslNode, TslNode, TslNode] = [uniforms.near, uniforms.mid, uniforms.far];

@@ -18,6 +18,7 @@ import {
   vec3,
 } from "three/tsl";
 import type { TreeRingInstanceBuffers } from "../tree_node_material.js";
+import { TREE_RING_INSTANCE_VEC4S } from "../tree_ring_placement.js";
 import { TREE_SPECIES, type TreeSettings } from "../tree_config_types.js";
 import { targetTreeHeight } from "../tree_geometry_types.js";
 
@@ -42,8 +43,12 @@ export interface TreeMorphologyDeformationNodes {
 }
 
 export function treeMorphologyRecordNodes(buffers: TreeRingInstanceBuffers): TreeMorphologyRecordNodes {
-  const records: TreeMorphologyNode = storage(buffers.cell, "vec4", buffers.capacity * 6).toReadOnly();
-  const base: TreeMorphologyNode = instanceIndex.mul(6);
+  const records: TreeMorphologyNode = storage(
+    buffers.cell,
+    "vec4",
+    buffers.capacity * TREE_RING_INSTANCE_VEC4S,
+  ).toReadOnly();
+  const base: TreeMorphologyNode = instanceIndex.mul(TREE_RING_INSTANCE_VEC4S);
   return {
     positionScale: records.element(base),
     rotationNormalY: records.element(base.add(1)),

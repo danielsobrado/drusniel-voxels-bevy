@@ -121,7 +121,10 @@ describe("tree system settings update planner", () => {
       lod: { ...settings.lod, shadowsMaxLod: settings.lod.shadowsMaxLod },
     }, key);
 
-    expect(plan.needsPatchRefresh).toBe(true);
+    // An lod section whose values are unchanged is a no-op: the controller always emits a
+    // complete settings object, so refreshing on mere presence rebuilt patches and the GPU
+    // ring on every update.
+    expect(plan.needsPatchRefresh).toBe(false);
     expect(plan.clearGpuRing).toBe(false);
   });
 

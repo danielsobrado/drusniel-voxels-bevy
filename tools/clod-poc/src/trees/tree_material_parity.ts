@@ -15,7 +15,6 @@ import {
   normalize,
   positionWorld,
   screenCoordinate,
-  sin,
   smoothstep,
   storage,
   texture,
@@ -35,11 +34,7 @@ import type { TreeLod, TreeSettings } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import { decorateTreeNodeForestLighting } from "./tree_node_forest_lighting.js";
 import type { TreeRingInstanceBuffers } from "./tree_node_material.js";
-import {
-  TREE_RING_CELL_SIZE_M,
-  TREE_RING_JITTER_X_SALT,
-  TREE_RING_JITTER_Z_SALT,
-} from "./tree_ring_placement.js";
+import { TREE_RING_INSTANCE_VEC4S } from "./tree_ring_placement.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -92,7 +87,7 @@ export function decorateTreeMaterialHandle(
   }
 
   const forest = options.ring?.forestLighting
-    ? createRingForestLighting(options.ring.settings, options.ring.buffers, regular)
+    ? createRingForestLighting(options.ring.buffers, regular)
     : null;
   const originalPrepass = handle.prepassNodesFor?.bind(handle);
   const originalUpdateForestLighting = handle.updateForestLighting?.bind(handle);
@@ -168,7 +163,6 @@ function createTreeVisibilityNodes(atlas: TreeFoliageAtlas): {
 }
 
 function createRingForestLighting(
-  settings: TreeSettings,
   buffers: TreeRingInstanceBuffers,
   material: NodeMaterialLike,
 ): {
@@ -184,17 +178,20 @@ function createRingForestLighting(
   const fogStrength = uniform(0);
   const fogColor = uniform(RING_FOREST_FOG_COLOR.clone());
   const debugMode = uniform(0);
-  const seed = uniform(settings.seed);
-  const cellSize = uniform(TREE_RING_CELL_SIZE_M);
 
-  const cellStore: TslNode = storage(buffers.cell, "vec4", buffers.capacity).toReadOnly();
-  const cell: TslNode = cellStore.element(instanceIndex);
-  const worldCell: TslNode = cell.xy;
-  const jitter: TslNode = vec2(
-    ringHash(worldCell, seed, TREE_RING_JITTER_X_SALT),
-    ringHash(worldCell, seed, TREE_RING_JITTER_Z_SALT),
-  );
-  const worldXZ: TslNode = worldCell.add(jitter).mul(cellSize);
+  // The ring buffer holds TREE_RING_INSTANCE_VEC4S vec4s per tree record; position_scale
+  // is field 0 and already carries the jittered world position. Reading it with a stride
+  // of one returned a neighbouring record's rotation/identity bits as if they were this
+  // tree's cell, and because the compute assigns slots with atomicAdd that garbage moved
+  // every dispatch — so each tree sampled the forest lighting at a different UV each
+  // frame, which is the "light jumping / darker-lighter" flicker.
+  const records: TslNode = storage(
+    buffers.cell,
+    "vec4",
+    buffers.capacity * TREE_RING_INSTANCE_VEC4S,
+  ).toReadOnly();
+  const positionScale: TslNode = records.element(instanceIndex.mul(TREE_RING_INSTANCE_VEC4S));
+  const worldXZ: TslNode = positionScale.xz;
   const forestUv: TslNode = clamp(worldXZ.div(worldSize), vec2(0), vec2(1));
   const packed: TslNode = texture(neutralPackedTexture, forestUv);
   const aux: TslNode = texture(neutralAuxTexture, forestUv);
@@ -281,12 +278,3 @@ function ringForestDebugColor(debugMode: TslNode, packed: TslNode, aux: TslNode)
   );
 }
 
-function ringHash(cell: TslNode, seed: TslNode, saltValue: number): TslNode {
-  const salt = float(saltValue);
-  return fract(
-    sin(dot(
-      cell.add(vec2(seed.add(salt), seed.mul(0.37).add(salt.mul(1.17)))),
-      vec2(41.3, 289.1),
-    )).mul(43758.5453),
-  );
-}

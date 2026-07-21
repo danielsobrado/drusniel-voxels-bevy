@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { disposeAfterGpuIdle } from "../rendering/deferred_gpu_dispose.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import type { TreeGpuRingMesh } from "./tree_system_gpu_ring_draw.js";
 
@@ -18,26 +19,41 @@ const DISPOSAL_LOG_PREFIX = "[trees-gpu-ring] resource disposal failed";
 export function disposeTreeGpuRingOwnedResources(resources: TreeGpuRingOwnedResources): void {
   const geometries = new Set<THREE.BufferGeometry>();
   const handles = new Set<TreeMaterialHandle>();
+  const twins = [...resources.prepassTwins];
+  const meshes = [...resources.meshes];
 
-  for (const twin of resources.prepassTwins) disposeTreeGpuRingPrepassTwin(resources.root, twin);
-
-  for (const mesh of resources.meshes) {
+  // Detach synchronously so nothing is drawn with these again, but keep the GPU buffers
+  // alive: the previous frame's submit still references them, and freeing now raises
+  // "[Buffer] used in submit while destroyed" and drops the frame to black.
+  for (const twin of twins) {
+    resources.root.remove(twin);
+    twin.parent?.remove(twin);
+  }
+  for (const mesh of meshes) {
     resources.root.remove(mesh);
     mesh.parent?.remove(mesh);
     geometries.add(mesh.geometry);
-    disposeTreeGpuRingMeshState(mesh);
   }
-
-  for (const geometry of geometries) disposeTreeGpuRingGeometry(geometry);
   for (const handle of Object.values(resources.materialHandles)) handles.add(handle);
-  for (const handle of handles) disposeTreeGpuRingMaterialHandle(handle);
+
+  disposeAfterGpuIdle(() => {
+    for (const twin of twins) {
+      disposeMaterial(twin.material);
+      disposeTreeGpuRingMeshState(twin);
+    }
+    for (const mesh of meshes) disposeTreeGpuRingMeshState(mesh);
+    for (const geometry of geometries) disposeTreeGpuRingGeometry(geometry);
+    for (const handle of handles) disposeTreeGpuRingMaterialHandle(handle);
+  });
 }
 
 export function disposeTreeGpuRingPrepassTwin(root: THREE.Object3D, twin: THREE.Mesh): void {
   root.remove(twin);
   twin.parent?.remove(twin);
-  disposeMaterial(twin.material);
-  disposeTreeGpuRingMeshState(twin);
+  disposeAfterGpuIdle(() => {
+    disposeMaterial(twin.material);
+    disposeTreeGpuRingMeshState(twin);
+  });
 }
 
 export function disposeTreeGpuRingGeometry(geometry: THREE.BufferGeometry): void {

@@ -195,7 +195,9 @@ const STRENGTH_SCALE: f32 = ${DRESSING_GRASS_CONTACT_STRENGTH_SCALE}.0;
 
 struct Params {
   center_cell: vec4<f32>,
-  layout: vec4<u32>,
+  // Named "dims", not "layout": "layout" is a reserved keyword in WGSL and Dawn rejects
+  // the whole module with "'layout' is a reserved keyword".
+  dims: vec4<u32>,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -207,7 +209,7 @@ struct Params {
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn clear_field(@builtin(global_invocation_id) gid: vec3<u32>) {
   let index = gid.x;
-  let cells = params.layout.x * params.layout.x;
+  let cells = params.dims.x * params.dims.x;
   if (index < cells) {
     atomicStore(&field[index], 0u);
   }
@@ -215,9 +217,9 @@ fn clear_field(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn rasterize_records(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (params.layout.w == 0u) { return; }
-  let capacity = params.layout.y;
-  let group_count = params.layout.z;
+  if (params.dims.w == 0u) { return; }
+  let capacity = params.dims.y;
+  let group_count = params.dims.z;
   let flat = gid.x;
   if (flat >= group_count * capacity) { return; }
   let group = flat / capacity;
@@ -232,7 +234,7 @@ fn rasterize_records(@builtin(global_invocation_id) gid: vec3<u32>) {
   let position_scale = records[record_base];
   let radius = max(0.01, policy.x * max(position_scale.w, 0.01));
   let cell_m = max(params.center_cell.z, 0.01);
-  let grid = params.layout.x;
+  let grid = params.dims.x;
   let half_extent = f32(grid) * cell_m * 0.5;
   let origin = params.center_cell.xy - vec2<f32>(half_extent);
   let min_cell = clamp(

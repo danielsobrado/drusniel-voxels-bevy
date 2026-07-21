@@ -19,18 +19,23 @@ export function planTreeSystemSettingsUpdate(
   Object.assign(next, patch);
   const nextGeometryKey = treeGeometryKey(next);
   const needsGeometry = nextGeometryKey !== currentGeometryKey;
-  const ecologyChanged = patch.ecology !== undefined;
-  const speciesChanged = patch.species !== undefined;
-  const windChanged = patch.wind !== undefined;
-  const impostorsChanged = patch.impostors !== undefined;
+  // Compare values, not presence. The controller's makeSettings() always emits a complete
+  // settings object, so a presence check is true on every update and would tear the GPU
+  // ring down and rebuild it each time — destroying buffers while the previous frame's
+  // submit still references them ("buffer used in submit while destroyed"), emitting
+  // zero-vertex draws, and making trees blink as the ring repopulates.
+  const ecologyChanged = treeSettingsSectionChanged(current.ecology, patch.ecology);
+  const speciesChanged = treeSettingsSectionChanged(current.species, patch.species);
+  const windChanged = treeSettingsSectionChanged(current.wind, patch.wind);
+  const impostorsChanged = treeSettingsSectionChanged(current.impostors, patch.impostors);
   const needsPatchRefresh = needsGeometry ||
-    patch.enabled !== undefined ||
-    patch.seed !== undefined ||
-    patch.distanceM !== undefined ||
-    patch.refreshDistanceM !== undefined ||
-    patch.maxInstances !== undefined ||
-    patch.placement !== undefined ||
-    patch.lod !== undefined ||
+    scalarChanged(current.enabled, patch.enabled) ||
+    scalarChanged(current.seed, patch.seed) ||
+    scalarChanged(current.distanceM, patch.distanceM) ||
+    scalarChanged(current.refreshDistanceM, patch.refreshDistanceM) ||
+    scalarChanged(current.maxInstances, patch.maxInstances) ||
+    treeSettingsSectionChanged(current.placement, patch.placement) ||
+    treeSettingsSectionChanged(current.lod, patch.lod) ||
     ecologyChanged ||
     speciesChanged;
   const debugColorChanged = patch.render?.debugColorByLod !== undefined &&
@@ -73,6 +78,19 @@ export function planTreeSystemSettingsUpdate(
     applyGpuRingDebugColor: debugColorChanged && !clearGpuRing,
     nextGpuStatus,
   };
+}
+
+/** True when a scalar patch field is present and differs from the current value. */
+function scalarChanged<T>(current: T, patch: T | undefined): boolean {
+  return patch !== undefined && patch !== current;
+}
+
+/** True when a patch section is present and differs in value from the current settings.
+ *  These sections are plain config data produced by the same builder, so a structural
+ *  comparison is stable and avoids rebuilding on an unchanged object identity. */
+function treeSettingsSectionChanged<T>(current: T, patch: T | undefined): boolean {
+  if (patch === undefined) return false;
+  return JSON.stringify(current) !== JSON.stringify(patch);
 }
 
 type TreeGpuSettingsShape = TreeSettings["gpu"];

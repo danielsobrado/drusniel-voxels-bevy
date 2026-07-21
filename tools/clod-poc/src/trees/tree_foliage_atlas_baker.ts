@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import { attribute } from "three/tsl";
+import { disposeAfterGpuIdle } from "../rendering/deferred_gpu_dispose.js";
 import { buildLeaf, buildNeedleSpray } from "../veg/veg_leaf_mesh.js";
 import { VegMeshGrower } from "../veg/veg_mesh_grower.js";
 import { vegRng, type Rng } from "../veg/veg_rng.js";
@@ -129,9 +130,15 @@ export async function bakeTreeFoliageAtlas(
   } finally {
     options.renderer.setRenderTarget(previousTarget);
     options.renderer.setClearColor(previousClearColor, previousClearAlpha);
-    geometry.dispose();
-    material.dispose();
-    renderTarget.dispose();
+    // The capture above submits a render pass that references these buffers, and the
+    // readback awaits in between. Freeing them here releases GPU memory that the in-flight
+    // submit still uses ("[Buffer] used in submit while destroyed"), so defer the release
+    // until the queue has drained.
+    disposeAfterGpuIdle(() => {
+      geometry.dispose();
+      material.dispose();
+      renderTarget.dispose();
+    });
   }
 }
 

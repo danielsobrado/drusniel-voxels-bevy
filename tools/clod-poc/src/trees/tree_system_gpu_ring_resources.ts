@@ -8,6 +8,7 @@ import {
   TREE_GPU_RING_SHADOW_GROUP_COUNT,
   treeGpuRingGroupIndex,
 } from "../gpu/tree_ring_compute.js";
+import { disposeAfterGpuIdle } from "../rendering/deferred_gpu_dispose.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "./tree_config.js";
 import { TREE_CROWN_PROXY_INDEX_COUNT } from "./tree_crown_proxy_math.js";
 import type { TreeDepthPrepassMaxLod } from "./tree_depth_prepass_runtime.js";
@@ -201,8 +202,14 @@ export function refreshTreeSystemGpuRingImpostorResources(
     updateTreeGpuRingIndirectIndexCount(resources.indirect, group, source);
     replaceTreeGpuRingPrepassTwin(input, mesh, nextHandle);
 
-    previousGeometry.dispose();
-    previousHandle?.dispose();
+    // The mesh has already been repointed at the new geometry/material, but the previous
+    // frame's submitted draw still references the old buffers. Freeing them now raises
+    // "buffer used in submit while destroyed" and drops a frame to black, so hold them
+    // until the GPU has drained the work already submitted.
+    disposeAfterGpuIdle(() => {
+      previousGeometry.dispose();
+      previousHandle?.dispose();
+    });
     swapped = true;
   }
 

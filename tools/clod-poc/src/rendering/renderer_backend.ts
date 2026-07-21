@@ -11,6 +11,7 @@ import { flushSaveRuntimeOrThrow } from "../save/save_runtime.js";
 import { installTerrainTextureArrayProbe } from "../gpu/terrain_texture_array_probe.js";
 import { requestSharedWebGpuDevice } from "./shared_webgpu_device.js";
 import { installMaterialKeyMemo } from "./three_patches.js";
+import { installGpuBufferDestroyTrace } from "./gpu_buffer_destroy_trace.js";
 import { installPositionInvariance } from "./veg_prepass.js";
 import {
   clearActiveWebGpuRendererContext,
@@ -55,6 +56,8 @@ export function createWebGlAppRenderer(): WebGlAppRenderer {
 }
 
 export async function createWebGpuAppRenderer(options: WebGpuRendererOptions = {}): Promise<WebGpuAppRenderer> {
+  // Must patch before any buffer is created so every destroy() is traced.
+  installGpuBufferDestroyTrace(new URLSearchParams(window.location.search));
   let shared: Awaited<ReturnType<typeof requestSharedWebGpuDevice>>;
   try {
     shared = await requestSharedWebGpuDevice();
