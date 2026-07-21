@@ -47,8 +47,8 @@ export function parseDressingGrassContactConfig(text: string): DressingGrassCont
     const raw = objectFrom(rawValue, `dressing_grass_contact.classes.${classId}`);
     assertKnownKeys(raw, new Set(["radius_m", "strength"]), `dressing_grass_contact.classes.${classId}`);
     classes[classId] = Object.freeze({
-      radiusM: positive(raw.radius_m, `${classId}.radius_m`),
-      strength: fraction(raw.strength, `${classId}.strength`),
+      radiusM: requiredFinite(raw.radius_m, `${classId}.radius_m`, 0.01, 32),
+      strength: requiredFinite(raw.strength, `${classId}.strength`, 0, 1),
     });
   }
 
@@ -59,7 +59,7 @@ export function parseDressingGrassContactConfig(text: string): DressingGrassCont
     enabled: booleanValue(root.enabled, DEFAULT_CONFIG.enabled, "enabled"),
     fieldGrid,
     fieldCellM: finite(root.field_cell_m, DEFAULT_CONFIG.fieldCellM, "field_cell_m", 0.1, 8),
-    coreFraction: fraction(root.core_fraction, "core_fraction", DEFAULT_CONFIG.coreFraction),
+    coreFraction: finite(root.core_fraction, DEFAULT_CONFIG.coreFraction, "core_fraction", 0, 1),
     classes: Object.freeze(classes),
   });
 }
@@ -102,16 +102,13 @@ function finite(value: unknown, fallback: number, label: string, minimum: number
   return value;
 }
 
+function requiredFinite(value: unknown, label: string, minimum: number, maximum: number): number {
+  if (value === undefined) throw new Error(`${label} is required`);
+  return finite(value, minimum, label, minimum, maximum);
+}
+
 function integer(value: unknown, fallback: number, label: string, minimum: number, maximum: number): number {
   const result = finite(value, fallback, label, minimum, maximum);
   if (!Number.isInteger(result)) throw new Error(`${label} must be an integer`);
   return result;
-}
-
-function positive(value: unknown, label: string): number {
-  return finite(value, Number.NaN, label, 0.01, 32);
-}
-
-function fraction(value: unknown, label: string, fallback = Number.NaN): number {
-  return finite(value, fallback, label, 0, 1);
 }
