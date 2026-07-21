@@ -1,22 +1,10 @@
 import * as THREE from "three";
 import {
-  cameraFar,
-  cameraNear,
-  cameraPosition,
-  cameraProjectionMatrix,
-  cameraViewMatrix,
   clamp,
   float,
-  Fn,
   fract,
-  getScreenPosition,
   max,
   mix,
-  perspectiveDepthToViewZ,
-  positionView,
-  positionWorld,
-  pow,
-  reflect,
   smoothstep,
   tan,
   texture,
@@ -24,17 +12,14 @@ import {
   uniform,
   vec2,
   vec3,
-  vec4,
-  viewportDepthTexture,
 } from "three/tsl";
 import { readActiveEnvironmentQuery } from "../environment_query/runtime.js";
 import { sampleActiveForestCanopyEcology } from "../forest_lighting/forest_lighting_texture.js";
 import { readActiveProbeGiRuntime } from "../lighting/probe_gi/runtime.js";
 import { surfaceHeight } from "../terrain/terrain.js";
-import type { WaterMaterialHandle, WaterMaterialParams } from "./water_material_types.js";
+import type { WaterMaterialParams } from "./water_material_types.js";
 import type { WaterVisualConfig } from "./waterConfig.js";
 import { encodeWaterHorizonSlope } from "./water_ssr_miss_route_math.js";
-import { getWaterScreenResources } from "./waterScreenResources.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -44,7 +29,6 @@ const HORIZON_CELL_SIZE_M = 12;
 const HORIZON_SAMPLE_DISTANCES_M = [16, 40, 80] as const;
 const HORIZON_CELLS_PER_UPDATE = 8;
 const HORIZON_REBUILD_DISTANCE_M = 12;
-const SSR_CONFIRM_DISTANCES_M = [7, 18, 42, 78] as const;
 const PROBE_LAYER_UV = (2 + 0.5) / 8;
 
 interface HorizonField {
@@ -57,125 +41,81 @@ interface HorizonField {
   cursor: number;
 }
 
+interface ProbeNodes {
+  readonly r: TslNode;
+  readonly g: TslNode;
+  readonly b: TslNode;
+  readonly bounds: TslNode;
+  readonly meta: TslNode;
+}
+
+export interface WaterSsrMissRoute {
+  sample(worldPosition: TslNode, reflectionDirection: TslNode): TslNode;
+  updateCamera(position: THREE.Vector3): void;
+  setDebugMode(mode: number): void;
+  updateVisual(visual: WaterVisualConfig): void;
+  dispose(): void;
+}
+
 let sharedHorizonField: HorizonField | null = null;
 
-export function decorateWaterSsrMissRouting(
-  base: WaterMaterialHandle,
-  params: WaterMaterialParams,
-): WaterMaterialHandle {
-  const material = base.material as THREE.Material & { fragmentNode?: TslNode };
-  if (!material.fragmentNode || !getWaterScreenResources().available) return base;
+export function createWaterSsrMissRoute(params: WaterMaterialParams): WaterSsrMissRoute {
   const horizon = acquireHorizonField();
   const uHorizonOriginSpan = uniform(new THREE.Vector4(0, 0, 1, 1)) as TslNode;
   const uTerrainStrength = uniform(params.visual.reflection.terrainFallbackStrength) as TslNode;
   const uSkyStrength = uniform(params.visual.reflection.skyFallbackStrength) as TslNode;
   const uProbeConfidence = uniform(0) as TslNode;
   const uRouteEnabled = uniform(1) as TslNode;
-  const uSsrEnabled = uniform(params.visual.reflection.ssrEnabled ? 1 : 0) as TslNode;
   const probeFallback = createProbeFallbackTexture();
-  const probeTextures = Array.from({ length: 3 }, () => ({
+  const probes: ProbeNodes[] = Array.from({ length: 3 }, () => ({
     r: texture3D(probeFallback, vec3(0.5), 0) as TslNode,
     g: texture3D(probeFallback, vec3(0.5), 0) as TslNode,
     b: texture3D(probeFallback, vec3(0.5), 0) as TslNode,
     bounds: uniform(new THREE.Vector4()) as TslNode,
     meta: uniform(new THREE.Vector4()) as TslNode,
   }));
-  let probeRadianceReady = false;
-  const originalFragment: TslNode = material.fragmentNode;
-
-  const routedFragment = Fn(() => {
-    const original: TslNode = originalFragment;
-    const world: TslNode = positionWorld;
-    const viewDir: TslNode = cameraPosition.sub(world).normalize();
-    const reflectDir: TslNode = reflect(viewDir.negate(), vec3(0, 1, 0)).normalize();
-    const horizontalLength: TslNode = max(reflectDir.xz.length(), float(0.0001));
-    const reflectionSlope: TslNode = reflectDir.y.div(horizontalLength);
-    const horizonUv: TslNode = world.xz.sub(uHorizonOriginSpan.xy).div(uHorizonOriginSpan.zw);
-    const horizonSample: TslNode = texture(horizon.texture, clamp(horizonUv, vec2(0), vec2(1)));
-    const absX: TslNode = reflectDir.x.abs();
-    const absZ: TslNode = reflectDir.z.abs();
-    const axisWeight: TslNode = absX.div(max(absX.add(absZ), float(0.0001)));
-    const horizonX: TslNode = reflectDir.x.greaterThanEqual(0).select(horizonSample.r, horizonSample.g);
-    const horizonZ: TslNode = reflectDir.z.greaterThanEqual(0).select(horizonSample.b, horizonSample.a);
-    const encodedHorizon: TslNode = mix(horizonZ, horizonX, axisWeight);
-    const horizonSlope: TslNode = tan(encodedHorizon.mul(1.2).sub(0.15));
-    const openMask: TslNode = smoothstep(horizonSlope.add(0.02), horizonSlope.add(0.12), reflectionSlope)
-      .mul(reflectDir.y.greaterThan(float(-0.02)).select(1, 0));
-
-    const atmosphere: TslNode = directionalAtmosphere(reflectDir);
-    const probeGi: TslNode = sampleDirectionalProbeGi(world, reflectDir, probeTextures);
-    const blockedFallback: TslNode = mix(
-      vec3(0.07, 0.095, 0.065).mul(uTerrainStrength),
-      probeGi,
-      uProbeConfidence,
-    );
-    const routedFallback: TslNode = mix(blockedFallback, atmosphere.mul(uSkyStrength), openMask);
-    const ssrHit: TslNode = uSsrEnabled.greaterThan(0.5)
-      .select(approximateSsrHit(world, reflectDir), float(0));
-    const missMask: TslNode = float(1).sub(ssrHit);
-    const fresnel: TslNode = float(0.02).add(float(0.98).mul(pow(float(1).sub(viewDir.y.abs()), float(5))));
-    const correctionWeight: TslNode = missMask.mul(fresnel).mul(0.36).mul(uRouteEnabled);
-    const correctedRgb: TslNode = original.rgb.add(routedFallback.mul(correctionWeight));
-    return vec4(max(correctedRgb, vec3(0)), original.a);
-  });
-  material.fragmentNode = routedFragment();
-  material.needsUpdate = true;
-
-  const updateHorizon = (position: THREE.Vector3): void => {
-    updateSharedHorizonField(horizon, position.x, position.z);
-    stepSharedHorizonField(horizon, HORIZON_CELLS_PER_UPDATE);
-    const span = HORIZON_RESOLUTION * HORIZON_CELL_SIZE_M;
-    uHorizonOriginSpan.value.set(horizon.origin.x, horizon.origin.y, span, span);
-  };
-  const updateProbeGi = (): void => {
-    const runtime = readActiveProbeGiRuntime();
-    if (!runtime) {
-      uProbeConfidence.value = 0;
-      publishMissRouteCounters(false);
-      return;
-    }
-    probeRadianceReady = readProbeGiRadianceReady();
-    runtime.cascades.forEach((cascade, index) => {
-      const target = probeTextures[index]!;
-      const published = runtime.publication.read(cascade.config.id).active;
-      target.r.value = published.shR;
-      target.g.value = published.shG;
-      target.b.value = published.shB;
-      const extentX = cascade.config.dimensions[0] * cascade.config.spacingM;
-      const extentZ = cascade.config.dimensions[2] * cascade.config.spacingM;
-      target.bounds.value.set(cascade.origin.worldX, cascade.origin.worldZ, extentX, extentZ);
-      target.meta.value.set(cascade.config.spacingM, cascade.config.dimensions[0], cascade.config.dimensions[2], 1);
-    });
-    uProbeConfidence.value = probeRadianceReady ? 1 : 0;
-    publishMissRouteCounters(probeRadianceReady);
-  };
 
   publishMissRouteCounters(false);
 
-  const originalUpdateCamera = base.updateCamera.bind(base);
-  const originalSetDebugMode = base.setDebugMode.bind(base);
-  const originalUpdateVisual = base.updateVisual.bind(base);
-  const originalDispose = base.dispose.bind(base);
   return {
-    ...base,
-    updateCamera(pos) {
-      originalUpdateCamera(pos);
-      updateHorizon(pos);
-      updateProbeGi();
+    sample(worldPosition, reflectionDirection) {
+      const horizontalLength: TslNode = max(reflectionDirection.xz.length(), float(0.0001));
+      const reflectionSlope: TslNode = reflectionDirection.y.div(horizontalLength);
+      const horizonUv: TslNode = worldPosition.xz.sub(uHorizonOriginSpan.xy).div(uHorizonOriginSpan.zw);
+      const horizonSample: TslNode = texture(horizon.texture, clamp(horizonUv, vec2(0), vec2(1)));
+      const absX: TslNode = reflectionDirection.x.abs();
+      const absZ: TslNode = reflectionDirection.z.abs();
+      const axisWeight: TslNode = absX.div(max(absX.add(absZ), float(0.0001)));
+      const horizonX: TslNode = reflectionDirection.x.greaterThanEqual(0).select(horizonSample.r, horizonSample.g);
+      const horizonZ: TslNode = reflectionDirection.z.greaterThanEqual(0).select(horizonSample.b, horizonSample.a);
+      const horizonSlope: TslNode = tan(mix(horizonZ, horizonX, axisWeight).mul(1.2).sub(0.15));
+      const openMask: TslNode = smoothstep(horizonSlope.add(0.02), horizonSlope.add(0.12), reflectionSlope)
+        .mul(reflectionDirection.y.greaterThan(float(-0.02)).select(1, 0));
+      const atmosphere: TslNode = directionalAtmosphere(reflectionDirection).mul(uSkyStrength);
+      const probeGi: TslNode = sampleDirectionalProbeGi(worldPosition, reflectionDirection, probes);
+      const terrainFallback: TslNode = vec3(0.07, 0.095, 0.065).mul(uTerrainStrength);
+      const blocked: TslNode = mix(terrainFallback, probeGi, uProbeConfidence);
+      return mix(vec3(0), mix(blocked, atmosphere, openMask), uRouteEnabled);
+    },
+    updateCamera(position) {
+      updateSharedHorizonField(horizon, position.x, position.z);
+      stepSharedHorizonField(horizon, HORIZON_CELLS_PER_UPDATE);
+      const span = HORIZON_RESOLUTION * HORIZON_CELL_SIZE_M;
+      uHorizonOriginSpan.value.set(horizon.origin.x, horizon.origin.y, span, span);
+      const ready = syncProbeGi(probes);
+      uProbeConfidence.value = ready ? 1 : 0;
+      publishMissRouteCounters(ready);
     },
     setDebugMode(mode) {
-      originalSetDebugMode(mode);
       uRouteEnabled.value = mode === 0 ? 1 : 0;
     },
     updateVisual(visual) {
-      originalUpdateVisual(withoutConstantWaterSsrMissFallback(visual));
-      syncReflectionUniforms(visual, uTerrainStrength, uSkyStrength);
-      uSsrEnabled.value = visual.reflection.ssrEnabled ? 1 : 0;
+      uTerrainStrength.value = visual.reflection.terrainFallbackStrength;
+      uSkyStrength.value = visual.reflection.skyFallbackStrength;
     },
     dispose() {
       releaseHorizonField(horizon);
       probeFallback.dispose();
-      originalDispose();
     },
   };
 }
@@ -191,28 +131,11 @@ function directionalAtmosphere(direction: TslNode): TslNode {
   );
 }
 
-function approximateSsrHit(world: TslNode, reflectDir: TslNode): TslNode {
-  if (!getWaterScreenResources().available) return float(0);
-  const dirV: TslNode = cameraViewMatrix.mul(vec4(reflectDir, 0)).xyz;
-  const hit: TslNode = float(0).toVar();
-  for (const distanceM of SSR_CONFIRM_DISTANCES_M) {
-    const pointV: TslNode = positionView.add(dirV.mul(distanceM));
-    const uv: TslNode = getScreenPosition(pointV, cameraProjectionMatrix);
-    const inBounds: TslNode = uv.x.greaterThan(0).and(uv.x.lessThan(1)).and(uv.y.greaterThan(0)).and(uv.y.lessThan(1));
-    const sceneZ: TslNode = perspectiveDepthToViewZ(viewportDepthTexture(clamp(uv, vec2(0), vec2(1))).x, cameraNear, cameraFar);
-    const close: TslNode = sceneZ.greaterThan(pointV.z.add(0.05)).and(sceneZ.lessThan(pointV.z.add(2.2)));
-    hit.assign(max(hit, inBounds.and(close).select(1, 0)));
-  }
-  return hit;
-}
-
-function sampleDirectionalProbeGi(world: TslNode, direction: TslNode, cascades: readonly {
-  r: TslNode;
-  g: TslNode;
-  b: TslNode;
-  bounds: TslNode;
-  meta: TslNode;
-}[]): TslNode {
+function sampleDirectionalProbeGi(
+  world: TslNode,
+  direction: TslNode,
+  cascades: readonly ProbeNodes[],
+): TslNode {
   let result: TslNode = vec3(0.07, 0.09, 0.06);
   for (let index = cascades.length - 1; index >= 0; index--) {
     const cascade = cascades[index]!;
@@ -235,16 +158,50 @@ function sampleDirectionalProbeGi(world: TslNode, direction: TslNode, cascades: 
       .add(coefficients.y.mul(direction.x))
       .add(coefficients.z.mul(direction.y))
       .add(coefficients.w.mul(direction.z));
-    const irradiance: TslNode = max(vec3(evaluate(cascade.r), evaluate(cascade.g), evaluate(cascade.b)), vec3(0));
+    const irradiance: TslNode = max(
+      vec3(evaluate(cascade.r), evaluate(cascade.g), evaluate(cascade.b)),
+      vec3(0),
+    );
     result = inside.select(irradiance, result);
   }
   return result;
 }
 
+function syncProbeGi(probes: readonly ProbeNodes[]): boolean {
+  const runtime = readActiveProbeGiRuntime();
+  if (!runtime) return false;
+  runtime.cascades.forEach((cascade, index) => {
+    const target = probes[index]!;
+    const published = runtime.publication.read(cascade.config.id).active;
+    target.r.value = published.shR;
+    target.g.value = published.shG;
+    target.b.value = published.shB;
+    target.bounds.value.set(
+      cascade.origin.worldX,
+      cascade.origin.worldZ,
+      cascade.config.dimensions[0] * cascade.config.spacingM,
+      cascade.config.dimensions[2] * cascade.config.spacingM,
+    );
+    target.meta.value.set(
+      cascade.config.spacingM,
+      cascade.config.dimensions[0],
+      cascade.config.dimensions[2],
+      1,
+    );
+  });
+  return readProbeGiRadianceReady();
+}
+
 function acquireHorizonField(): HorizonField {
   if (!sharedHorizonField) {
     const data = new Uint8Array(HORIZON_RESOLUTION * HORIZON_RESOLUTION * 4);
-    const textureValue = new THREE.DataTexture(data, HORIZON_RESOLUTION, HORIZON_RESOLUTION, THREE.RGBAFormat, THREE.UnsignedByteType);
+    const textureValue = new THREE.DataTexture(
+      data,
+      HORIZON_RESOLUTION,
+      HORIZON_RESOLUTION,
+      THREE.RGBAFormat,
+      THREE.UnsignedByteType,
+    );
     textureValue.name = "water-reflection-directional-horizon";
     textureValue.wrapS = THREE.ClampToEdgeWrapping;
     textureValue.wrapT = THREE.ClampToEdgeWrapping;
@@ -311,8 +268,7 @@ function stepSharedHorizonField(field: HorizonField, maximumCells: number): void
         const canopyTop = (canopy?.canopyHeightM ?? 0) * (canopy?.canopyDensity ?? 0);
         maximumSlope = Math.max(maximumSlope, (terrain + canopyTop - baseHeight) / distanceM);
       }
-      const encoded = encodeWaterHorizonSlope(maximumSlope);
-      field.data[cell * 4 + channel] = Math.round(encoded * 255);
+      field.data[cell * 4 + channel] = Math.round(encodeWaterHorizonSlope(maximumSlope) * 255);
     }
     processed++;
   }
@@ -336,22 +292,6 @@ function readProbeGiRadianceReady(): boolean {
   return (counters?.["probe_gi_radiance_ready"] ?? 0) > 0;
 }
 
-export function withoutConstantWaterSsrMissFallback(visual: WaterVisualConfig): WaterVisualConfig {
-  return {
-    ...visual,
-    reflection: {
-      ...visual.reflection,
-      skyFallbackStrength: 0,
-      terrainFallbackStrength: 0,
-    },
-  };
-}
-
-function syncReflectionUniforms(visual: WaterVisualConfig, terrain: TslNode, sky: TslNode): void {
-  terrain.value = visual.reflection.terrainFallbackStrength;
-  sky.value = visual.reflection.skyFallbackStrength;
-}
-
 function publishMissRouteCounters(probeReady: boolean): void {
   const counters = (globalThis as typeof globalThis & {
     window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
@@ -362,4 +302,6 @@ function publishMissRouteCounters(probeReady: boolean): void {
   counters["water_ssr_miss_atmosphere_open"] = 1;
   counters["water_ssr_miss_directional_probe_gi"] = 1;
   counters["water_ssr_miss_probe_gi_ready"] = probeReady ? 1 : 0;
+  counters["water_ssr_miss_exact_hit_authority"] = 1;
+  counters["water_ssr_miss_duplicate_depth_trace"] = 0;
 }

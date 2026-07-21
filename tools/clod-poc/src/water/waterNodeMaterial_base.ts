@@ -58,6 +58,7 @@ import { buildWaterStaticGridNodes } from "./water_node_static_grid.js";
 import { buildWaterAtlasGridNodes } from "./water_node_atlas_grid.js";
 import { buildWaterGlitter, buildWaterSuspendedScatter } from "./water_node_optics.js";
 import { buildWaterFoamNodes } from "./water_foam_nodes.js";
+import { createWaterSsrMissRoute } from "./water_ssr_miss_route.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // three 0.184's TSL node graph types are intentionally loose: extension methods
@@ -70,6 +71,7 @@ type TslNode = any;
 export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterMaterialHandle {
   const u = makeWaterUniforms(params);
   const riverMaterial = readRiverMaterialSettings();
+  const ssrMissRoute = createWaterSsrMissRoute(params);
 
   const uTime = uniform(0) as TslNode;
   const uFoam = uniform(u.uFoamColor.value) as TslNode;
@@ -129,8 +131,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uReflStepScale = uniform(u.uReflection.stepScale) as TslNode;
   const uReflEdgeFadeStart = uniform(u.uReflection.edgeFadeStart) as TslNode;
   const uReflEdgeFadeEnd = uniform(u.uReflection.edgeFadeEnd) as TslNode;
-  const uReflSkyStrength = uniform(u.uReflection.skyFallbackStrength) as TslNode;
-  const uReflTerrainStrength = uniform(u.uReflection.terrainFallbackStrength) as TslNode;
 
   const uCausticsEnabled = uniform(u.uCausticsEnabled.value) as TslNode;
   const uCausticsGain = uniform(u.uCausticsGain.value) as TslNode;
@@ -222,11 +222,11 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     // Four rotated directional waves with non-harmonic frequencies (1.0, 1.83,
     // 3.11, 5.27); the previous paired axis-aligned sinusoids interfered into
     // stable moire bands over calm pools.
-    const rippleGrad = (uv: TslNode, phase: TslNode): { x: TslNode; z: TslNode } => {
-      const w1: TslNode = cos(uv.x.mul(0.94).add(uv.y.mul(0.34)).add(phase.mul(tau))).mul(uRippleStrengthA);
-      const w2: TslNode = cos(uv.x.mul(-0.75).add(uv.y.mul(1.665)).sub(phase.mul(tau * 0.7))).mul(uRippleStrengthA.mul(0.55));
-      const w3: TslNode = cos(uv.x.mul(1.773).add(uv.y.mul(-2.55)).add(phase.mul(tau * 0.9))).mul(uRippleStrengthB);
-      const w4: TslNode = cos(uv.x.mul(-4.585).add(uv.y.mul(-2.635)).sub(phase.mul(tau * 1.3))).mul(uRippleStrengthB.mul(0.6));
+    const rippleGrad = (uvNode: TslNode, phase: TslNode): { x: TslNode; z: TslNode } => {
+      const w1: TslNode = cos(uvNode.x.mul(0.94).add(uvNode.y.mul(0.34)).add(phase.mul(tau))).mul(uRippleStrengthA);
+      const w2: TslNode = cos(uvNode.x.mul(-0.75).add(uvNode.y.mul(1.665)).sub(phase.mul(tau * 0.7))).mul(uRippleStrengthA.mul(0.55));
+      const w3: TslNode = cos(uvNode.x.mul(1.773).add(uvNode.y.mul(-2.55)).add(phase.mul(tau * 0.9))).mul(uRippleStrengthB);
+      const w4: TslNode = cos(uvNode.x.mul(-4.585).add(uvNode.y.mul(-2.635)).sub(phase.mul(tau * 1.3))).mul(uRippleStrengthB.mul(0.6));
       return {
         x: w1.mul(0.94).add(w2.mul(-0.41)).add(w3.mul(0.57)).add(w4.mul(-0.87)),
         z: w1.mul(0.34).add(w2.mul(0.91)).add(w3.mul(-0.82)).add(w4.mul(-0.50)),
@@ -337,7 +337,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
 
     const screenAvail = getWaterScreenResources().available;
     const refrFallback: TslNode = waterBase;
-    const ssrFallback: TslNode = skyReflection;
 
     const refrCol: TslNode = Fn(() => {
       if (!screenAvail) return refrFallback;
@@ -367,7 +366,6 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
 
     const ssrHit: TslNode = float(0).toVar();
     const ssrCol: TslNode = Fn(() => {
-      if (!screenAvail) return ssrFallback;
       const toCam: TslNode = cameraPosition.sub(worldPos);
       const camDist: TslNode = toCam.length();
       const viewDirN: TslNode = toCam.div(camDist.max(1e-4));
@@ -375,35 +373,37 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
         viewDirN.negate(),
         vec3(normal.x.mul(0.55), normal.y, normal.z.mul(0.55)).normalize(),
       );
+      const missFallback: TslNode = ssrMissRoute.sample(worldPos, rdir);
+      if (!screenAvail) return missFallback;
       const dirV: TslNode = cameraViewMatrix.mul(vec4(rdir, 0)).xyz;
       // Long steps with a wide hit window accept unrelated depth surfaces and
       // produce alternating dark/bright reflection bands; cap the step and keep
-      // the window proportional but tight, letting misses fall back to sky.
+      // the window proportional but tight, letting misses use the directional route.
       const stepLen: TslNode = clamp(camDist.mul(uReflStepScale), 0.25, 14);
       const jitter: TslNode = interleavedGradientNoise(screenCoordinate.xy);
       const hitUv: TslNode = vec2(0, 0).toVar();
 
-      Loop(uReflMaxSteps.toUint(), ({ i }: { readonly i: any }) => {
-        const t: TslNode = float(i).add(jitter).mul(stepLen);
-        const pV: TslNode = positionView.add(dirV.mul(t));
-        const uvS: TslNode = getScreenPosition(pV, cameraProjectionMatrix);
-        If(
-          uvS.x.lessThan(0).or(uvS.x.greaterThan(1)).or(uvS.y.lessThan(0)).or(uvS.y.greaterThan(1)),
-          () => { Break(); },
-        );
-        const zS: TslNode = perspectiveDepthToViewZ(viewportDepthTexture(uvS).x, cameraNear, cameraFar);
-        If(
-          zS.greaterThan(pV.z.add(0.06)).and(zS.lessThan(pV.z.add(stepLen.mul(1.35).add(0.5)))),
-          () => {
-            ssrHit.assign(1);
-            hitUv.assign(uvS);
-            Break();
-          },
-        );
+      If(uReflSSREnabled.greaterThan(0.5), () => {
+        Loop(uReflMaxSteps.toUint(), ({ i }: { readonly i: any }) => {
+          const t: TslNode = float(i).add(jitter).mul(stepLen);
+          const pV: TslNode = positionView.add(dirV.mul(t));
+          const uvS: TslNode = getScreenPosition(pV, cameraProjectionMatrix);
+          If(
+            uvS.x.lessThan(0).or(uvS.x.greaterThan(1)).or(uvS.y.lessThan(0)).or(uvS.y.greaterThan(1)),
+            () => { Break(); },
+          );
+          const zS: TslNode = perspectiveDepthToViewZ(viewportDepthTexture(uvS).x, cameraNear, cameraFar);
+          If(
+            zS.greaterThan(pV.z.add(0.06)).and(zS.lessThan(pV.z.add(stepLen.mul(1.35).add(0.5)))),
+            () => {
+              ssrHit.assign(1);
+              hitUv.assign(uvS);
+              Break();
+            },
+          );
+        });
       });
 
-      const terrainFallback: TslNode = vec3(0.12, 0.14, 0.10).mul(uReflTerrainStrength);
-      const missFallback: TslNode = mix(terrainFallback, skyReflection.mul(uReflSkyStrength), float(0.72));
       const edge: TslNode = hitUv.sub(0.5).abs().mul(2);
       const edgeFade: TslNode = smoothstep(uReflEdgeFadeStart, uReflEdgeFadeEnd, edge.x.max(edge.y));
       const scene: TslNode = viewportSharedTexture(hitUv).rgb;
@@ -578,8 +578,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     uReflStepScale.value = v.reflection.stepScale;
     uReflEdgeFadeStart.value = v.reflection.edgeFadeStart;
     uReflEdgeFadeEnd.value = v.reflection.edgeFadeEnd;
-    uReflSkyStrength.value = v.reflection.skyFallbackStrength;
-    uReflTerrainStrength.value = v.reflection.terrainFallbackStrength;
+    ssrMissRoute.updateVisual(v);
     material.depthWrite = v.depthWrite;
     material.needsUpdate = true;
   };
@@ -589,7 +588,11 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     ...(atlasGrid ? { atlasGrid: atlasGrid.handle } : {}),
     ...(staticGrid ? { staticGrid: staticGrid.handle } : {}),
     setTime: (t) => { u.uTime.value = t; uTime.value = t; },
-    setDebugMode: (mode) => { u.uDebugMode.value = mode; uDebugMode.value = mode; },
+    setDebugMode: (mode) => {
+      u.uDebugMode.value = mode;
+      uDebugMode.value = mode;
+      ssrMissRoute.setDebugMode(mode);
+    },
     setInnerRect: (minX, minZ, maxX, maxZ) => {
       u.uInnerRect.value.set(minX, minZ, maxX, maxZ);
       uInnerRect.value.set(minX, minZ, maxX, maxZ);
@@ -600,12 +603,19 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
       uClipmapTint.value = u.uClipmapTint.value;
     },
     setWireframe: (enabled) => { material.wireframe = enabled; material.needsUpdate = true; },
-    updateCamera: (pos) => { u.uCameraPos.value.copy(pos); uCameraPos.value.copy(pos); },
+    updateCamera: (pos) => {
+      u.uCameraPos.value.copy(pos);
+      uCameraPos.value.copy(pos);
+      ssrMissRoute.updateCamera(pos);
+    },
     updateSunDirection: (dir) => {
       u.uSunDir.value.copy(dir).normalize();
       uSunDir.value.copy(u.uSunDir.value);
     },
     updateVisual: syncVisual,
-    dispose: () => { material.dispose(); },
+    dispose: () => {
+      ssrMissRoute.dispose();
+      material.dispose();
+    },
   };
 }
