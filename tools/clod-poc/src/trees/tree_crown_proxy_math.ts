@@ -61,9 +61,10 @@ export function treeMorphologyCrownProxyOffset(
   base: TreeCrownProxyDimensions,
   morphology: TreeInstanceMorphology,
 ): [number, number] {
+  const dimensions = treeMorphologyCrownProxyDimensions(base, morphology);
   return [
-    morphology.crownBiasX * base.radiusX + morphology.leanX * base.centerY * 0.49,
-    morphology.crownBiasZ * base.radiusZ + morphology.leanZ * base.centerY * 0.49,
+    morphology.crownBiasX * dimensions.radiusX + morphology.leanX * dimensions.centerY * 0.49,
+    morphology.crownBiasZ * dimensions.radiusZ + morphology.leanZ * dimensions.centerY * 0.49,
   ];
 }
 
