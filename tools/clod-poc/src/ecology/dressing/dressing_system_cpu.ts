@@ -26,6 +26,8 @@ export class CpuDressingSystem extends DressingSystemBase {
   private canonicalOptions: DressingSystemOptions | null = null;
   private readonly groundDebrisResources = new GroundDebrisCpuResources();
   private readonly scene: THREE.Scene;
+  private lastVisualCenterX = Number.POSITIVE_INFINITY;
+  private lastVisualCenterZ = Number.POSITIVE_INFINITY;
 
   constructor(options: DressingSystemOptions) {
     const deferredConfig = { ...options.config, enabled: false };
@@ -40,12 +42,22 @@ export class CpuDressingSystem extends DressingSystemBase {
         : { x: options.worldCells * 0.5, z: options.worldCells * 0.5 };
       (this as unknown as DressingSystemInternals).rebuild(center.x, center.z);
       this.groundDebrisResources.apply(this.scene);
+      this.lastVisualCenterX = center.x;
+      this.lastVisualCenterZ = center.z;
     }
   }
 
   override update(center: { readonly x: number; readonly z: number }): void {
+    const refreshDistance = (this.canonicalOptions?.config.clusterSizeM ?? Number.POSITIVE_INFINITY) * 0.5;
+    const resourcesMayChange = Math.hypot(
+      center.x - this.lastVisualCenterX,
+      center.z - this.lastVisualCenterZ,
+    ) >= refreshDistance;
     super.update(center);
+    if (!resourcesMayChange) return;
     this.groundDebrisResources.apply(this.scene);
+    this.lastVisualCenterX = center.x;
+    this.lastVisualCenterZ = center.z;
   }
 
   override dispose(): void {
