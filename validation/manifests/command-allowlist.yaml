@@ -29,7 +29,7 @@ command_allowlist:
       target: clod-poc
       lane: static
       program: npm
-      args: [--prefix, tools/clod-poc, run, test, --, src/qa/unified]
+      args: [--prefix, tools/clod-poc, run, test, --, src/qa/unified, src/qa/lookdev]
       cwd: .
       timeout_ms: 300000
       continue_on_failure: false
@@ -65,7 +65,7 @@ command_allowlist:
       target: clod-poc
       lane: gpu
       program: npm
-      args: [--prefix, tools/clod-poc, exec, --, tsx, tools/qa-capture-clod.ts, --output, "${OUTPUT_DIR}/targets/clod-poc", --scene, clod_poc_main_view]
+      args: [--prefix, tools/clod-poc, run, qa:capture, --, --output, "${OUTPUT_DIR}/targets/clod-poc", --scene, clod_poc_main_view]
       cwd: .
       timeout_ms: 900000
       continue_on_failure: false
@@ -83,14 +83,19 @@ command_allowlist:
           required: true
           deterministic: true
           kind: json
-          ignore_json_keys: []
-          numeric_tolerance: 0.005
+          ignore_json_keys: [averageHash]
+          numeric_tolerance: 0
+          numeric_tolerances:
+            "$.scenes[*].image.probes[*].metrics.**": 0.005
+            "$.scenes[*].image.signature.linearRgbGrid[*]": 0.003
+            "$.scenes[*].image.signature.luminanceHistogram[*]": 0.005
+            "$.scenes[*].image.signature.edgeHistogram[*]": 0.005
 
     - id: clod-capture-full
       target: clod-poc
       lane: full
       program: npm
-      args: [--prefix, tools/clod-poc, exec, --, tsx, tools/qa-capture-clod.ts, --output, "${OUTPUT_DIR}/targets/clod-poc"]
+      args: [--prefix, tools/clod-poc, run, qa:capture, --, --output, "${OUTPUT_DIR}/targets/clod-poc"]
       cwd: .
       timeout_ms: 1800000
       continue_on_failure: false
@@ -108,8 +113,73 @@ command_allowlist:
           required: true
           deterministic: true
           kind: json
+          ignore_json_keys: [averageHash]
+          numeric_tolerance: 0
+          numeric_tolerances:
+            "$.scenes[*].image.probes[*].metrics.**": 0.005
+            "$.scenes[*].image.signature.linearRgbGrid[*]": 0.003
+            "$.scenes[*].image.signature.luminanceHistogram[*]": 0.005
+            "$.scenes[*].image.signature.edgeHistogram[*]": 0.005
+
+    - id: clod-lookdev-smoke
+      target: clod-poc
+      lane: gpu
+      program: npm
+      args: [--prefix, tools/clod-poc, run, lookdev:smoke, --, --out, "${OUTPUT_DIR}/lookdev/smoke"]
+      cwd: .
+      timeout_ms: 900000
+      continue_on_failure: false
+      environment:
+        DRUSNIEL_QA_RUN_INDEX: "${RUN_INDEX}"
+      placeholders: [OUTPUT_DIR, RUN_INDEX]
+      artifacts:
+        - path: "${OUTPUT_DIR}/lookdev/smoke/report.json"
+          required: true
+          deterministic: false
+          kind: json
           ignore_json_keys: []
-          numeric_tolerance: 0.005
+          numeric_tolerance: 0
+        - path: "${OUTPUT_DIR}/lookdev/smoke/determinism.json"
+          required: true
+          deterministic: true
+          kind: json
+          ignore_json_keys: [averageHash]
+          numeric_tolerance: 0
+          numeric_tolerances:
+            "$.captures[*].signature.linearRgbGrid[*]": 0.003
+            "$.captures[*].signature.luminanceHistogram[*]": 0.005
+            "$.captures[*].signature.edgeHistogram[*]": 0.005
+            "$.captures[*].sanity.metrics.**": 0.005
+
+    - id: clod-lookdev-full
+      target: clod-poc
+      lane: full
+      program: npm
+      args: [--prefix, tools/clod-poc, run, lookdev:full, --, --out, "${OUTPUT_DIR}/lookdev/full"]
+      cwd: .
+      timeout_ms: 1800000
+      continue_on_failure: true
+      environment:
+        DRUSNIEL_QA_RUN_INDEX: "${RUN_INDEX}"
+      placeholders: [OUTPUT_DIR, RUN_INDEX]
+      artifacts:
+        - path: "${OUTPUT_DIR}/lookdev/full/report.json"
+          required: true
+          deterministic: false
+          kind: json
+          ignore_json_keys: []
+          numeric_tolerance: 0
+        - path: "${OUTPUT_DIR}/lookdev/full/determinism.json"
+          required: true
+          deterministic: true
+          kind: json
+          ignore_json_keys: [averageHash]
+          numeric_tolerance: 0
+          numeric_tolerances:
+            "$.captures[*].signature.linearRgbGrid[*]": 0.003
+            "$.captures[*].signature.luminanceHistogram[*]": 0.005
+            "$.captures[*].signature.edgeHistogram[*]": 0.005
+            "$.captures[*].sanity.metrics.**": 0.005
 
     - id: bevy-capture-smoke
       target: bevy
