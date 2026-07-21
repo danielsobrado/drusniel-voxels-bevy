@@ -10,6 +10,7 @@ import {
   type TreeGeometryMap,
   type TreeImpostorAtlas,
 } from "./index.js";
+import { markTreeImpostorCenterRelativeDepth } from "./tree_impostor_depth_contract.js";
 
 describe("GPU ring tree geometry selector", () => {
   it("uses normal geometry for non-impostor LODs", () => {
@@ -112,6 +113,21 @@ describe("GPU ring tree geometry selector", () => {
     expect(first.geometry.getAttribute("uv")).toBeDefined();
     expect(first.geometry.getAttribute("treeVariant")).toBeDefined();
     expectPositionExtents(first.geometry, { minX: -4, maxX: 4, minY: 2, maxY: 10, maxAbsZ: 0 });
+  });
+
+  it("tessellates only atlases with the current depth encoding", () => {
+    const settings = cloneTreeSettings();
+    settings.impostors.enabled = true;
+    const legacy = fakeAtlas("oak");
+    const current = fakeAtlas("oak");
+    markTreeImpostorCenterRelativeDepth(current);
+
+    const legacyGeometry = createTreeGpuRingBakedImpostorGeometry("oak", settings, legacy);
+    const currentGeometry = createTreeGpuRingBakedImpostorGeometry("oak", settings, current);
+
+    expect(legacyGeometry.getAttribute("position").count).toBe(4);
+    expect(currentGeometry.getAttribute("position").count).toBe(16);
+    expect(currentGeometry.getIndex()?.count).toBe(54);
   });
 
   it("keeps baked billboard UVs local so the ring material can select atlas frames", () => {
