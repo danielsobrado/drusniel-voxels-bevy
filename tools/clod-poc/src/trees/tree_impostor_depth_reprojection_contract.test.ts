@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import bakerSource from "./tree_impostor_baker.ts?raw";
 import captureSource from "./tree_impostor_capture_material.ts?raw";
 import depthSource from "./tree_impostor_depth_reprojection.ts?raw";
+import samplingSource from "./tree_impostor_depth_sampling.ts?raw";
 import geometrySource from "./tree_gpu_ring_geometry.ts?raw";
 import wrapperSource from "./tree_ring_impostor_node_material.ts?raw";
 
@@ -16,10 +17,10 @@ describe("tree impostor depth reprojection contract", () => {
   });
 
   it("coverage-weights depth across view and age layers", () => {
-    expect(depthSource).toContain("depth: texture(atlas.normalDepth!, atlasUv).w");
-    expect(depthSource).toContain("coverage: texture(atlas.albedo ?? atlas.texture, atlasUv).w");
-    expect(depthSource).toContain("const cw00: TslNode = s00.coverage.mul(w00)");
-    expect(depthSource).toContain("const lowerWeight: TslNode = float(1).sub(layerBlend).mul(lower.coverage)");
+    expect(samplingSource).toContain("depth: texture(atlas.normalDepth!, atlasUv).w");
+    expect(samplingSource).toContain("coverage: texture(atlas.albedo ?? atlas.texture, atlasUv).w");
+    expect(samplingSource).toContain("const cw00: TslNode = s00.coverage.mul(w00)");
+    expect(samplingSource).toContain("const lowerWeight: TslNode = float(1).sub(layerBlend).mul(lower.coverage)");
     expect(depthSource).toContain("clamp(sample.depth, 0, 1).mul(2).sub(1).mul(range.extentM)");
   });
 
