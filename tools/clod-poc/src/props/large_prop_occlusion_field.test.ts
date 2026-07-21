@@ -83,6 +83,12 @@ describe("large prop occlusion field", () => {
       fogBottomY: 0,
       fogTopY: 4,
     });
+    const payload = field.giHeightPayload();
+    expect(payload).not.toBeNull();
+    expect(payload?.revision).toBe(1);
+    expect(Array.from(payload?.cellX ?? [])).toEqual([0, 1, 0, 1]);
+    expect(Array.from(payload?.cellZ ?? [])).toEqual([0, 0, 1, 1]);
+    expect(Array.from(payload?.topY ?? [])).toEqual([4, 4, 4, 4]);
 
     field.submit(snapshot(2, [occluder("b", 10, 10, 12, 12)]));
     field.step();
@@ -91,6 +97,7 @@ describe("large prop occlusion field", () => {
       fogOccupancy: 1,
     });
     expect(field.stats().pendingRevision).toBe(2);
+    expect(field.giHeightPayload()).toBe(payload);
 
     field.step();
     expect(field.sampleInto(0.5, 0.5, sample)).toMatchObject({
@@ -98,6 +105,7 @@ describe("large prop occlusion field", () => {
       fogOccupancy: 0,
     });
     expect(field.sampleInto(10.5, 10.5, sample).fogOccupancy).toBe(1);
+    expect(field.giHeightPayload()?.revision).toBe(2);
   });
 
   it("honors the strict raster-cell budget even for one large occluder", () => {
@@ -141,6 +149,7 @@ describe("large prop occlusion field", () => {
       fogTopY: 4,
     });
     expect(field.sampleInto(1.25, 0.5, sample).fogOccupancy).toBe(0.5);
+    expect(field.giHeightPayload()).toBeNull();
   });
 
   it("replaces a pending revision and applies disabled snapshots immediately", () => {
@@ -165,6 +174,7 @@ describe("large prop occlusion field", () => {
       revision: 3,
       fogOccupancy: 0,
     });
+    expect(field.giHeightPayload()).toBeNull();
     expect(field.submit(snapshot(2, []))).toBe(false);
   });
 });

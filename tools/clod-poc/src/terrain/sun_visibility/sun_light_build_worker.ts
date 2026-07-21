@@ -1,10 +1,9 @@
 // Sun-light tile build worker: runs buildLightTile off the main thread.
 //
-// Exactness contract: heights are sampled through the same createSunLightHeightSampler
-// code path as the main-thread provider, over a transferred heightMax snapshot, with
-// surfaceHeightCore(x, z, terrainFieldConfig) as the analytic fallback (identical to
-// WorldSource.sampleHeight). Worker-built tiles therefore match main-thread tiles bit
-// for bit; the parity test pins this.
+// Exactness contract: heights are sampled through the same composed terrain-summary,
+// analytic-fallback, and committed large-prop height path as the main-thread provider.
+// Worker-built tiles therefore match main-thread tiles bit for bit; parity tests pin both
+// terrain-only and sparse-prop configurations.
 
 import {
   buildSunLightWorkerTiles,

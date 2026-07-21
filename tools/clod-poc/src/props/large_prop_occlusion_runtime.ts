@@ -1,16 +1,24 @@
 import type { LargePropOcclusionField, LargePropOcclusionFieldStats } from "./large_prop_occlusion_field.js";
 
 let activeField: LargePropOcclusionField | null = null;
+let activeFieldGeneration = 0;
 
 export function registerActiveLargePropOcclusionField(field: LargePropOcclusionField): () => void {
   activeField = field;
+  activeFieldGeneration += 1;
   return () => {
-    if (activeField === field) activeField = null;
+    if (activeField !== field) return;
+    activeField = null;
+    activeFieldGeneration += 1;
   };
 }
 
 export function readActiveLargePropOcclusionField(): LargePropOcclusionField | null {
   return activeField;
+}
+
+export function readActiveLargePropOcclusionFieldGeneration(): number {
+  return activeFieldGeneration;
 }
 
 export function publishLargePropOcclusionCounters(stats: LargePropOcclusionFieldStats): void {
@@ -19,6 +27,7 @@ export function publishLargePropOcclusionCounters(stats: LargePropOcclusionField
   }).window?.__drusnielClod?.stats?.counters;
   if (!counters) return;
 
+  counters["large_prop_occlusion_generation"] = activeFieldGeneration;
   counters["large_prop_occlusion_active_revision"] = stats.activeRevision;
   counters["large_prop_occlusion_pending_revision"] = stats.pendingRevision;
   counters["large_prop_occlusion_active_cells"] = stats.activeCells;

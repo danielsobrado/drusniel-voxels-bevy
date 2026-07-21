@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { surfaceHeightCore } from "../../gpu/terrain_field_core.js";
+import {
+  createLargePropOcclusionHeightSampler,
+  type LargePropOcclusionHeightPayload,
+} from "../../props/large_prop_occlusion_height.js";
 import { createSunLightHeightSampler } from "./far_light_height.js";
 import { buildLightTile } from "./light_builder.js";
 import { SUN_LIGHT_DEFAULTS, type SunLightOptions } from "./sun_light_options.js";
@@ -23,55 +27,83 @@ function syntheticSummary(res: number, worldSize: number) {
   return { res, worldSize, heightMax };
 }
 
+function propPayload(): LargePropOcclusionHeightPayload {
+  return {
+    revision: 3,
+    cellSizeM: 8,
+    cellX: new Int32Array([1, 2, -4]),
+    cellZ: new Int32Array([1, 1, 8]),
+    topY: new Float32Array([96, 72, 88]),
+    minX: -32,
+    minZ: 8,
+    maxX: 24,
+    maxZ: 72,
+  };
+}
+
 describe("sun light worker parity", () => {
-  it("worker-built tiles match main-thread tiles bit for bit", () => {
-    const summary = syntheticSummary(32, 512);
-    const sunVec = { x: 0.42, y: 0.55, z: -0.72 };
-    const sunBin = toSunBin(new THREE.Vector3(sunVec.x, sunVec.y, sunVec.z), OPTIONS.directionBins);
+  it("worker-built tiles match main-thread tiles bit for bit without props", () => {
+    assertWorkerParity(null);
+  });
 
-    // Main-thread path: provider-style sampler over the live arrays.
-    const mainHeightAt = createSunLightHeightSampler(
-      summary.res,
-      summary.worldSize,
-      summary.heightMax,
-      (x, z) => surfaceHeightCore(x, z),
-    );
-    const tiles = [
-      { tileX: 0, tileZ: 0, lod: 0 },
-      { tileX: 3, tileZ: -2, lod: 0 },
-      { tileX: -9, tileZ: 14, lod: 0 },
-    ];
-    const mainBuilt = tiles.map((tile) => buildLightTile(
-      { tile, sunVec, sunBin, terrainRevision: 7, frameIndex: 11 },
-      { heightAt: mainHeightAt },
-      OPTIONS,
-    ));
+  it("worker-built tiles match main-thread tiles with sparse prop heights", () => {
+    const payload = propPayload();
+    assertWorkerParity(payload);
 
-    // Worker path: state reconstructed from the configure payload (heightMax copy).
-    const state = sunLightWorkerStateFromConfigure({
-      type: "configure",
-      configId: 1,
-      terrainFieldConfig: null,
-      summary: { ...summary, heightMax: summary.heightMax.slice() },
-      options: OPTIONS,
-    });
-    const workerBuilt = buildSunLightWorkerTiles(state, tiles.map((tile, index) => ({
-      key: `k${index}`,
-      tileX: tile.tileX,
-      tileZ: tile.tileZ,
-      lod: tile.lod,
-      sunVec: [sunVec.x, sunVec.y, sunVec.z],
-      sunBin,
-      terrainRevision: 7,
-      frameIndex: 11,
-    })));
-
-    for (let i = 0; i < tiles.length; i++) {
-      expect(workerBuilt[i]!.resolution).toBe(mainBuilt[i]!.resolution);
-      expect(Array.from(workerBuilt[i]!.values)).toEqual(Array.from(mainBuilt[i]!.values));
-    }
-    // Sanity: the tile is not trivially uniform (the parity assertion must bite).
-    const distinct = new Set(mainBuilt.flatMap((tile) => Array.from(tile.values)));
-    expect(distinct.size).toBeGreaterThan(1);
+    const terrain = () => 4;
+    const heightAt = createLargePropOcclusionHeightSampler(payload, terrain);
+    expect(heightAt(12, 12)).toBe(96);
+    expect(heightAt(20, 12)).toBe(72);
+    expect(heightAt(40, 40)).toBe(4);
   });
 });
+
+function assertWorkerParity(propOcclusion: LargePropOcclusionHeightPayload | null): void {
+  const summary = syntheticSummary(32, 512);
+  const sunVec = { x: 0.42, y: 0.55, z: -0.72 };
+  const sunBin = toSunBin(new THREE.Vector3(sunVec.x, sunVec.y, sunVec.z), OPTIONS.directionBins);
+
+  const terrainHeightAt = createSunLightHeightSampler(
+    summary.res,
+    summary.worldSize,
+    summary.heightMax,
+    (x, z) => surfaceHeightCore(x, z),
+  );
+  const mainHeightAt = createLargePropOcclusionHeightSampler(propOcclusion, terrainHeightAt);
+  const tiles = [
+    { tileX: 0, tileZ: 0, lod: 0 },
+    { tileX: 3, tileZ: -2, lod: 0 },
+    { tileX: -9, tileZ: 14, lod: 0 },
+  ];
+  const mainBuilt = tiles.map((tile) => buildLightTile(
+    { tile, sunVec, sunBin, terrainRevision: 7, frameIndex: 11 },
+    { heightAt: mainHeightAt },
+    OPTIONS,
+  ));
+
+  const state = sunLightWorkerStateFromConfigure({
+    type: "configure",
+    configId: 1,
+    terrainFieldConfig: null,
+    summary: { ...summary, heightMax: summary.heightMax.slice() },
+    propOcclusion,
+    options: OPTIONS,
+  });
+  const workerBuilt = buildSunLightWorkerTiles(state, tiles.map((tile, index) => ({
+    key: `k${index}`,
+    tileX: tile.tileX,
+    tileZ: tile.tileZ,
+    lod: tile.lod,
+    sunVec: [sunVec.x, sunVec.y, sunVec.z],
+    sunBin,
+    terrainRevision: 7,
+    frameIndex: 11,
+  })));
+
+  for (let i = 0; i < tiles.length; i++) {
+    expect(workerBuilt[i]!.resolution).toBe(mainBuilt[i]!.resolution);
+    expect(Array.from(workerBuilt[i]!.values)).toEqual(Array.from(mainBuilt[i]!.values));
+  }
+  const distinct = new Set(mainBuilt.flatMap((tile) => Array.from(tile.values)));
+  expect(distinct.size).toBeGreaterThan(1);
+}

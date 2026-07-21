@@ -1,12 +1,11 @@
 // Message protocol for the sun-light tile build worker.
 //
 // A sun-visibility tile is a pure function of (summary heightMax grid, analytic terrain
-// config, sun-light options, tile coords, sun vector), so tiles can build off the main
-// thread with bit-identical results. The worker samples heights through the same
-// createSunLightHeightSampler used by the main-thread provider; its analytic fallback is
-// surfaceHeightCore(x, z, terrainFieldConfig), which matches WorldSource.sampleHeight
-// (the same exactness contract the canopy build worker relies on).
+// config, committed large-prop height payload, sun-light options, tile coords, sun vector),
+// so tiles can build off the main thread with bit-identical results. The worker samples
+// heights through the same composed sampler used by the main-thread fallback.
 
+import type { LargePropOcclusionHeightPayload } from "../../props/large_prop_occlusion_height.js";
 import type { SunDirectionBin } from "./sun_bins.js";
 import type { SunLightOptions } from "./sun_light_options.js";
 import type { TerrainFieldConfig } from "../terrain.js";
@@ -23,6 +22,7 @@ export interface SunLightWorkerConfigureRequest {
   configId: number;
   terrainFieldConfig: TerrainFieldConfig | null;
   summary: SunLightWorkerSummaryPayload | null;
+  propOcclusion: LargePropOcclusionHeightPayload | null;
   options: SunLightOptions;
 }
 
