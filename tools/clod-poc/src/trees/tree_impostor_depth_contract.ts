@@ -1,3 +1,6 @@
+export const TREE_IMPOSTOR_DEPTH_ENCODING = "center-relative-v2" as const;
+export type TreeImpostorDepthEncoding = typeof TREE_IMPOSTOR_DEPTH_ENCODING | "view-linear-v1";
+
 export const TREE_IMPOSTOR_DEPTH_NEAR_M = 0.01;
 export const TREE_IMPOSTOR_DEPTH_FAR_RADIUS_MULTIPLIER = 6;
 export const TREE_IMPOSTOR_DEPTH_EXTENT_DIVISOR = 4;
