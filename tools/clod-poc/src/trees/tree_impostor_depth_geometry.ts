@@ -1,13 +1,15 @@
 import * as THREE from "three";
 import { TREE_IMPOSTOR_DEPTH_GRID_SEGMENTS } from "./tree_impostor_depth_contract.js";
 
+const MAX_UINT16_GRID_SEGMENTS = 255;
+
 export function createTreeImpostorDepthGridGeometry(
   source: THREE.BufferGeometry,
   segments = TREE_IMPOSTOR_DEPTH_GRID_SEGMENTS,
 ): THREE.BufferGeometry {
   const position = source.getAttribute("position");
   const uv = source.getAttribute("uv");
-  const safeSegments = Math.max(1, Math.floor(segments));
+  const safeSegments = Math.min(MAX_UINT16_GRID_SEGMENTS, Math.max(1, Math.floor(segments)));
   if (!position || !uv || position.count !== 4 || uv.count !== 4 || safeSegments === 1) return source;
 
   const corners = resolveQuadCorners(uv);
@@ -41,7 +43,7 @@ export function createTreeImpostorDepthGridGeometry(
     geometry.setAttribute(name, new THREE.BufferAttribute(values, itemSize, attribute.normalized));
   }
 
-  const indices = new Uint32Array(safeSegments * safeSegments * 6);
+  const indices = new Uint16Array(safeSegments * safeSegments * 6);
   let cursor = 0;
   for (let z = 0; z < safeSegments; z++) {
     for (let x = 0; x < safeSegments; x++) {
