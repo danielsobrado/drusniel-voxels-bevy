@@ -14,6 +14,7 @@ import {
 } from "../../gpu/grass_node_material.js";
 import { GrassGpuRingCompute } from "../../gpu/grass_ring_compute.js";
 import { registerForestLightingGpuDevice } from "../../forest_lighting/forest_lighting_texture.js";
+import { ensureDressingGrassContactGpuResources } from "../../ecology/dressing/gpu/dressing_grass_contact_field.js";
 import { createGrassController } from "./grass_controller.js";
 import type { ClodAppState } from "../../app/clod_app_state.js";
 import { grassUiState } from "../../app/clod_app_state.js";
@@ -55,6 +56,7 @@ export function runGrassStartup(input: GrassStartupInput): GrassStartupResult {
   } = input;
 
   registerForestLightingGpuDevice(isWebGpu ? rendererWebGpuDevice : null);
+  if (isWebGpu && gpuBackend) ensureDressingGrassContactGpuResources(gpuBackend);
   const grassHydrologyData = hydrologySystem ? packHydrologyData(hydrologySystem) : null;
 
   const currentGrassLighting = (): GrassLighting => {
