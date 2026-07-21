@@ -44,9 +44,11 @@ describe("tree impostor depth reprojection contract", () => {
       .toBeLessThan(assetsSource.indexOf("this.setImpostorAtlases(result.atlases, bakeContentKey)"));
   });
 
-  it("applies one identical transform to color and prepass", () => {
-    expect(wrapperSource).toContain("material.positionNode = depthReprojection.apply(material.positionNode)");
-    expect(wrapperSource).toContain("positionNode: depthReprojection.apply(nodes.positionNode as TslNode)");
+  it("keeps depth in the shared color and prepass position graph", () => {
+    expect(wrapperSource).toContain("const applyImpostorPosition = (sourcePosition: TslNode)");
+    expect(wrapperSource).toContain("depthReprojection.apply(sourcePosition)");
+    expect(wrapperSource).toContain("material.positionNode = applyImpostorPosition(material.positionNode)");
+    expect(wrapperSource).toContain("positionNode: applyImpostorPosition(nodes.positionNode as TslNode)");
     expect(wrapperSource).toContain('counters["tree_impostor_depth_prepass_parity"] = depthReprojectionActive ? 1 : 0');
     expect(wrapperSource).toContain('counters["tree_impostor_secondary_competition_response"] = 0');
   });
