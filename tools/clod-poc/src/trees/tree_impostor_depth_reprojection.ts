@@ -16,7 +16,10 @@ import {
 import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 import type { TreeRingInstanceBuffers } from "./tree_node_material.js";
 import { treeMorphologyRecordNodes } from "./morphology/node_deformation.js";
-import { treeImpostorDepthRange } from "./tree_impostor_depth_contract.js";
+import {
+  TREE_IMPOSTOR_DEPTH_ENCODING,
+  treeImpostorDepthRange,
+} from "./tree_impostor_depth_contract.js";
 import { treeImpostorDepthAgeSampleNode } from "./tree_impostor_depth_sampling.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -34,7 +37,12 @@ export function createTreeImpostorDepthReprojectionNode(
   atlas: TreeImpostorAtlas,
   buffers: TreeRingInstanceBuffers,
 ): TreeImpostorDepthReprojectionNode {
-  if (!atlas.normalDepth || !atlas.radius || !Number.isFinite(atlas.radius)) {
+  if (
+    atlas.depthEncoding !== TREE_IMPOSTOR_DEPTH_ENCODING
+    || !atlas.normalDepth
+    || !atlas.radius
+    || !Number.isFinite(atlas.radius)
+  ) {
     return { active: false, apply: (sourcePosition) => sourcePosition };
   }
 
