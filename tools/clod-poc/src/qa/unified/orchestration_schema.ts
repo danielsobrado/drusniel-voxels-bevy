@@ -11,6 +11,7 @@ export interface QaCommandArtifact {
   kind: "file" | "directory" | "json";
   ignore_json_keys: string[];
   numeric_tolerance: number;
+  numeric_tolerances: Record<string, number>;
 }
 
 export interface QaCommandDefinition {
