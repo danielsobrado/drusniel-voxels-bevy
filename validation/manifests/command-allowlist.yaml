@@ -29,7 +29,7 @@ command_allowlist:
       target: clod-poc
       lane: static
       program: npm
-      args: [--prefix, tools/clod-poc, run, test, --, src/qa/unified, src/qa/lookdev]
+      args: [--prefix, tools/clod-poc, run, test, --, src/qa/unified, src/qa/lookdev, src/qa/affected]
       cwd: .
       timeout_ms: 300000
       continue_on_failure: false
