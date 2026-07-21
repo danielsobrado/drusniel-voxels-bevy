@@ -57,7 +57,7 @@ export interface TreeImpostorAtlas {
   texture: THREE.Texture;
   /** Sqrt-encoded RGB albedo + coverage in A. */
   albedo?: THREE.Texture;
-  /** Tree-local normal in RGB, normalized linear depth in A. */
+  /** Tree-local normal in RGB, centered signed view depth encoded to [0, 1] in A. */
   normalDepth?: THREE.Texture;
   gridSize: number;
   resolutionPx: number;
@@ -819,8 +819,8 @@ export function encodeTreeImpostorAlbedo(channel: number): number {
 }
 
 export function decodeTreeImpostorAlbedo(channel: number): number {
-  const value = clamp01(channel);
-  return value * value;
+  const encoded = clamp01(channel);
+  return encoded * encoded;
 }
 
 export function encodeTreeImpostorNormalComponent(component: number): number {
@@ -831,8 +831,8 @@ export function decodeTreeImpostorNormalComponent(channel: number): number {
   return clamp01(channel) * 2 - 1;
 }
 
-export function encodeTreeImpostorDepth(depth: number): number {
-  return clamp01(depth);
+export function encodeTreeImpostorDepth(linearDepth: number): number {
+  return clamp01(linearDepth);
 }
 
 export function decodeTreeImpostorDepth(channel: number): number {
@@ -840,5 +840,5 @@ export function decodeTreeImpostorDepth(channel: number): number {
 }
 
 function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
 }

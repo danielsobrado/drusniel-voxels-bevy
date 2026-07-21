@@ -19,6 +19,7 @@ import {
   resolveTreeMorphologyEvidenceMode,
   type TreeMorphologyEvidenceMode,
 } from "./morphology/impostor_competition.js";
+import { createTreeImpostorDepthReprojectionNode } from "./tree_impostor_depth_reprojection.js";
 import {
   createTreeRingImpostorNodeMaterialHandle as createBaseHandle,
 } from "./tree_ring_impostor_node_material_base.js";
@@ -27,6 +28,7 @@ import {
 type TslNode = any;
 type NodeMaterialShape = THREE.Material & {
   colorNode?: TslNode;
+  positionNode?: TslNode;
   needsUpdate: boolean;
 };
 
@@ -51,28 +53,47 @@ export function createTreeRingImpostorNodeMaterialHandle(
   const detailNode: TslNode = texture(neutralDetail, competitionUv);
   const competition: TslNode = clamp(detailNode.w.mul(uCompetitionEnabled), 0, 1);
   const age: TslNode = clamp(record.morphology0.x, 0, 1);
+  const depthReprojection = createTreeImpostorDepthReprojectionNode(atlas, buffers);
 
   const decorate = (materialValue: THREE.Material): void => {
     const material = materialValue as NodeMaterialShape;
-    if (!material.colorNode) return;
-    const originalColor: TslNode = material.colorNode;
-    material.colorNode = evidenceMode === "age"
-      ? ageEvidence(age)
-      : evidenceMode === "competition"
-        ? competitionEvidence(competition)
-        : originalColor;
-    material.needsUpdate = true;
+    let changed = false;
+    if (depthReprojection.active && material.positionNode) {
+      material.positionNode = depthReprojection.apply(material.positionNode);
+      changed = true;
+    }
+    if (material.colorNode) {
+      const originalColor: TslNode = material.colorNode;
+      material.colorNode = evidenceMode === "age"
+        ? ageEvidence(age)
+        : evidenceMode === "competition"
+          ? competitionEvidence(competition)
+          : originalColor;
+      changed = true;
+    }
+    if (changed) material.needsUpdate = true;
   };
 
   decorate(base.regularMaterial);
   for (const material of Object.values(base.debugMaterials) as THREE.Material[]) decorate(material);
 
   const originalUpdateForestLighting = base.updateForestLighting?.bind(base);
+  const originalPrepassNodesFor = base.prepassNodesFor?.bind(base);
   const originalDispose = base.dispose.bind(base);
-  publishEvidenceCounters(evidenceMode, false);
+  publishEvidenceCounters(evidenceMode, false, depthReprojection.active);
 
   return {
     ...base,
+    prepassNodesFor: originalPrepassNodesFor
+      ? (lod) => {
+          const nodes = originalPrepassNodesFor(lod);
+          if (!nodes || !depthReprojection.active) return nodes;
+          return {
+            ...nodes,
+            positionNode: depthReprojection.apply(nodes.positionNode as TslNode),
+          };
+        }
+      : undefined,
     updateForestLighting(state: ForestLightingMaterialState | null) {
       originalUpdateForestLighting?.(state);
       const enabled = state?.settings.enabled === true
@@ -80,7 +101,7 @@ export function createTreeRingImpostorNodeMaterialHandle(
       uCompetitionEnabled.value = enabled ? 1 : 0;
       uForestWorldSize.value = state?.worldCells ?? 1;
       detailNode.value = state?.textureHandle.detailTexture ?? neutralDetail;
-      publishEvidenceCounters(evidenceMode, enabled);
+      publishEvidenceCounters(evidenceMode, enabled, depthReprojection.active);
     },
     dispose() {
       neutralDetail.dispose();
@@ -121,7 +142,11 @@ function createNeutralDetailTexture(): THREE.DataTexture {
   return textureValue;
 }
 
-function publishEvidenceCounters(mode: TreeMorphologyEvidenceMode, authorityActive: boolean): void {
+function publishEvidenceCounters(
+  mode: TreeMorphologyEvidenceMode,
+  authorityActive: boolean,
+  depthReprojectionActive: boolean,
+): void {
   const counters = (globalThis as typeof globalThis & {
     window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
   }).window?.__drusnielClod?.stats?.counters;
@@ -130,5 +155,7 @@ function publishEvidenceCounters(mode: TreeMorphologyEvidenceMode, authorityActi
   counters["tree_impostor_competition_authority"] = authorityActive ? 1 : 0;
   counters["tree_impostor_secondary_competition_response"] = 0;
   counters["tree_morphology_record_authority"] = 1;
+  counters["tree_impostor_depth_reprojection_active"] = depthReprojectionActive ? 1 : 0;
+  counters["tree_impostor_depth_prepass_parity"] = depthReprojectionActive ? 1 : 0;
   counters["tree_impostor_evidence_mode"] = mode === "age" ? 1 : mode === "competition" ? 2 : 0;
 }

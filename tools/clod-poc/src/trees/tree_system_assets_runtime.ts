@@ -9,6 +9,7 @@ import { createTreeCrownProxyGeometry } from "./tree_crown_proxy_math.js";
 import type { EnvironmentLighting } from "../environment/environment.js";
 import type { ForestLightingMaterialState } from "../forest_lighting/index.js";
 import { bakeTreeImpostorAtlases, type TreeImpostorAtlas } from "./tree_impostor_baker.js";
+import { markTreeImpostorCenterRelativeDepth } from "./tree_impostor_depth_contract.js";
 import { publishTreeImpostorDebugStatus } from "./tree_impostor_debug.js";
 import { selectTreeGpuRingGeometry } from "./tree_gpu_ring_geometry.js";
 import { createTreeFoliageAtlas, type TreeFoliageAtlas } from "./tree_alpha_mask.js";
@@ -157,6 +158,9 @@ export class TreeSystemAssets {
         if (!this.canCommitImpostorBake(controller, bakeContentKey)) {
           this.disposeAtlasSet(result.atlases);
           return this.cancelledBakeResult(controller.signal.reason);
+        }
+        for (const atlas of Object.values(result.atlases)) {
+          if (atlas?.ready) markTreeImpostorCenterRelativeDepth(atlas);
         }
         this.setImpostorAtlases(result.atlases, bakeContentKey);
         this.impostorStatus = "baked";

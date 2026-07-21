@@ -2,7 +2,9 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import {
   attribute,
+  cameraPosition,
   clamp,
+  dot,
   float,
   floor,
   fract,
@@ -10,7 +12,7 @@ import {
   max,
   mix,
   normalize,
-  positionView,
+  positionWorld,
   sqrt,
   texture,
   uv,
@@ -34,6 +36,7 @@ import {
   trackedMeshBasicMaterial,
   trackedShaderMaterial,
 } from "../rendering/material_churn/tracked_material_factory.js";
+import { TREE_IMPOSTOR_DEPTH_EXTENT_DIVISOR } from "./tree_impostor_depth_contract.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -110,16 +113,15 @@ export function createTreeImpostorNormalDepthBakeMaterial(
       new MeshBasicNodeMaterial(),
       "tree-impostor-bake-normal-depth-node",
     );
-    const linearDepth = clamp(
-      positionView.z.negate().sub(float(near)).div(float(Math.max(far - near, 0.0001))),
-      0,
-      1,
-    );
+    const depthExtent = float(Math.max((far - near) / TREE_IMPOSTOR_DEPTH_EXTENT_DIVISOR, 0.0001));
+    const captureDirection: TslNode = normalize(cameraPosition);
+    const relativeDepth: TslNode = dot(positionWorld, captureDirection);
+    const encodedDepth: TslNode = clamp(relativeDepth.div(depthExtent).mul(0.5).add(0.5), 0, 1);
     material.name = "tree-impostor-normal-depth-bake";
     const localNormal: TslNode = normalize(attribute("normal", "vec3"));
     const facingNormal: TslNode = (frontFacing as TslNode).select(localNormal, localNormal.negate());
     material.colorNode = facingNormal.mul(0.5).add(0.5);
-    material.opacityNode = linearDepth;
+    material.opacityNode = encodedDepth;
     if (foliageAtlas) {
       (material as unknown as { maskNode: TslNode }).maskNode = createFoliageCaptureNodes(foliageAtlas).keep;
     }
@@ -188,15 +190,19 @@ varying vec2 vTreeImpostorUv;
 varying float vTreeImpostorFoliageCard;
 varying float vTreeImpostorSpeciesIndex;
 varying vec3 vTreeImpostorLocalNormal;
-varying float vTreeImpostorLinearDepth;
+varying float vTreeImpostorRelativeDepth;
 
 void main() {
-  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+  vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+  vec4 mvPosition = viewMatrix * worldPosition;
+  vec3 captureDirection = normalize(cameraPosition);
+  float depthExtent = max((far - near) / ${TREE_IMPOSTOR_DEPTH_EXTENT_DIVISOR.toFixed(1)}, 0.0001);
+  float relativeDepth = dot(worldPosition.xyz, captureDirection);
   vTreeImpostorUv = uv;
   vTreeImpostorFoliageCard = treeFoliageCard;
   vTreeImpostorSpeciesIndex = treeWind.z;
   vTreeImpostorLocalNormal = normalize(normal);
-  vTreeImpostorLinearDepth = clamp((-mvPosition.z - near) / max(far - near, 0.0001), 0.0, 1.0);
+  vTreeImpostorRelativeDepth = clamp(relativeDepth / depthExtent * 0.5 + 0.5, 0.0, 1.0);
   gl_Position = projectionMatrix * mvPosition;
 }
 `;
@@ -208,7 +214,7 @@ varying vec2 vTreeImpostorUv;
 varying float vTreeImpostorFoliageCard;
 varying float vTreeImpostorSpeciesIndex;
 varying vec3 vTreeImpostorLocalNormal;
-varying float vTreeImpostorLinearDepth;
+varying float vTreeImpostorRelativeDepth;
 
 void main() {
   if (hasFoliageAtlas > 0.5 && vTreeImpostorFoliageCard > 0.5) {
@@ -227,6 +233,6 @@ void main() {
   vec3 facingNormal = normalize(vTreeImpostorLocalNormal);
   if (!gl_FrontFacing) facingNormal = -facingNormal;
   vec3 packedNormal = facingNormal * 0.5 + 0.5;
-  gl_FragColor = vec4(packedNormal, vTreeImpostorLinearDepth);
+  gl_FragColor = vec4(packedNormal, vTreeImpostorRelativeDepth);
 }
 `;
