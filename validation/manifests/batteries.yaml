@@ -12,11 +12,11 @@ qa_batteries:
     - id: lane-b-clod-smoke
       target: clod-poc
       authoritative: true
-      commands: [clod-capture-smoke]
+      commands: [clod-capture-smoke, clod-lookdev-smoke]
     - id: lane-b-clod-full
       target: clod-poc
       authoritative: true
-      commands: [clod-capture-full]
+      commands: [clod-capture-full, clod-lookdev-full]
     - id: lane-b-bevy-smoke
       target: bevy
       authoritative: true
@@ -36,13 +36,13 @@ qa_batteries:
 
   batteries:
     - id: clod-smoke
-      description: Static validation plus the canonical CLOD smoke capture.
+      description: Static validation plus canonical CLOD capture and lookdev smoke coverage.
       targets: [clod-poc]
       lanes: [lane-a-clod-static, lane-b-clod-smoke]
       scenes: [clod_poc_main_view]
       tags: []
     - id: clod-full
-      description: Full CLOD visual, performance, water, tree, and streaming acceptance battery.
+      description: Full CLOD visual, lookdev, performance, water, tree, and streaming acceptance battery.
       targets: [clod-poc]
       lanes: [lane-a-clod-static, lane-b-clod-full, lane-c-clod-specialized]
       scenes: [clod_poc_main_view, long_view_4km, infinite_islands_move_static, infinite_islands_move_moving, infinite_islands_move_steady]
