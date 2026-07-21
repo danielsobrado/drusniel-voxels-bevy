@@ -213,8 +213,10 @@ export function grassContactPatchInfluence(worldXZ: TslNode): GrassContactInflue
   const stoneSuppress: TslNode = sample.x.mul(active);
   const stoneTrample: TslNode = sample.y.mul(active);
   const dressing = dressingGrassContactInfluence(worldXZ);
-  const suppress: TslNode = max(stoneSuppress, dressing.suppress);
-  const trample: TslNode = max(stoneTrample, dressing.trample);
+  const dressingSuppress: TslNode = dressing.suppress.mul(uEnabled);
+  const dressingTrample: TslNode = dressing.trample.mul(uEnabled);
+  const suppress: TslNode = max(stoneSuppress, dressingSuppress);
+  const trample: TslNode = max(stoneTrample, dressingTrample);
   const splay: TslNode = sample.zw.mul(active);
   return {
     suppress,
