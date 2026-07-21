@@ -1,5 +1,6 @@
 import {
   abs,
+  attribute,
   cameraPosition,
   clamp,
   cos,
@@ -7,6 +8,7 @@ import {
   float,
   floor,
   max,
+  mix,
   normalize,
   sin,
   smoothstep,
@@ -84,12 +86,27 @@ export function createTreeImpostorDepthReprojectionNode(
     DEPTH_COVERAGE_FADE_END,
     clamp(sample.coverage, 0, 1),
   );
-  const worldOffset: TslNode = cameraRay.mul(offsetM.mul(coverageWeight).mul(instanceScale));
+  const topWeight: TslNode = clamp(attribute("treeHeight01", "float"), 0, 1);
+  const heightScale: TslNode = mix(0.72, 1.08, smoothstep(0, 1, age))
+    .mul(mix(1, clamp(record.morphology1.w, 0.82, 1.2), topWeight));
+  const widthScale: TslNode = clamp(record.morphology1.z, 0.82, 1.18)
+    .mul(mix(0.78, 1.12, age));
+  const weightedOffset: TslNode = offsetM.mul(coverageWeight).mul(instanceScale);
+  const localDepth: TslNode = vec3(
+    localViewDirection.x.mul(widthScale),
+    localViewDirection.y.mul(heightScale),
+    localViewDirection.z.mul(widthScale),
+  ).mul(weightedOffset);
+  const worldDepth: TslNode = vec3(
+    yawCos.mul(localDepth.x).add(yawSin.mul(localDepth.z)),
+    localDepth.y,
+    yawCos.mul(localDepth.z).sub(yawSin.mul(localDepth.x)),
+  );
 
   return {
     active: true,
     apply(sourcePosition) {
-      return sourcePosition.add(worldOffset);
+      return sourcePosition.add(worldDepth);
     },
   };
 }
@@ -206,7 +223,7 @@ function treeImpostorDepthAtlasUv(
   );
   const maxUv = vec2(
     frameX.add(1).mul(resolution).sub(padding).div(atlasWidth),
-    yOffset.add(frameY.add(1).mul(resolution)).sub(padding).div(atlasHeight),
+    yOffset.add(frameY.add(1).mul(resolution).sub(padding).div(atlasHeight),
   );
   return minUv.add(clamp(baseUv, vec2(0), vec2(1)).mul(maxUv.sub(minUv)));
 }
