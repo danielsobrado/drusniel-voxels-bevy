@@ -212,11 +212,12 @@ fn compare_artifact(
         let right_value = read_json(&right.path)?;
         let ignored = left.ignore_json_keys.iter().cloned().collect::<BTreeSet<_>>();
         let mut differences = Vec::new();
-        compare_json(
+        compare_json_with_tolerances(
             &left_value,
             &right_value,
             &ignored,
             left.numeric_tolerance,
+            &left.numeric_tolerances,
             "$",
             &mut differences,
         );
@@ -254,6 +255,26 @@ pub fn compare_json(
     path: &str,
     differences: &mut Vec<String>,
 ) {
+    compare_json_with_tolerances(
+        left,
+        right,
+        ignored,
+        tolerance,
+        &BTreeMap::new(),
+        path,
+        differences,
+    );
+}
+
+fn compare_json_with_tolerances(
+    left: &Value,
+    right: &Value,
+    ignored: &BTreeSet<String>,
+    default_tolerance: f64,
+    path_tolerances: &BTreeMap<String, f64>,
+    path: &str,
+    differences: &mut Vec<String>,
+) {
     let key = path.rsplit('.').next().unwrap_or(path);
     if ignored.contains(key) || ignored.contains(path) {
         return;
@@ -262,8 +283,9 @@ pub fn compare_json(
         (Value::Number(left), Value::Number(right)) => {
             let left = left.as_f64();
             let right = right.as_f64();
+            let tolerance = tolerance_for_path(path, default_tolerance, path_tolerances);
             if left.zip(right).is_none_or(|(left, right)| (left - right).abs() > tolerance) {
-                differences.push(format!("{path}: {left:?} != {right:?}"));
+                differences.push(format!("{path}: {left:?} != {right:?} (tolerance {tolerance})"));
             }
         }
         (Value::Array(left), Value::Array(right)) => {
@@ -271,11 +293,12 @@ pub fn compare_json(
                 differences.push(format!("{path}.length: {} != {}", left.len(), right.len()));
             }
             for index in 0..left.len().min(right.len()) {
-                compare_json(
+                compare_json_with_tolerances(
                     &left[index],
                     &right[index],
                     ignored,
-                    tolerance,
+                    default_tolerance,
+                    path_tolerances,
                     &format!("{path}[{index}]"),
                     differences,
                 );
@@ -285,11 +308,12 @@ pub fn compare_json(
             let keys = left.keys().chain(right.keys()).cloned().collect::<BTreeSet<_>>();
             for key in keys {
                 match (left.get(&key), right.get(&key)) {
-                    (Some(left), Some(right)) => compare_json(
+                    (Some(left), Some(right)) => compare_json_with_tolerances(
                         left,
                         right,
                         ignored,
-                        tolerance,
+                        default_tolerance,
+                        path_tolerances,
                         &format!("{path}.{key}"),
                         differences,
                     ),
@@ -300,6 +324,55 @@ pub fn compare_json(
         _ if left == right => {}
         _ => differences.push(format!("{path}: {left} != {right}")),
     }
+}
+
+fn tolerance_for_path(
+    path: &str,
+    default_tolerance: f64,
+    path_tolerances: &BTreeMap<String, f64>,
+) -> f64 {
+    if let Some(tolerance) = path_tolerances.get(path) {
+        return *tolerance;
+    }
+    let normalized = normalize_array_indices(path);
+    if let Some(tolerance) = path_tolerances.get(&normalized) {
+        return *tolerance;
+    }
+    for (pattern, tolerance) in path_tolerances {
+        if let Some(prefix) = pattern.strip_suffix(".**") {
+            if normalized == prefix || normalized.starts_with(&format!("{prefix}.")) {
+                return *tolerance;
+            }
+        }
+    }
+    default_tolerance
+}
+
+fn normalize_array_indices(path: &str) -> String {
+    let chars = path.chars().collect::<Vec<_>>();
+    let mut output = String::with_capacity(path.len());
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '[' {
+            let start = index;
+            index += 1;
+            let digits_start = index;
+            while index < chars.len() && chars[index].is_ascii_digit() {
+                index += 1;
+            }
+            if index > digits_start && index < chars.len() && chars[index] == ']' {
+                output.push_str("[*]");
+                index += 1;
+                continue;
+            }
+            output.push(chars[start]);
+            index = start + 1;
+            continue;
+        }
+        output.push(chars[index]);
+        index += 1;
+    }
+    output
 }
 
 fn hash_json(value: &Value, ignored: &BTreeSet<String>) -> Result<String, DeterminismError> {
@@ -446,5 +519,17 @@ mod tests {
         let mut differences = Vec::new();
         compare_json(&left, &right, &ignored, 0.005, "$", &mut differences);
         assert!(differences.is_empty());
+    }
+
+    #[test]
+    fn json_comparison_honors_path_specific_tolerances() {
+        let left = json!({"counters": {"pages": 8}, "signature": {"grid": [0.1]}});
+        let right = json!({"counters": {"pages": 9}, "signature": {"grid": [0.102]}});
+        let ignored = BTreeSet::new();
+        let tolerances = BTreeMap::from([("$.signature.grid[*]".to_string(), 0.003)]);
+        let mut differences = Vec::new();
+        compare_json_with_tolerances(&left, &right, &ignored, 0.0, &tolerances, "$", &mut differences);
+        assert_eq!(differences.len(), 1);
+        assert!(differences[0].contains("$.counters.pages"));
     }
 }
