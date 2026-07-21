@@ -1,0 +1,16 @@
+river_ambience:
+  cascade_particles:
+    enabled: true
+    mist_strength: 0.58
+    cascade_splash_strength: 0.95
+    rapid_droplet_strength: 0.82
+    foam_drift_strength: 0.72
+    spawn_radius_m: 72
+    max_emitters_per_tick: 24
+    rapid_speed_start: 0.72
+    rapid_speed_end: 1.75
+    rapid_droplet_threshold: 0.28
+    rapid_droplets_per_emitter: 2
+    rapid_droplet_gravity: 5.4
+    drop_start: 0.78
+    drop_end: 4.4

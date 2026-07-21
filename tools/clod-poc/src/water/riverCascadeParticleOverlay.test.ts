@@ -4,6 +4,7 @@ import type { EnvironmentQuery, EnvironmentQueryMeta } from "../environment_quer
 import {
   RiverCascadeParticleOverlay,
   cascadeParticleSignal,
+  rapidDropletSpawnSpecs,
 } from "./riverCascadeParticleOverlay.js";
 import { DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS } from "./riverCascadeParticlesRuntime.js";
 import type { RiverDressingSample } from "./riverDressingSampleReader.js";
@@ -124,6 +125,72 @@ describe("cascade particle signal", () => {
     expect(signal).toEqual({ cascade: 0, rapid: 0, foam: 0 });
   });
 
+  it("builds deterministic ballistic droplets for rapid water", () => {
+    const water = sample({ flowX: 0.8, flowZ: 0.6, flowStrength: 3, bedDrop: 0.05 });
+    const signal = cascadeParticleSignal(water, DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS);
+    const first = rapidDropletSpawnSpecs(
+      4,
+      7,
+      3,
+      20,
+      30,
+      water,
+      signal,
+      DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS,
+    );
+    const repeated = rapidDropletSpawnSpecs(
+      4,
+      7,
+      3,
+      20,
+      30,
+      water,
+      signal,
+      DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS,
+    );
+    const nextTick = rapidDropletSpawnSpecs(
+      4,
+      7,
+      4,
+      20,
+      30,
+      water,
+      signal,
+      DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS,
+    );
+
+    expect(first.length).toBeGreaterThan(0);
+    expect(first).toEqual(repeated);
+    expect(nextTick).not.toEqual(first);
+    expect(first.every((entry) => [
+      entry.originX,
+      entry.originY,
+      entry.originZ,
+      entry.velocityX,
+      entry.velocityY,
+      entry.velocityZ,
+      entry.life,
+      entry.strength,
+    ].every(Number.isFinite))).toBe(true);
+    expect(first.every((entry) => entry.life > 0 && entry.strength > 0)).toBe(true);
+  });
+
+  it("rejects rapid droplets below the configured threshold", () => {
+    const water = sample({ flowStrength: 0.8, bedDrop: 0 });
+    const signal = cascadeParticleSignal(water, DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS);
+
+    expect(rapidDropletSpawnSpecs(
+      1,
+      2,
+      1,
+      0,
+      0,
+      water,
+      signal,
+      DEFAULT_RIVER_CASCADE_PARTICLE_SETTINGS,
+    )).toEqual([]);
+  });
+
   it("budgets legacy field probes across frames", () => {
     const sampleForCellSize = vi.fn(() => fieldSample({ depth: 0, bodyMask: 0 }));
     const overlay = new RiverCascadeParticleOverlay(
@@ -143,6 +210,7 @@ describe("cascade particle signal", () => {
       sampleForCellSize.mock.calls.every((call: unknown[]) => call[2] === 16),
     ).toBe(true);
     expect(overlay.getSamplingStats().fallbackSamples).toBeGreaterThan(0);
+    expect(overlay.getStats().rapidDroplets).toBe(0);
     overlay.dispose();
   });
 
