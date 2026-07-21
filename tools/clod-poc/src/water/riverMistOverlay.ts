@@ -3,8 +3,14 @@ import { readActiveBiomeVisualState } from "../environment/biome_visual_state_ru
 import type { BiomeVisualState } from "../environment/biome_visual_state.js";
 import { readActiveEnvironmentQuery } from "../environment_query/runtime.js";
 import type { EnvironmentQuery } from "../environment_query/types.js";
+import {
+  createLargePropOcclusionSample,
+  type LargePropOcclusionField,
+} from "../props/large_prop_occlusion_field.js";
+import { readActiveLargePropOcclusionField } from "../props/large_prop_occlusion_runtime.js";
 import type { WaterField } from "./waterField.js";
 import { RiverMistParticlePool } from "./riverMistParticlePool.js";
+import { riverMistPropTransmission } from "./river_mist_prop_occlusion.js";
 import {
   riverMistSampleFromEnvironment,
   riverMistSampleFromWaterField,
@@ -25,12 +31,15 @@ export interface RiverMistOverlayStats {
   readonly lastEnvironmentSamples: number;
   readonly lastFallbackSamples: number;
   readonly lastInvalidSamples: number;
+  readonly lastPropOcclusionSamples: number;
+  readonly lastPropOcclusionClipped: number;
 }
 
 export interface RiverMistOverlayOptions {
   readonly settings: RiverMistRuntimeSettings;
   readonly readBiomeState?: () => BiomeVisualState | null;
   readonly readEnvironmentQuery?: () => EnvironmentQuery | null;
+  readonly readPropOcclusionField?: () => LargePropOcclusionField | null;
   readonly minimumSampleHintM?: number;
 }
 
@@ -44,6 +53,8 @@ export class RiverMistOverlay {
   private readonly pool: RiverMistParticlePool;
   private readonly readBiomeState: () => BiomeVisualState | null;
   private readonly readEnvironmentQuery: () => EnvironmentQuery | null;
+  private readonly readPropOcclusionField: () => LargePropOcclusionField | null;
+  private readonly propOcclusionSample = createLargePropOcclusionSample();
   private readonly halfGrid: number;
   private readonly gridSide: number;
   private readonly sampleHintM: number;
@@ -62,6 +73,8 @@ export class RiverMistOverlay {
   private lastEnvironmentSamples = 0;
   private lastFallbackSamples = 0;
   private lastInvalidSamples = 0;
+  private lastPropOcclusionSamples = 0;
+  private lastPropOcclusionClipped = 0;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -94,6 +107,7 @@ export class RiverMistOverlay {
     this.points.renderOrder = 3;
     this.readBiomeState = options.readBiomeState ?? readActiveBiomeVisualState;
     this.readEnvironmentQuery = options.readEnvironmentQuery ?? readActiveEnvironmentQuery;
+    this.readPropOcclusionField = options.readPropOcclusionField ?? readActiveLargePropOcclusionField;
     this.halfGrid = Math.ceil(particles.spawnRadiusM / particles.spacingM);
     this.gridSide = this.halfGrid * 2 + 1;
     this.sampleHintM = Math.max(
@@ -123,6 +137,8 @@ export class RiverMistOverlay {
       lastEnvironmentSamples: this.lastEnvironmentSamples,
       lastFallbackSamples: this.lastFallbackSamples,
       lastInvalidSamples: this.lastInvalidSamples,
+      lastPropOcclusionSamples: this.lastPropOcclusionSamples,
+      lastPropOcclusionClipped: this.lastPropOcclusionClipped,
     };
   }
 
@@ -148,6 +164,7 @@ export class RiverMistOverlay {
       }
     }
     this.writeParticles();
+    publishPropOcclusionCounters(this.lastPropOcclusionSamples, this.lastPropOcclusionClipped);
   }
 
   dispose(): void {
@@ -172,6 +189,9 @@ export class RiverMistOverlay {
     this.lastEnvironmentSamples = 0;
     this.lastFallbackSamples = 0;
     this.lastInvalidSamples = 0;
+    this.lastPropOcclusionSamples = 0;
+    this.lastPropOcclusionClipped = 0;
+    publishPropOcclusionCounters(0, 0);
   }
 
   private beginScan(cameraPosition: THREE.Vector3): void {
@@ -188,11 +208,14 @@ export class RiverMistOverlay {
     this.lastEnvironmentSamples = 0;
     this.lastFallbackSamples = 0;
     this.lastInvalidSamples = 0;
+    this.lastPropOcclusionSamples = 0;
+    this.lastPropOcclusionClipped = 0;
     this.scanActive = true;
   }
 
   private stepScan(biome: BiomeVisualState): void {
     const particles = this.options.settings.mask.particles;
+    const propOcclusionField = this.readPropOcclusionField();
     const totalCells = this.gridSide * this.gridSide;
     const end = Math.min(totalCells, this.scanCursor + particles.scanCellsPerFrame);
     while (this.scanCursor < end && this.lastEmitters < particles.maxEmittersPerTick) {
@@ -210,7 +233,21 @@ export class RiverMistOverlay {
       const sample = this.sampleMist(x, z);
       this.lastSampledCells += 1;
       if (!sample) continue;
-      const signal = riverMistSignal(sample, biome, this.options.settings);
+      let signal = riverMistSignal(sample, biome, this.options.settings);
+      if (signal > 0.01 && propOcclusionField) {
+        propOcclusionField.sampleInto(x, z, this.propOcclusionSample);
+        if (this.propOcclusionSample.valid) {
+          this.lastPropOcclusionSamples += 1;
+          const spawnY = sample.waterY + particles.surfaceOffsetM * 1.25;
+          const transmission = riverMistPropTransmission(
+            this.propOcclusionSample,
+            spawnY,
+            propOcclusionField.mistClipStrength(),
+          );
+          if (transmission < 0.999) this.lastPropOcclusionClipped += 1;
+          signal *= transmission;
+        }
+      }
       this.lastMaxSignal = Math.max(this.lastMaxSignal, signal);
       if (signal <= 0.01) continue;
       const chance = Math.min(1, signal * particles.spawnProbability);
@@ -311,6 +348,16 @@ function createMistSpriteTexture(): THREE.DataTexture {
   texture.generateMipmaps = false;
   texture.needsUpdate = true;
   return texture;
+}
+
+function publishPropOcclusionCounters(sampled: number, clipped: number): void {
+  const counters = (globalThis as typeof globalThis & {
+    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
+  }).window?.__drusnielClod?.stats?.counters;
+  if (!counters) return;
+  counters["river_mist_prop_occlusion_samples"] = sampled;
+  counters["river_mist_prop_occlusion_clipped"] = clipped;
+  counters["river_mist_prop_occlusion_readbacks"] = 0;
 }
 
 function hash01(x: number, z: number, seed: number): number {

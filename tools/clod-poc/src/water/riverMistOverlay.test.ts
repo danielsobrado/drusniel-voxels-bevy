@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BiomeVisualState } from "../environment/biome_visual_state.js";
 import { cloneEnvironmentalMaskSettings } from "../environment_masks/environment_mask_config.js";
 import type { EnvironmentQuery, EnvironmentQueryMeta } from "../environment_query/types.js";
+import type { LargePropOcclusionField } from "../props/large_prop_occlusion_field.js";
 import { HYDROLOGY_BODY_RIVER } from "./hydrologyGrid.js";
 import type { WaterField } from "./waterField.js";
 import { RiverMistOverlay } from "./riverMistOverlay.js";
@@ -31,17 +32,21 @@ function validMeta(cellSizeM: number): EnvironmentQueryMeta {
   return { source: "hydrology-cpu", revision: 4, valid: true, cellSizeM };
 }
 
+function wetRiverSample() {
+  return {
+    waterY: 4,
+    terrainY: 3.5,
+    depth: 0.5,
+    bodyMask: 1,
+    bodyKind: HYDROLOGY_BODY_RIVER,
+    shoreDistance: 0,
+    flow: { x: 1, z: 0, speed: 1, progress: 0, drop: 0 },
+  };
+}
+
 describe("RiverMistOverlay", () => {
   it("uses the coarse bypass hint and legacy fallback only without an active query", () => {
-    const sampleForCellSize = vi.fn((_x: number, _z: number, _cellSize: number) => ({
-      waterY: 4,
-      terrainY: 3.5,
-      depth: 0.5,
-      bodyMask: 1,
-      bodyKind: HYDROLOGY_BODY_RIVER,
-      shoreDistance: 0,
-      flow: { x: 1, z: 0, speed: 1, progress: 0, drop: 0 },
-    }));
+    const sampleForCellSize = vi.fn((_x: number, _z: number, _cellSize: number) => wetRiverSample());
     const scene = new THREE.Scene();
     const overlay = new RiverMistOverlay(
       scene,
@@ -62,6 +67,8 @@ describe("RiverMistOverlay", () => {
     expect(stats.lastEnvironmentSamples).toBe(0);
     expect(stats.lastFallbackSamples).toBe(stats.lastSampledCells);
     expect(stats.lastInvalidSamples).toBe(0);
+    expect(stats.lastPropOcclusionSamples).toBe(0);
+    expect(stats.lastPropOcclusionClipped).toBe(0);
     expect(sampleForCellSize).toHaveBeenCalled();
     expect(sampleForCellSize.mock.calls.every((call) => call[2] === 20)).toBe(true);
 
@@ -131,6 +138,44 @@ describe("RiverMistOverlay", () => {
     expect(invalidStats.lastInvalidSamples).toBe(invalidStats.lastSampledCells);
     expect(invalidStats.lastFallbackSamples).toBe(0);
     expect(fallback).not.toHaveBeenCalled();
+    overlay.dispose();
+  });
+
+  it("suppresses spawning inside an active fog-occluding prop volume", () => {
+    const sampleForCellSize = vi.fn(() => wetRiverSample());
+    const propField = {
+      sampleInto(_x: number, _z: number, out: Record<string, unknown>) {
+        Object.assign(out, {
+          valid: true,
+          enabled: true,
+          revision: 2,
+          fogOccupancy: 1,
+          fogBottomY: 0,
+          fogTopY: 10,
+        });
+        return out;
+      },
+      mistClipStrength() {
+        return 1;
+      },
+    } as unknown as LargePropOcclusionField;
+    const overlay = new RiverMistOverlay(
+      new THREE.Scene(),
+      { sampleForCellSize } as unknown as WaterField,
+      {
+        settings: runtimeSettings(),
+        readBiomeState: biomeState,
+        readEnvironmentQuery: () => null,
+        readPropOcclusionField: () => propField,
+      },
+    );
+
+    overlay.update(0.2, new THREE.Vector3());
+    const stats = overlay.getStats();
+    expect(stats.lastPropOcclusionSamples).toBeGreaterThan(0);
+    expect(stats.lastPropOcclusionClipped).toBe(stats.lastPropOcclusionSamples);
+    expect(stats.lastEmitters).toBe(0);
+    expect(stats.particles).toBe(0);
     overlay.dispose();
   });
 });
