@@ -8,8 +8,10 @@ const terrainSource = readFileSync(new URL("../rendering/terrain_material_webgpu
 describe("dressing grass-contact consumer", () => {
   it("combines dressing with the existing stone contact authority", () => {
     expect(contactSource).toContain("dressingGrassContactInfluence(worldXZ)");
-    expect(contactSource).toContain("max(stoneSuppress, dressing.suppress)");
-    expect(contactSource).toContain("max(stoneTrample, dressing.trample)");
+    expect(contactSource).toContain("dressing.suppress.mul(uEnabled)");
+    expect(contactSource).toContain("dressing.trample.mul(uEnabled)");
+    expect(contactSource).toContain("max(stoneSuppress, dressingSuppress)");
+    expect(contactSource).toContain("max(stoneTrample, dressingTrample)");
   });
 
   it("keeps directional splay owned by the stone contact field", () => {
