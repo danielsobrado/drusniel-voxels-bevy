@@ -72,13 +72,14 @@ describe("tree impostor baker", () => {
     }
   });
 
-  it("uses a normal-depth shader with linear depth in alpha", () => {
-    expect(TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER).toContain("vTreeImpostorLinearDepth");
+  it("uses a normal-depth shader with center-relative depth in alpha", () => {
+    expect(TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER).toContain("vTreeImpostorRelativeDepth");
     expect(TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER).toContain("normalize(normal)");
+    expect(TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER).toContain("dot(worldPosition.xyz, captureDirection)");
     expect(TREE_IMPOSTOR_NORMAL_DEPTH_VERTEX_SHADER).toContain("far - near");
     expect(TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER).toContain("packedNormal");
-    expect(TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER).toContain("vTreeImpostorLinearDepth");
-    expect(TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER).toContain("gl_FragColor = vec4(packedNormal, vTreeImpostorLinearDepth)");
+    expect(TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER).toContain("vTreeImpostorRelativeDepth");
+    expect(TREE_IMPOSTOR_NORMAL_DEPTH_FRAGMENT_SHADER).toContain("gl_FragColor = vec4(packedNormal, vTreeImpostorRelativeDepth)");
   });
 });
 
