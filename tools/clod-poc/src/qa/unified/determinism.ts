@@ -3,7 +3,7 @@ import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from 
 import { basename, resolve } from "node:path";
 import type { UnifiedQaRegistry } from "./schema.js";
 import type { QaOrchestrationRegistry } from "./orchestration_schema.js";
-import { commandArtifactPaths } from "./command_runner.js";
+import { commandArtifactPaths, type QaResolvedCommandArtifact } from "./command_runner.js";
 import { runQaBattery, type QaBatteryReport } from "./battery_runner.js";
 
 export interface QaDeterminismOptions {
@@ -31,6 +31,11 @@ export interface QaDeterminismReport {
   run_b: QaBatteryReport;
   artifacts: QaDeterminismArtifactResult[];
   failures: string[];
+}
+
+export interface QaNumericTolerancePolicy {
+  defaultTolerance: number;
+  pathTolerances: Readonly<Record<string, number>>;
 }
 
 export async function runQaDeterminism(
@@ -94,8 +99,8 @@ function compareDeclaredArtifacts(
 function compareArtifact(
   commandId: string,
   sceneId: string,
-  left: { path: string; kind: string; ignoreJsonKeys: string[]; numericTolerance: number },
-  right: { path: string; kind: string; ignoreJsonKeys: string[]; numericTolerance: number },
+  left: QaResolvedCommandArtifact,
+  right: QaResolvedCommandArtifact,
 ): QaDeterminismArtifactResult {
   if (!existsSync(left.path) || !existsSync(right.path)) {
     return { command_id: commandId, scene_id: sceneId, artifact: basename(left.path), status: "MISSING", left_hash: null, right_hash: null };
@@ -103,7 +108,10 @@ function compareArtifact(
   if (left.kind === "json") {
     const leftValue = JSON.parse(readFileSync(left.path, "utf8")) as unknown;
     const rightValue = JSON.parse(readFileSync(right.path, "utf8")) as unknown;
-    const differences = compareJsonValues(leftValue, rightValue, new Set(left.ignoreJsonKeys), left.numericTolerance);
+    const differences = compareJsonValues(leftValue, rightValue, new Set(left.ignoreJsonKeys), {
+      defaultTolerance: left.numericTolerance,
+      pathTolerances: left.numericTolerances,
+    });
     return {
       command_id: commandId,
       scene_id: sceneId,
@@ -126,25 +134,61 @@ function compareArtifact(
   };
 }
 
-export function compareJsonValues(left: unknown, right: unknown, ignored: Set<string>, tolerance: number, path = "$", differences: string[] = []): string[] {
+export function compareJsonValues(
+  left: unknown,
+  right: unknown,
+  ignored: Set<string>,
+  tolerance: number | QaNumericTolerancePolicy,
+  path = "$",
+  differences: string[] = [],
+): string[] {
   const key = path.split(".").at(-1) ?? path;
   if (ignored.has(key) || ignored.has(path)) return differences;
+  const policy = typeof tolerance === "number"
+    ? { defaultTolerance: tolerance, pathTolerances: {} }
+    : tolerance;
   if (typeof left === "number" && typeof right === "number") {
-    if (!Number.isFinite(left) || !Number.isFinite(right) || Math.abs(left - right) > tolerance) differences.push(`${path}: ${left} != ${right}`);
+    const allowed = toleranceForPath(path, policy);
+    if (!Number.isFinite(left) || !Number.isFinite(right) || Math.abs(left - right) > allowed) {
+      differences.push(`${path}: ${left} != ${right} (tolerance ${allowed})`);
+    }
     return differences;
   }
   if (Array.isArray(left) && Array.isArray(right)) {
     if (left.length !== right.length) differences.push(`${path}.length: ${left.length} != ${right.length}`);
-    for (let index = 0; index < Math.min(left.length, right.length); index++) compareJsonValues(left[index], right[index], ignored, tolerance, `${path}[${index}]`, differences);
+    for (let index = 0; index < Math.min(left.length, right.length); index++) {
+      compareJsonValues(left[index], right[index], ignored, policy, `${path}[${index}]`, differences);
+    }
     return differences;
   }
   if (isObject(left) && isObject(right)) {
     const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
-    for (const childKey of keys) compareJsonValues(left[childKey], right[childKey], ignored, tolerance, `${path}.${childKey}`, differences);
+    for (const childKey of keys) compareJsonValues(left[childKey], right[childKey], ignored, policy, `${path}.${childKey}`, differences);
     return differences;
   }
   if (left !== right) differences.push(`${path}: ${String(left)} != ${String(right)}`);
   return differences;
+}
+
+function toleranceForPath(path: string, policy: QaNumericTolerancePolicy): number {
+  const exact = policy.pathTolerances[path];
+  if (exact !== undefined) return exact;
+  const normalized = path.replace(/\[\d+\]/gu, "[*]");
+  const normalizedTolerance = policy.pathTolerances[normalized];
+  if (normalizedTolerance !== undefined) return normalizedTolerance;
+  for (const [pattern, value] of Object.entries(policy.pathTolerances)) {
+    if (pathPatternMatches(pattern, path)) return value;
+  }
+  return policy.defaultTolerance;
+}
+
+function pathPatternMatches(pattern: string, path: string): boolean {
+  const expression = pattern
+    .replace(/[.+?^${}()|[\]\\]/gu, "\\$&")
+    .replaceAll("\\[\\*\\]", "\\[\\d+\\]")
+    .replaceAll("**", ".*")
+    .replaceAll("*", "[^.\\[]+");
+  return new RegExp(`^${expression}$`, "u").test(path);
 }
 
 function sameCommandOutcomes(left: QaBatteryReport, right: QaBatteryReport): boolean {
