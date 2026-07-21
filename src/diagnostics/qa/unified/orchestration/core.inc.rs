@@ -94,6 +94,7 @@ pub fn deterministic_artifacts(
                 kind: artifact.kind,
                 ignore_json_keys: artifact.ignore_json_keys.clone(),
                 numeric_tolerance: artifact.numeric_tolerance,
+                numeric_tolerances: artifact.numeric_tolerances.clone(),
             })
         })
         .collect()
@@ -263,6 +264,14 @@ fn validate_registry(
             }
             if !artifact.numeric_tolerance.is_finite() || artifact.numeric_tolerance < 0.0 {
                 return invalid(format!("command {} artifact numeric_tolerance is invalid", command.id));
+            }
+            for (path, tolerance) in &artifact.numeric_tolerances {
+                if !path.starts_with("$.") {
+                    return invalid(format!("command {} artifact tolerance path must start with $.", command.id));
+                }
+                if !tolerance.is_finite() || *tolerance < 0.0 {
+                    return invalid(format!("command {} artifact tolerance for {path} is invalid", command.id));
+                }
             }
         }
     }
