@@ -5,10 +5,13 @@ qa_path_ownership:
     - id: qa-infrastructure
       patterns:
         - validation/**
+        - tools/clod-poc/package.json
+        - tools/clod-poc/vite*.ts
         - tools/clod-poc/src/qa/**
         - tools/clod-poc/tools/qa-*.ts
         - tools/clod-poc/tools/lookdev-gallery.ts
         - tools/clod-poc/config/lookdev_qa.yaml
+        - tools/clod-poc/config/qa_path_ownership.yaml
       battery: clod-smoke
       scripts: []
     - id: streaming-terrain
