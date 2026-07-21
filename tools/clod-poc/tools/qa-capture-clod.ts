@@ -34,6 +34,7 @@ interface Args {
 }
 
 interface SceneCaptureEnvironment extends Record<string, unknown> {
+  cacheKey: unknown;
   convergence: {
     initial: QaConvergenceEvidence;
     positioned: QaConvergenceEvidence;
@@ -76,10 +77,12 @@ async function main(): Promise<void> {
       schema_version: 2,
       target: "clod-poc",
       authoritative: process.platform === "win32"
+        && expectedBuild.branch === "main"
         && hardwareGpu
         && expectedBuild.commitSha !== "unknown"
         && !expectedBuild.workingTreeDirty,
       repository_commit_sha: expectedBuild.commitSha,
+      repository_branch: expectedBuild.branch,
       working_tree_dirty: expectedBuild.workingTreeDirty,
       package_lock_sha256: expectedBuild.packageLockSha256,
       os_version: `${process.platform}-${process.arch}`,
@@ -91,6 +94,10 @@ async function main(): Promise<void> {
       viewport: first["viewport"] ?? null,
       device_pixel_ratio: first["devicePixelRatio"] ?? null,
       runtime_build: first["build"] ?? null,
+      world_cache_keys: sceneEnvironments.map((environment, index) => ({
+        scene_id: selected[index]?.id ?? `scene-${index}`,
+        key: environment.cacheKey,
+      })),
       scenes: selected.map((scene) => scene.id),
       captured_utc: new Date().toISOString(),
     });
@@ -235,11 +242,15 @@ async function captureScene(
       signature,
     });
     writeJson(resolve(sceneDir, "actual.signature.json"), signature);
-    const captured = await page.evaluate(async () => ({
-      environment: window.__drusnielQa?.environment() ?? null,
-      pose: window.__drusnielQa?.getPose() ?? null,
-      worldState: window.__drusnielQa?.worldState() ?? null,
-    }));
+    const captured = await page.evaluate(async () => {
+      const scope = window as typeof window & { __drusnielAcceptanceWorldCacheKey?: unknown };
+      return {
+        environment: window.__drusnielQa?.environment() ?? null,
+        pose: window.__drusnielQa?.getPose() ?? null,
+        worldState: window.__drusnielQa?.worldState() ?? null,
+        cacheKey: scope.__drusnielAcceptanceWorldCacheKey ?? null,
+      };
+    });
     const stableCounters = Object.fromEntries(
       Object.entries(stats.counters)
         .filter(([key]) => /(?:signature|hash|seed|triangles|draw_calls|visible|nodes_rendered|pages_applied|readbacks)$/u.test(key))
@@ -255,6 +266,7 @@ async function captureScene(
       requested_world_state: state,
       applied_world_state: captured.worldState,
       world_mode: scene.launch.world_mode,
+      world_cache_key: captured.cacheKey,
       image: { width: image.width, height: image.height, probes, signature },
       stable_counters: stableCounters,
     });
@@ -262,11 +274,13 @@ async function captureScene(
       schema_version: 1,
       url,
       attempt,
+      world_cache_key: captured.cacheKey,
       convergence: { initial, positioned, frozen },
       messages,
     });
     return {
       ...((captured.environment ?? {}) as Record<string, unknown>),
+      cacheKey: captured.cacheKey,
       browser_version: await page.evaluate(() => navigator.userAgent),
       convergence: { initial, positioned, frozen },
     };
@@ -321,8 +335,10 @@ function sceneUrl(scene: UnifiedQaScene): string {
     taaJitter: "0",
     treeWind: "0",
     grassWind: "0",
+    timeOfDayHours: String(scene.launch.lighting.time_of_day_hours),
     sunElevationDeg: String(scene.launch.lighting.sun_elevation_deg),
     sunAzimuthDeg: String(scene.launch.lighting.sun_azimuth_deg),
+    weather: scene.launch.weather.precipitation === "none" ? "off" : scene.launch.weather.precipitation,
   };
   for (const [key, value] of Object.entries(scene.launch.flags)) {
     params[key] = typeof value === "boolean" ? (value ? "1" : "0") : String(value);
