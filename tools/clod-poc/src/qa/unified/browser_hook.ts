@@ -115,8 +115,7 @@ export function installBrowserQaHook(): DrusnielQaHook {
     },
     endSequence: async () => {
       sequenceClock = null;
-      runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "final", proceduralDebug: "final" });
-      runtime().setQaDiagnosticBuffer?.("final");
+      setFinalDiagnosticState(runtime());
       await settleRuntime(runtime(), 1);
     },
     captureDiagnosticBuffer: async (kind) => {
@@ -126,19 +125,20 @@ export function installBrowserQaHook(): DrusnielQaHook {
         const canvas = document.querySelector("canvas");
         if (!(canvas instanceof HTMLCanvasElement)) throw new Error("render canvas is missing");
         const dataUrl = canvas.toDataURL("image/png");
-        runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "final" });
+        setFinalDiagnosticState(runtime());
         await settleRuntime(runtime(), 1);
         return dataUrl;
       }
       const setBuffer = runtime().setQaDiagnosticBuffer;
       if (!setBuffer) throw new Error("runtime diagnostic-buffer capture is unavailable");
-      setBuffer(kind);
+      if (kind === "final") setFinalDiagnosticState(runtime());
+      else setBuffer(kind);
       await settleRuntime(runtime(), 1);
       const canvas = document.querySelector("canvas");
       if (!(canvas instanceof HTMLCanvasElement)) throw new Error("render canvas is missing");
       const dataUrl = canvas.toDataURL("image/png");
       if (kind !== "final") {
-        setBuffer("final");
+        setFinalDiagnosticState(runtime());
         await settleRuntime(runtime(), 1);
       }
       return dataUrl;
@@ -151,7 +151,8 @@ export function installBrowserQaHook(): DrusnielQaHook {
       }
       const setBuffer = runtime().setQaDiagnosticBuffer;
       if (!setBuffer) throw new Error("runtime diagnostic-buffer capture is unavailable");
-      setBuffer(kind);
+      if (kind === "final") setFinalDiagnosticState(runtime());
+      else setBuffer(kind);
       await settleRuntime(runtime(), 1);
     },
     runSequenceEvent: async (action) => {
@@ -163,7 +164,7 @@ export function installBrowserQaHook(): DrusnielQaHook {
       }
       else if (action === "streaming-on") runtime().setTerrainStreamingEnabled?.(true);
       else if (action === "ownership-debug") runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "ownership" });
-      else runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "final", proceduralDebug: "final" });
+      else setFinalDiagnosticState(runtime());
       await settleRuntime(runtime(), 1);
     },
   };
@@ -190,6 +191,11 @@ function validateWorldState(state: QaWorldState): QaWorldState {
     throw new Error("QA world state precipitation must not be empty");
   }
   return { ...state };
+}
+
+function setFinalDiagnosticState(runtime: ClodHooks): void {
+  runtime.setAcceptanceSceneOptions?.({ farClipmapDebug: "final", proceduralDebug: "final" });
+  runtime.setQaDiagnosticBuffer?.("final");
 }
 
 async function settleRuntime(runtime: ClodHooks, frames: number): Promise<void> {
