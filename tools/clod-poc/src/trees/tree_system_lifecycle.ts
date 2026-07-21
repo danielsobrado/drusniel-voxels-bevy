@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSpeciesId } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
+import { disposeTreePatchGeometry } from "./tree_system_patch_mesh_factory.js";
 
 export type TreeSystemMeshGrid = Record<TreeSpeciesId, Record<TreeLod, THREE.InstancedMesh>>;
 
@@ -25,7 +26,9 @@ export function disposeTreeMeshGrid(meshes: TreeSystemMeshGrid): void {
         disposeMaterial(depthTwin.material);
         depthTwin.dispose();
       }
-      mesh.geometry.dispose();
+      // Vertex buffers are shared with the species/LOD template; only the patch's
+      // own instance attributes are released here.
+      disposeTreePatchGeometry(mesh.geometry);
       // Colour materials are shared and owned by TreeSystemAssets.
       mesh.dispose();
     }

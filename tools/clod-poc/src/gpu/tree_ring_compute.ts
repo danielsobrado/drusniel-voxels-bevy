@@ -566,20 +566,32 @@ export class TreeGpuRingCompute {
   destroy(): void {
     this.generation++;
     this.runningReadbacks = 0;
-    this.paramBuffer.destroy();
-    this.counterBuffer.destroy();
-    this.shadowCounterBuffer.destroy();
-    this.visibleClusterMaskBuffer.destroy();
-    this.activeSlotBuffer.destroy();
-    this.fallbackShadowCellBuffer?.destroy();
-    this.fallbackShadowIndirectBuffer?.destroy();
-    this.digEdits.destroy();
-    this.fieldParams.destroy();
-    this.hydroTexture.destroy();
+    // These buffers/textures back the compute dispatch and the indirect tree draw.
+    // Destroying them synchronously — e.g. from a settings toggle between frames —
+    // frees them while a submit already on the queue still references them, which the
+    // WebGPU backend reports as "buffer used in submit while destroyed". Defer the
+    // teardown until the GPU has drained the work already submitted.
+    const pending: Array<{ destroy(): void }> = [
+      this.paramBuffer,
+      this.counterBuffer,
+      this.shadowCounterBuffer,
+      this.visibleClusterMaskBuffer,
+      this.activeSlotBuffer,
+      this.digEdits,
+      this.fieldParams,
+      this.hydroTexture,
+    ];
+    if (this.fallbackShadowCellBuffer) pending.push(this.fallbackShadowCellBuffer);
+    if (this.fallbackShadowIndirectBuffer) pending.push(this.fallbackShadowIndirectBuffer);
     for (const slot of this.counterReadbacks) {
+      // A busy readback buffer is mapped; destroying it now would reject the pending
+      // map, so it self-destroys once the map settles. Idle ones join the deferred batch.
       if (slot.busy) slot.destroyAfterMap = true;
-      else slot.buffer.destroy();
+      else pending.push(slot.buffer);
     }
+    void this.device.queue.onSubmittedWorkDone().then(() => {
+      for (const resource of pending) resource.destroy();
+    });
   }
 
   private prepareActiveSlotIndices(source: Uint32Array | undefined): { data: Uint32Array; count: number; paddedCount: number } {

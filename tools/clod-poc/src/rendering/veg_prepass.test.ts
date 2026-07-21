@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { EqualDepth } from "three";
+import { LessEqualDepth } from "three";
 import { depthPrepassTwin } from "./veg_prepass.js";
 
 describe("depthPrepassTwin", () => {
@@ -12,7 +12,7 @@ describe("depthPrepassTwin", () => {
 
     expect(twin.geometry).toBe(mesh.geometry);
     expect(mesh.material).not.toBe(sourceMaterial);
-    expect((mesh.material as THREE.Material).depthFunc).toBe(EqualDepth);
+    expect((mesh.material as THREE.Material).depthFunc).toBe(LessEqualDepth);
     expect((mesh.material as THREE.Material).depthWrite).toBe(false);
     expect(sourceMaterial.depthWrite).toBe(true);
   });
@@ -29,7 +29,7 @@ describe("depthPrepassTwin", () => {
 
     expect(twin.geometry).toBe(mesh.geometry);
     expect(mesh.material).toBe(sourceMaterial);
-    expect(sourceMaterial.depthFunc).toBe(EqualDepth);
+    expect(sourceMaterial.depthFunc).toBe(LessEqualDepth);
     expect(sourceMaterial.depthWrite).toBe(false);
   });
 

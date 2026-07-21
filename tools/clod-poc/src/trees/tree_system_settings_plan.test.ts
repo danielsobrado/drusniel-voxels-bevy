@@ -175,4 +175,26 @@ describe("tree system settings update planner", () => {
     expect(plan.clearGpuRing).toBe(true);
     expect(plan.nextGpuStatus).toBe("fallback-cpu");
   });
+
+  it("does not tear down the GPU ring for policy-only gpu flags", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+
+    for (const patch of [
+      { fallbackToCpu: !settings.gpu.fallbackToCpu },
+      { debugShowGpuCounts: !settings.gpu.debugShowGpuCounts },
+      { debugValidateAgainstCpu: !settings.gpu.debugValidateAgainstCpu },
+    ]) {
+      const plan = planTreeSystemSettingsUpdate(settings, { gpu: { ...settings.gpu, ...patch } }, key);
+      expect(plan.clearGpuRing).toBe(false);
+    }
+  });
+
+  it("still rebuilds the GPU ring when a resource-owning gpu flag changes", () => {
+    const settings = cloneTreeSettings();
+    const key = treeGeometryKey(settings);
+    const plan = planTreeSystemSettingsUpdate(settings, { gpu: { ...settings.gpu, maxVisible: settings.gpu.maxVisible + 1 } }, key);
+
+    expect(plan.clearGpuRing).toBe(true);
+  });
 });
