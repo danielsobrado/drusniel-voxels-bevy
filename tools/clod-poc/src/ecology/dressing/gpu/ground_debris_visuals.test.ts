@@ -44,8 +44,8 @@ describe("ground debris visual profiles", () => {
       expect(luminance(profile.wetColor)).toBeLessThan(luminance(profile.baseColor));
       expect(profile.wetRoughness).toBeLessThan(profile.dryRoughness);
     }
-    expect(groundDebrisWetMix(-2, groundDebrisVisualProfile("river_cobbles")!)).toBe(0);
-    expect(groundDebrisWetMix(2, groundDebrisVisualProfile("river_cobbles")!)).toBe(1);
+    expect(groundDebrisWetMix(-2)).toBe(0);
+    expect(groundDebrisWetMix(2)).toBe(1);
   });
 
   it("does not claim unrelated ecological dressing classes", () => {
