@@ -14,7 +14,7 @@ import { resolveWaterQualityTier, type WaterQualityTier } from "./water_quality_
 
 export interface WaterFoamRuntimeDiagnostics {
   readonly modelRevision: number;
-  readonly modelName: "coherent-fbm-flow-sun-distance-v4";
+  readonly modelName: "coherent-fbm-flow-sun-distance-v5";
   readonly qualityTier: WaterQualityTier;
   readonly maxCoverage: number;
   readonly patternStart: number;
@@ -52,7 +52,7 @@ export function getWaterFoamRuntimeDiagnostics(
   const distanceFade = getWaterFoamDistanceFadeState();
   return {
     modelRevision: WATER_FOAM_MODEL_REVISION,
-    modelName: "coherent-fbm-flow-sun-distance-v4",
+    modelName: "coherent-fbm-flow-sun-distance-v5",
     qualityTier: resolveWaterQualityTier(searchParams),
     maxCoverage: WATER_FOAM_MAX_COVERAGE,
     patternStart: WATER_FOAM_PATTERN_START,
