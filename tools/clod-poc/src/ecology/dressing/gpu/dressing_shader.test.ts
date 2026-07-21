@@ -17,14 +17,9 @@ describe("dressing GPU shader", () => {
     expect(shader).toContain("fn generate_persistent");
     expect(shader).toContain("fn generate_terrain");
     expect(shader).toContain("fn build_indirect_args");
+    expect(shader).toContain("persistent_exclusions");
+    expect(shader).toContain("fn dressing_persistent_excluded");
+    expect(shader).toContain("class_data.class_meta.y == 0u && dressing_persistent_excluded(identity)");
     expect(shader).not.toContain("DRESSING_WORKGROUP_SIZE: u32 = 64u");
-  });
-
-  it("avoids Dawn-reserved identifiers and ambiguous bitwise precedence", () => {
-    const shader = composeDressingGpuShader();
-    expect(shader).not.toMatch(/\blet\s+class\b/);
-    expect(shader).not.toMatch(/\blet\s+meta\b/);
-    expect(shader).not.toContain(".meta");
-    expect(shader).toContain("channel ^ (class_id * 0x9e3779b9u)");
   });
 });

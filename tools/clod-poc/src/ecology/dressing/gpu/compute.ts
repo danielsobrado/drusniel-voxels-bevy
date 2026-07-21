@@ -7,6 +7,7 @@ import { getDigEditsSnapshot, getDigEditRevision } from "../../../terrain/terrai
 import { resolveDigEdits, type ResolvedDigEdit } from "../../../gpu/terrain_field_core.js";
 import { heightfieldTileGpuAtlasBindings } from "../../../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
 import type { DressingConfig, DressingQuality } from "../config.js";
+import { readPersistentDressingExclusions } from "../saved_exclusions.js";
 import {
   DRESSING_GPU_ACTIVE_RADIUS_M,
   DRESSING_GPU_CLASS_PARAM_WORDS,
@@ -19,12 +20,13 @@ import {
 } from "./layouts.js";
 import type { DressingGpuOutputBuffers } from "./render_resources.js";
 
-const PARAM_WORDS = 20;
+const PARAM_WORDS = 24;
 const PARAM_BYTES = PARAM_WORDS * Uint32Array.BYTES_PER_ELEMENT;
 const COUNTER_BYTES = DRESSING_GPU_GROUP_COUNT * Uint32Array.BYTES_PER_ELEMENT;
 const CLASS_PARAM_BYTES = (DRESSING_GPU_GROUP_COUNT / DRESSING_GPU_LOD_COUNT)
   * DRESSING_GPU_CLASS_PARAM_WORDS
   * Uint32Array.BYTES_PER_ELEMENT;
+const EXCLUSION_ENTRY_BYTES = 2 * Uint32Array.BYTES_PER_ELEMENT;
 
 type PipelineName = "clear_counters" | "generate_persistent" | "generate_terrain" | "build_indirect_args";
 
@@ -47,6 +49,8 @@ export interface DressingGpuComputeStats {
   readonly dispatches: number;
   readonly canopyAuthorityActive: boolean;
   readonly canonicalHeightAuthorityActive: boolean;
+  readonly persistentExclusionCount: number;
+  readonly persistentExclusionRevision: number;
 }
 
 export class DressingGpuCompute {
@@ -55,6 +59,7 @@ export class DressingGpuCompute {
   private readonly counterBuffer: GPUBuffer;
   private readonly fieldParams: GPUBuffer;
   private digEdits: GPUBuffer;
+  private persistentExclusions: GPUBuffer;
   private readonly hydroTexture: GPUTexture;
   private readonly hydroSampler: GPUSampler;
   private canopyAuxTexture: GPUTexture;
@@ -65,6 +70,8 @@ export class DressingGpuCompute {
   private readonly pipelines: Record<PipelineName, GPUComputePipeline>;
   private readonly paramsScratch = new ArrayBuffer(PARAM_BYTES);
   private lastDigEditRevision = -1;
+  private persistentExclusionRevision = -1;
+  private persistentExclusionCount = 0;
   private submitMs = 0;
   private dispatches = 0;
 
@@ -87,6 +94,10 @@ export class DressingGpuCompute {
     this.digEdits = this.createDigEditsBuffer(edits);
     this.writeFieldParams(edits.length);
     this.lastDigEditRevision = getDigEditRevision();
+    const exclusions = readPersistentDressingExclusions();
+    this.persistentExclusions = this.createPersistentExclusionBuffer(exclusions.packed);
+    this.persistentExclusionRevision = exclusions.revision;
+    this.persistentExclusionCount = exclusions.count;
     device.queue.writeBuffer(this.classParamsBuffer, 0, gpuLayout.packed);
     this.hydroTexture = createTreeHydrologyTexture(device, hydrologyData);
     this.hydroSampler = device.createSampler({ label: "dressing GPU hydro sampler", magFilter: "nearest", minFilter: "nearest" });
@@ -124,6 +135,7 @@ export class DressingGpuCompute {
       { binding: 12, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
       { binding: 13, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
       { binding: 14, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+      storage(15, "read-only-storage"),
     ] });
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
     const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({
@@ -153,6 +165,7 @@ export class DressingGpuCompute {
   dispatch(input: DressingGpuDispatchParams): void {
     this.syncDigEdits();
     this.syncCanopyTextures();
+    this.syncPersistentExclusions();
     const f32 = new Float32Array(this.paramsScratch);
     const u32 = new Uint32Array(this.paramsScratch);
     f32.fill(0);
@@ -175,6 +188,8 @@ export class DressingGpuCompute {
     u32[17] = this.gpuLayout.persistentCandidateEnd >>> 0;
     u32[18] = this.gpuLayout.terrainCandidateStart >>> 0;
     u32[19] = this.gpuLayout.terrainCandidateEnd >>> 0;
+    u32[20] = this.persistentExclusionCount >>> 0;
+    u32[21] = this.persistentExclusionRevision >>> 0;
     this.device.queue.writeBuffer(this.paramBuffer, 0, this.paramsScratch);
 
     const encoder = this.device.createCommandEncoder({ label: "dressing GPU authority encoder" });
@@ -205,6 +220,8 @@ export class DressingGpuCompute {
       dispatches: this.dispatches,
       canopyAuthorityActive: this.canopySource !== null,
       canonicalHeightAuthorityActive: true,
+      persistentExclusionCount: this.persistentExclusionCount,
+      persistentExclusionRevision: this.persistentExclusionRevision,
     };
   }
 
@@ -214,6 +231,7 @@ export class DressingGpuCompute {
     this.counterBuffer.destroy();
     this.fieldParams.destroy();
     this.digEdits.destroy();
+    this.persistentExclusions.destroy();
     this.hydroTexture.destroy();
     if (this.ownsCanopyTextures) {
       this.canopyAuxTexture.destroy();
@@ -255,6 +273,17 @@ export class DressingGpuCompute {
     this.bindGroup = this.createBindGroup();
   }
 
+  private syncPersistentExclusions(): void {
+    const snapshot = readPersistentDressingExclusions();
+    if (snapshot.revision === this.persistentExclusionRevision) return;
+    const previous = this.persistentExclusions;
+    this.persistentExclusions = this.createPersistentExclusionBuffer(snapshot.packed);
+    this.persistentExclusionRevision = snapshot.revision;
+    this.persistentExclusionCount = snapshot.count;
+    this.bindGroup = this.createBindGroup();
+    previous.destroy();
+  }
+
   private createBindGroup(): GPUBindGroup {
     const canonical = heightfieldTileGpuAtlasBindings(this.device);
     return this.device.createBindGroup({ label: "dressing GPU authority bind group", layout: this.layout, entries: [
@@ -273,12 +302,25 @@ export class DressingGpuCompute {
       { binding: 12, resource: { buffer: canonical.params } },
       { binding: 13, resource: this.canopyAuxTexture.createView() },
       { binding: 14, resource: this.canopyDetailTexture.createView() },
+      { binding: 15, resource: { buffer: this.persistentExclusions } },
     ] });
   }
 
   private createDigEditsBuffer(edits: readonly ResolvedDigEdit[]): GPUBuffer {
     const buffer = this.device.createBuffer({ label: "dressing GPU dig edits", size: Math.max(1, edits.length) * DIG_EDIT_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.device.queue.writeBuffer(buffer, 0, packDigEdits(edits));
+    return buffer;
+  }
+
+  private createPersistentExclusionBuffer(packed: Uint32Array): GPUBuffer {
+    const buffer = this.device.createBuffer({
+      label: "dressing GPU persistent exclusions",
+      size: Math.max(EXCLUSION_ENTRY_BYTES, packed.byteLength),
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    if (packed.byteLength > 0) {
+      this.device.queue.writeBuffer(buffer, 0, packed.buffer as ArrayBuffer, packed.byteOffset, packed.byteLength);
+    }
     return buffer;
   }
 
@@ -311,11 +353,9 @@ function createCanopyFallbackTextures(device: GPUDevice): { aux: GPUTexture; det
   return { aux: create("dressing GPU canopy fallback aux"), detail: create("dressing GPU canopy fallback detail") };
 }
 
-
 export function dressingGpuComputeUnsupportedReason(device: GPUDevice): string | null {
-  const requiredStorageBuffers = 5;
+  const requiredStorageBuffers = 6;
   return device.limits.maxStorageBuffersPerShaderStage >= requiredStorageBuffers
     ? null
     : `dressing GPU authority requires ${requiredStorageBuffers} storage buffers per shader stage`;
 }
-

@@ -13,6 +13,7 @@ struct DressingParams {
   hydro_atlas: vec4<f32>,
   canopy_meta: vec4<f32>,
   category_ranges: vec4<u32>,
+  persistence_meta: vec4<u32>,
 };
 
 struct DressingClassParams {
@@ -55,6 +56,7 @@ struct DressingRecord {
 @group(0) @binding(9) var hydro_atlas_texture: texture_2d<f32>;
 @group(0) @binding(13) var canopy_aux_texture: texture_2d<f32>;
 @group(0) @binding(14) var canopy_detail_texture: texture_2d<f32>;
+@group(0) @binding(15) var<storage, read> persistent_exclusions: array<vec2<u32>>;
 
 fn placement_hydro_atlas_params() -> vec4<f32> {
   return params.hydro_atlas;
@@ -87,6 +89,27 @@ fn dressing_identity_roll(identity: vec2<u32>, salt: u32) -> vec2<f32> {
 
 fn dressing_identity_roll_swapped(identity: vec2<u32>, salt: u32) -> vec2<f32> {
   return treePcg2d01(bitcast<i32>(identity.y), bitcast<i32>(identity.x), salt);
+}
+
+fn dressing_identity_before(left: vec2<u32>, right: vec2<u32>) -> bool {
+  return left.y < right.y || (left.y == right.y && left.x < right.x);
+}
+
+fn dressing_persistent_excluded(identity: vec2<u32>) -> bool {
+  var lower = 0u;
+  var upper = params.persistence_meta.x;
+  loop {
+    if (lower >= upper) { break; }
+    let middle = lower + (upper - lower) / 2u;
+    let candidate = persistent_exclusions[middle];
+    if (candidate.x == identity.x && candidate.y == identity.y) { return true; }
+    if (dressing_identity_before(candidate, identity)) {
+      lower = middle + 1u;
+    } else {
+      upper = middle;
+    }
+  }
+  return false;
 }
 
 fn dressing_class_for_slot(slot: u32) -> u32 {
@@ -297,6 +320,7 @@ fn generate_and_compact(slot: u32) {
   if (class_data.class_meta.y == DRESSING_PARENT_OWNERSHIP || class_data.class_meta.w == 0u) { return; }
   let cell = dressing_candidate_cell(slot, class_index);
   let identity = dressing_stable_identity(cell, class_index);
+  if (class_data.class_meta.y == 0u && dressing_persistent_excluded(identity)) { return; }
   let acceptance_rolls = dressing_identity_roll(identity, 0x4100u + class_index + 1u);
   let spacing = max(0.5, class_data.grid_density.y);
   let jitter_x = acceptance_rolls.y;

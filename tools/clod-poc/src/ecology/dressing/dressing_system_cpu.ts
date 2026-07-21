@@ -7,6 +7,7 @@ import {
   type DressingSystemOptions,
 } from "./dressing_system_base.js";
 import { resolveDressingCanopyEcology } from "./dressing_canopy_environment.js";
+import { isPersistentDressingExcludedAt } from "./saved_exclusions.js";
 import type { DressingEnvironmentSample } from "./types.js";
 
 interface DressingSystemInternals {
@@ -85,7 +86,7 @@ export class CpuDressingSystem extends DressingSystemBase {
       exactVoxelSurface: false,
       terrainEdited: false,
       structureExcluded: false,
-      persistentExcluded: false,
+      persistentExcluded: isPersistentDressingExcludedAt(x, z),
       forestEdge: ecology.forestEdge,
       sunExposure: ecology.sunExposure,
       caveMouthFactor: 0,

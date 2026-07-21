@@ -15,6 +15,7 @@ export * from "./integration.js";
 export * from "./persistent_candidates.js";
 export * from "./persistence_bridge.js";
 export * from "./placement_stages.js";
+export * from "./saved_exclusions.js";
 export * from "./stable_id.js";
 export * from "./terrain_candidates.js";
 export * from "./types.js";

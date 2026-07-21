@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const systemSource = readFileSync(new URL("../dressing_system.ts", import.meta.url), "utf8");
 const gpuSystemSource = readFileSync(new URL("./system.ts", import.meta.url), "utf8");
+const computeSource = readFileSync(new URL("./compute.ts", import.meta.url), "utf8");
 const shaderSource = readFileSync(new URL("./dressing.compute.wgsl", import.meta.url), "utf8");
 const renderSource = readFileSync(new URL("./render_resources.ts", import.meta.url), "utf8");
 
@@ -28,5 +29,14 @@ describe("GPU dressing runtime contract", () => {
     expect(shaderSource).toContain("canopy_detail_texture");
     expect(renderSource).toContain("setIndirect");
     expect(renderSource).toContain("StorageInstancedBufferAttribute");
+  });
+
+  it("uploads saved 64-bit exclusions only when their revision changes", () => {
+    expect(computeSource).toContain("readPersistentDressingExclusions");
+    expect(computeSource).toContain("syncPersistentExclusions");
+    expect(computeSource).toContain("snapshot.revision === this.persistentExclusionRevision");
+    expect(computeSource).toContain("binding: 15");
+    expect(computeSource).not.toContain("mapAsync");
+    expect(shaderSource).toContain("dressing_persistent_excluded(identity)");
   });
 });

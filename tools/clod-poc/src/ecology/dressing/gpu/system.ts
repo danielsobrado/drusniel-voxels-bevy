@@ -143,10 +143,14 @@ export class GpuDressingSystem implements DressingSystemLike {
     for (const [name, value] of Object.entries(this.diagnostics)) {
       if (name !== "perClass" && typeof value === "number") counters[name] = value;
     }
+    const stats = this.compute?.stats();
     counters["dressing_gpu_authority"] = 1;
     counters["dressing_cpu_candidate_generation"] = 0;
     counters["dressing_gpu_readbacks"] = 0;
-    counters["dressing_environment_query_gpu_mirror"] = this.compute?.stats().canonicalHeightAuthorityActive ? 1 : 0;
-    counters["dressing_canopy_authority_active"] = this.compute?.stats().canopyAuthorityActive ? 1 : 0;
+    counters["dressing_environment_query_gpu_mirror"] = stats?.canonicalHeightAuthorityActive ? 1 : 0;
+    counters["dressing_canopy_authority_active"] = stats?.canopyAuthorityActive ? 1 : 0;
+    counters["dressing_persistent_exclusion_count"] = stats?.persistentExclusionCount ?? 0;
+    counters["dressing_persistent_exclusion_revision"] = stats?.persistentExclusionRevision ?? 0;
+    counters["dressing_persistent_exclusion_gpu_authority"] = stats ? 1 : 0;
   }
 }
