@@ -1,5 +1,20 @@
 import type * as THREE from "three";
-import type { CustomPropsSettings, PropAssetDef, PropAssetMetadata, PropPlacementScene } from "../props/prop_types.js";
+import type {
+  CustomPropsSettings,
+  PropAssetDef,
+  PropAssetMetadata,
+  PropPlacementScene,
+} from "../props/prop_types.js";
+import {
+  buildPropOccluderSnapshot,
+  emptyPropOccluderSnapshot,
+  type PropOccluderSnapshot,
+} from "../props/prop_occluder_snapshot.js";
+import { LargePropOcclusionField } from "../props/large_prop_occlusion_field.js";
+import {
+  publishLargePropOcclusionCounters,
+  registerActiveLargePropOcclusionField,
+} from "../props/large_prop_occlusion_runtime.js";
 import { PropColliderSet } from "../props/prop_collider.js";
 import { PropSystem } from "../props/prop_system.js";
 import type { PropStats } from "../props/prop_stats.js";
@@ -42,6 +57,8 @@ export interface PropController {
   setEnabled(enabled: boolean): void;
   refreshStats(): void;
   getPlacementSceneSnapshot(): PropPlacementScene;
+  getOccluderSnapshot(): PropOccluderSnapshot;
+  getOcclusionField(): LargePropOcclusionField;
   replacePlacementScene(scene: PropPlacementScene): void;
   resolveSnapPlacement(input: PropSnapPlacementInput): PropSnapPlacementResult | null;
   availablePrefabIds(): string[];
@@ -61,13 +78,33 @@ export function createPropController(deps: PropControllerDeps): PropController {
     gpuBackend: deps.gpuBackend,
   });
   const colliderSet = new PropColliderSet();
+  const occlusionField = new LargePropOcclusionField(deps.settings.occlusion);
+  const unregisterOcclusionField = registerActiveLargePropOcclusionField(occlusionField);
   let collidersEnabled = deps.settings.enabled;
   let forceColliderSync = true;
   let lastColliderSyncAt = Number.NEGATIVE_INFINITY;
   let lastColliderSyncPos: [number, number, number] | null = null;
+  let occluderRevision = 0;
+  let occluderSnapshot = emptyPropOccluderSnapshot();
 
   const refreshStats = () => {
     deps.syncStatsToState?.(system.getStats());
+  };
+
+  const refreshOccluderSnapshot = () => {
+    const access = system as unknown as PropSystemSnapAccess;
+    const placement = system.getPlacementSceneSnapshot();
+    occluderRevision += 1;
+    occluderSnapshot = buildPropOccluderSnapshot({
+      enabled: deps.settings.enabled,
+      revision: occluderRevision,
+      sceneId: placement.sceneId,
+      instances: access.grid?.instances ?? placement.instances,
+      assetById: access.assetById,
+      metadataByAssetId: access.metadataByAssetId,
+      settings: deps.settings.occlusion,
+    });
+    occlusionField.submit(occluderSnapshot);
   };
 
   const shouldSyncColliders = (playerPos: [number, number, number]): boolean => {
@@ -92,9 +129,12 @@ export function createPropController(deps: PropControllerDeps): PropController {
     async init() {
       await system.init();
       forceColliderSync = true;
+      refreshOccluderSnapshot();
       refreshStats();
     },
     update(camera, ringCenter) {
+      occlusionField.step();
+      publishLargePropOcclusionCounters(occlusionField.stats());
       system.update(camera, ringCenter);
       refreshStats();
     },
@@ -109,24 +149,35 @@ export function createPropController(deps: PropControllerDeps): PropController {
       forceColliderSync = false;
     },
     setEnabled(enabled) {
+      const changed = collidersEnabled !== enabled;
       collidersEnabled = enabled;
+      deps.settings.enabled = enabled;
       system.setEnabled(enabled);
       if (!enabled) {
         colliderSet.sync([]);
         system.setCollidersActive(0);
       }
       forceColliderSync = true;
+      if (changed) refreshOccluderSnapshot();
       refreshStats();
     },
     refreshStats,
     getPlacementSceneSnapshot() {
       return system.getPlacementSceneSnapshot();
     },
+    getOccluderSnapshot() {
+      return occluderSnapshot;
+    },
+    getOcclusionField() {
+      return occlusionField;
+    },
     replacePlacementScene(scene) {
+      deps.placementScene = scene;
       system.replacePlacementScene(scene);
       colliderSet.sync([]);
       system.setCollidersActive(0);
       forceColliderSync = true;
+      refreshOccluderSnapshot();
       refreshStats();
     },
     resolveSnapPlacement(input) {
@@ -136,8 +187,11 @@ export function createPropController(deps: PropControllerDeps): PropController {
       return system.availablePrefabIds();
     },
     dispose() {
+      unregisterOcclusionField();
       colliderSet.dispose();
       system.dispose();
+      occluderRevision += 1;
+      occluderSnapshot = emptyPropOccluderSnapshot(occluderRevision);
     },
   };
 }

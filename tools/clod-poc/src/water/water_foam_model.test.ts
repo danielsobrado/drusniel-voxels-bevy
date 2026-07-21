@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  WATER_FOAM_BASE_WEIGHT,
+  WATER_FOAM_DETAIL_WEIGHT,
   WATER_FOAM_MAX_COVERAGE,
+  WATER_FOAM_PATTERN_END,
+  WATER_FOAM_PATTERN_START,
   WATER_FOAM_RIVER_SHORE_ATTENUATION,
   WATER_FOAM_SHADE_COVERAGE_FLOOR,
   evaluateWaterFoam,
@@ -23,6 +27,15 @@ const BASE = {
 } as const;
 
 describe("water foam parity model", () => {
+  it("matches the Fable5 breakup and coverage envelope", () => {
+    expect(WATER_FOAM_PATTERN_START).toBe(0.42);
+    expect(WATER_FOAM_PATTERN_END).toBe(0.85);
+    expect(WATER_FOAM_BASE_WEIGHT).toBe(0.62);
+    expect(WATER_FOAM_DETAIL_WEIGHT).toBe(0.38);
+    expect(WATER_FOAM_BASE_WEIGHT + WATER_FOAM_DETAIL_WEIGHT).toBeCloseTo(1);
+    expect(WATER_FOAM_MAX_COVERAGE).toBe(0.68);
+  });
+
   it("requires both flow speed and local drop for rapid foam", () => {
     expect(rapidFoamEligibility(1, 0, 1)).toBe(0);
     expect(rapidFoamEligibility(0, 1, 1)).toBe(0);

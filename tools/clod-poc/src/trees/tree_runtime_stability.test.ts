@@ -3,7 +3,7 @@ import { cloneTreeSettings } from "./tree_config_defaults.js";
 import { stabilizeRuntimeTreeSettings } from "./tree_runtime_stability.js";
 
 describe("runtime tree stability", () => {
-  it("keeps all distance rings, impostor baking, and configured crossfades while disabling terrain visibility", () => {
+  it("keeps all distance rings and impostor baking while disabling temporal transitions", () => {
     const input = cloneTreeSettings();
     input.gpu.terrainVisibility.enabled = true;
     input.impostors.enabled = true;
@@ -19,11 +19,11 @@ describe("runtime tree stability", () => {
     expect(settings.impostors.enabled).toBe(true);
     expect(settings.gpu.terrainVisibility.enabled).toBe(false);
     expect(settings.impostors.bakeOnStart).toBe(true);
-    expect(settings.impostors.swapOnBake).toBe(true);
+    expect(settings.impostors.swapOnBake).toBe(false);
     expect(settings.impostors.fallbackToPlaceholder).toBe(false);
-    expect(settings.lod.crossfadeEnabled).toBe(true);
-    expect(settings.lod.crossfadeBandM).toBe(20);
-    expect(settings.lod.ditherEnabled).toBe(true);
+    expect(settings.lod.crossfadeEnabled).toBe(false);
+    expect(settings.lod.crossfadeBandM).toBe(0);
+    expect(settings.lod.ditherEnabled).toBe(false);
   });
 
   it("disables crossfade when the configured band is zero", () => {

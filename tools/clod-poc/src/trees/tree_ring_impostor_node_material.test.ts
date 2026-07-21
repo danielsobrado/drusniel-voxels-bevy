@@ -48,10 +48,11 @@ describe("GPU ring baked impostor node material", () => {
     expect(material.version).toBeGreaterThan(version);
   });
 
-  it("updates fade center and lighting without replacing materials", () => {
+  it("updates time, fade center, and lighting without replacing materials", () => {
     const handle = createTreeRingImpostorNodeMaterialHandle(cloneTreeSettings(), buffers(), atlas());
     const material = handle.regularMaterial;
 
+    handle.setTime(1.25);
     handle.setFadeCenter?.(10, 20);
     handle.updateLighting?.({
       sunDirection: new THREE.Vector3(1, 1, 0).normalize(),
@@ -167,7 +168,7 @@ describe("GPU ring baked impostor node material", () => {
     expect(source).toContain("decodeTreeRingImpostorPackedNormal(s00.normal).mul(s00.coverage).mul(w00)");
   });
 
-  it("disposes every owned material and both neutral forest textures", () => {
+  it("disposes every owned material and all neutral textures", () => {
     const textureDispose = vi.spyOn(THREE.DataTexture.prototype, "dispose");
     const handle = createTreeRingImpostorNodeMaterialHandle(cloneTreeSettings(), buffers(), atlas());
     const materials = [handle.regularMaterial, ...Object.values(handle.debugMaterials)];
@@ -176,13 +177,16 @@ describe("GPU ring baked impostor node material", () => {
     handle.dispose();
 
     for (const spy of materialSpies) expect(spy).toHaveBeenCalledTimes(1);
-    expect(textureDispose).toHaveBeenCalledTimes(2);
+    expect(textureDispose).toHaveBeenCalledTimes(3);
     textureDispose.mockRestore();
   });
 });
 
 function materialSource(): string {
-  return readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8");
+  return [
+    readFileSync(new URL("./tree_ring_impostor_node_material.ts", import.meta.url), "utf8"),
+    readFileSync(new URL("./tree_ring_impostor_node_material_base.ts", import.meta.url), "utf8"),
+  ].join("\n");
 }
 
 function buffers(): TreeRingInstanceBuffers {

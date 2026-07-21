@@ -10,9 +10,9 @@ import * as THREE from "three";
 import { VegMeshGrower } from "./veg_mesh_grower.js";
 import { buildLeafCluster, buildSprayAt } from "./veg_leaf_mesh.js";
 import { growSkeleton } from "./veg_skeleton.js";
-import { tubesForSkeleton } from "./veg_tube_mesh.js";
+import { ringsForLevel, tubesForSkeleton } from "./veg_tube_mesh.js";
 import type { Rng } from "./veg_rng.js";
-import type { FoliageCardParams, GrowthInstance, LeafAnchor, SpeciesParams } from "./veg_types.js";
+import type { FoliageCardParams, GrowthInstance, LeafAnchor, SkelBranch, Skeleton, SpeciesParams } from "./veg_types.js";
 
 export type VegLod = 0 | 1 | 2;
 
@@ -41,6 +41,11 @@ interface AnchorSelection {
 }
 
 const LOD_BARK_K: Record<VegLod, number> = { 0: 1, 1: 0.6, 2: 0.32 };
+/** Share of the vertex budget the bark tubes may spend; the rest goes to foliage. */
+const BARK_RESERVE_FRACTION: Record<VegLod, number> = { 0: 0.34, 1: 0.42, 2: 0.52 };
+/** Floors for the bark diet, so a tight budget thins the tree instead of erasing it. */
+const MIN_BARK_LOD_K = 0.3;
+const MAX_BARK_BRANCH_STRIDE = 8;
 const CARD_WIND_WEIGHT = 0.65;
 const CARD_FLUTTER = 0.45;
 const CARD_Z = new THREE.Vector3(0, 0, 1);
@@ -110,6 +115,57 @@ function selectAnchors(
   };
 }
 
+function barkReserveFor(lod: VegLod, vertexBudget: number): number {
+  return vertexBudget * BARK_RESERVE_FRACTION[lod];
+}
+
+/** Vertices `tubesForSkeleton` will emit for these settings; mirrors its ring/stride walk. */
+function predictBarkVertices(
+  branches: readonly SkelBranch[],
+  lodK: number,
+  maxLevel: number,
+  stride: number,
+): number {
+  let total = 0;
+  let bi = 0;
+  for (const br of branches) {
+    if (br.level > maxLevel) continue;
+    if (br.level >= 1 && stride > 1 && bi++ % stride !== 0) continue;
+    total += br.pts.length * (ringsForLevel(br.level, lodK) + 1);
+  }
+  return total;
+}
+
+/**
+ * Thins the bark until its predicted vertex count fits the reserve. Ring resolution
+ * is reduced first (cheap, keeps every branch), then whole branches are strided out.
+ * Without this the L-system skeleton is unbounded and `vertexBudget` only ever
+ * constrained foliage anchors.
+ */
+function fitBarkToBudget(
+  skel: Skeleton,
+  lod: VegLod,
+  vertexBudget: number | undefined,
+  maxLevel: number,
+): { lodK: number; branchStride: number } {
+  const baseLodK = LOD_BARK_K[lod];
+  const baseStride = lod === 2 ? 2 : 1;
+  if (typeof vertexBudget !== "number" || !Number.isFinite(vertexBudget) || vertexBudget <= 0) {
+    return { lodK: baseLodK, branchStride: baseStride };
+  }
+
+  const reserve = barkReserveFor(lod, vertexBudget);
+  let lodK = baseLodK;
+  let stride = baseStride;
+  while (predictBarkVertices(skel.branches, lodK, maxLevel, stride) > reserve && lodK > MIN_BARK_LOD_K) {
+    lodK = Math.max(MIN_BARK_LOD_K, lodK * 0.85);
+  }
+  while (predictBarkVertices(skel.branches, lodK, maxLevel, stride) > reserve && stride < MAX_BARK_BRANCH_STRIDE) {
+    stride++;
+  }
+  return { lodK, branchStride: stride };
+}
+
 function budgetedAnchorTargets(
   sp: SpeciesParams,
   lod: VegLod,
@@ -127,8 +183,7 @@ function budgetedAnchorTargets(
   const leafVertexCost = sp.foliage.kind === "needleSpray"
     ? Math.max(64, sp.foliage.leaf.needleCount * 4 + 10)
     : 17 * Math.max(1, (sp.foliage.clusterSize[0] + sp.foliage.clusterSize[1]) * 0.5);
-  const barkReserve = lod === 0 ? vertexBudget * 0.34 : lod === 1 ? vertexBudget * 0.42 : vertexBudget * 0.52;
-  const foliageBudget = Math.max(0, vertexBudget - barkReserve);
+  const foliageBudget = Math.max(0, vertexBudget - barkReserveFor(lod, vertexBudget));
   const meshBudget = lod === 0 ? foliageBudget * 0.64 : 0;
   const cardBudget = foliageBudget - meshBudget;
 
@@ -149,13 +204,14 @@ export function buildTree(sp: SpeciesParams, rng: Rng, opts: BuildTreeOpts): Bui
     : opts.lod === 1
       ? Math.max(1, anchorLevel - 1)
       : Math.max(1, anchorLevel - 2);
+  const bark = fitBarkToBudget(skel, opts.lod, opts.vertexBudget, maxLevel);
   tubesForSkeleton(grower, skel, rng.fork("tubes"), {
-    lodK: LOD_BARK_K[opts.lod],
+    lodK: bark.lodK,
     uRepeats: sp.barkRepeats,
     barkColor: opts.barkColor,
     flare: { ...sp.flare, phase: rng.float() * Math.PI * 2 },
     maxLevel,
-    branchStride: opts.lod === 2 ? 2 : 1,
+    branchStride: bark.branchStride,
   });
 
   if (sp.foliage && skel.anchors.length > 0) {

@@ -4,6 +4,7 @@ import {
   attachTreePatchInstanceAttributes,
   createTreePatchLodMesh,
   createTreePatchMeshGroup,
+  disposeTreePatchGeometry,
 } from "./tree_system_patch_mesh_factory.js";
 import { TREE_LODS, TREE_SPECIES, type TreeInstance, type TreeLod, type TreeSpeciesId } from "./index.js";
 
@@ -59,6 +60,51 @@ describe("tree patch mesh factory", () => {
     expect(mesh.geometry.getAttribute("treeLodFade").count).toBe(3);
     expect(mesh.geometry.getAttribute("treeLodDitherRole").count).toBe(3);
     expect(mesh.geometry.getAttribute("treeImpostorUvRect").count).toBe(3);
+  });
+
+  it("shares template vertex buffers across patches instead of cloning them", () => {
+    const source = new THREE.PlaneGeometry(1, 2);
+    const material = new THREE.MeshBasicMaterial();
+    const lodMesh = (nodeId: string) => createTreePatchLodMesh({
+      nodeId, species: "oak", lod: "near", capacity: 4, geometry: source, material, castShadow: false,
+    });
+
+    const a = lodMesh("L0:0,0");
+    const b = lodMesh("L0:1,0");
+
+    // Same attribute objects, so the vertex data is uploaded and held once.
+    expect(a.geometry.getAttribute("position")).toBe(source.getAttribute("position"));
+    expect(b.geometry.getAttribute("position")).toBe(source.getAttribute("position"));
+    expect(a.geometry.index).toBe(source.index);
+    // Instance attributes stay per patch.
+    expect(a.geometry.getAttribute("treeWorldXZ")).not.toBe(b.geometry.getAttribute("treeWorldXZ"));
+  });
+
+  it("disposing one patch leaves the shared template buffers intact for other patches", () => {
+    const source = new THREE.PlaneGeometry(1, 2);
+    const material = new THREE.MeshBasicMaterial();
+    const lodMesh = (nodeId: string) => createTreePatchLodMesh({
+      nodeId, species: "oak", lod: "near", capacity: 4, geometry: source, material, castShadow: false,
+    });
+    const a = lodMesh("L0:0,0");
+    const b = lodMesh("L0:1,0");
+
+    const released: string[] = [];
+    a.geometry.addEventListener("dispose", () => {
+      // Whatever is still attached at dispose time is what three will free.
+      released.push(...Object.keys(a.geometry.attributes));
+      if (a.geometry.index) released.push("index");
+    });
+
+    disposeTreePatchGeometry(a.geometry);
+
+    // Only patch-owned instance attributes may be released.
+    expect(released).not.toContain("position");
+    expect(released).not.toContain("index");
+    expect(released).toContain("treeWorldXZ");
+    // The surviving patch and the template are untouched.
+    expect(b.geometry.getAttribute("position")).toBe(source.getAttribute("position"));
+    expect(source.getAttribute("position").array.length).toBeGreaterThan(0);
   });
 
   it("attaches impostor UV rect only for impostor LOD", () => {

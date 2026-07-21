@@ -7,6 +7,11 @@ import { createSunLightCacheRuntime } from "./far_light_cache_runtime.js";
 import { loadBundledSunLightOptions } from "./sun_light_config_loader.js";
 import { createSunLightDebugOverlay } from "./sun_light_debug_overlay.js";
 import { invalidateSunLightGpuAtlas, updateSunLightGpuAtlas } from "./sun_light_gpu_atlas.js";
+import {
+  changedSunLightPropRegions,
+  publishSunLightPropCounters,
+  readSunLightPropHeightState,
+} from "./sun_light_prop_occlusion.js";
 import { sunBinKey, toSunBin } from "./sun_bins.js";
 import { createSunLightRemoteTileBuilder } from "./sun_light_worker_client.js";
 
@@ -24,11 +29,12 @@ function applyQueryOverrides(options: ReturnType<typeof loadBundledSunLightOptio
 
 function stableFrameKey(input: {
   terrainRevision: number;
+  propKey: string;
   tileX: number;
   tileZ: number;
   sunBin: string;
 }): string {
-  return `${input.terrainRevision}|${input.tileX},${input.tileZ}|${input.sunBin}`;
+  return `${input.terrainRevision}|${input.propKey}|${input.tileX},${input.tileZ}|${input.sunBin}`;
 }
 
 function safeTerrainFieldConfig(): ReturnType<typeof getTerrainFieldConfig> | null {
@@ -44,9 +50,11 @@ export function createLightUpdate(args: LightUpdateArgs) {
   applyQueryOverrides(options);
   const provider = createTerrainSummaryLightHeightProvider(args.terrainSummary);
   const changeTracker = createTerrainEditChangeTracker();
+  let propHeightState = readSunLightPropHeightState();
+  provider.setPropOcclusion(propHeightState.payload);
   // Tile builds cost seconds of CPU each; the worker keeps them off the main thread.
-  // The worker samples a heightMax snapshot, so it must be reconfigured whenever the
-  // main-thread heights can have changed (terrain revision bumps, manual refresh).
+  // The worker samples immutable terrain and committed prop-height snapshots, so it must
+  // be reconfigured whenever either source revision changes.
   const remote = options.active ? createSunLightRemoteTileBuilder() : null;
   const configureRemote = (): void => {
     remote?.configure({
@@ -56,6 +64,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
         worldSize: args.terrainSummary.worldSize,
         heightMax: args.terrainSummary.heightMax,
       },
+      propOcclusion: propHeightState.payload,
       options,
     });
   };
@@ -69,6 +78,8 @@ export function createLightUpdate(args: LightUpdateArgs) {
   globals.__drusnielSunLightOptions = options;
   globals.__drusnielSunLightStats = () => cache.stats();
   globals.__drusnielSunLightRefresh = () => {
+    propHeightState = readSunLightPropHeightState();
+    provider.setPropOcclusion(propHeightState.payload);
     cache.markAllStale();
     invalidateSunLightGpuAtlas();
     configureRemote();
@@ -98,6 +109,18 @@ export function createLightUpdate(args: LightUpdateArgs) {
         lastTerrainRevision = terrainRevision;
         lastStableFrameKey = "";
       }
+
+      const nextPropHeightState = readSunLightPropHeightState();
+      if (nextPropHeightState.key !== propHeightState.key) {
+        const regions = changedSunLightPropRegions(propHeightState.payload, nextPropHeightState.payload);
+        propHeightState = nextPropHeightState;
+        provider.setPropOcclusion(propHeightState.payload);
+        if (regions.length > 0) cache.invalidateRegions(regions);
+        configureRemote();
+        lastStableFrameKey = "";
+      }
+
+      publishSunLightPropCounters(propHeightState);
       if (!options.active) {
         invalidateSunLightGpuAtlas();
         overlay.update([], options);
@@ -109,6 +132,7 @@ export function createLightUpdate(args: LightUpdateArgs) {
       const sunBin = sunBinKey(toSunBin(sunVec, options.directionBins));
       const frameKey = stableFrameKey({
         terrainRevision,
+        propKey: propHeightState.key,
         tileX: centerTile.tileX,
         tileZ: centerTile.tileZ,
         sunBin,

@@ -7,6 +7,7 @@
 /perf-p0-*/
 /validation-artifacts/
 /validation-runs/
+/qa-runs/
 /references/
 .history/src/voxel/*
 log.txt
@@ -97,6 +98,7 @@ tools/clod-poc/perf-runs/
 tools/clod-poc/perf-p0-webgpu/
 tools/clod-poc/perf-p0-*/
 tools/clod-poc/acceptance-runs/*
+tools/clod-poc/qa-runs/
 tools/clod-poc/public/tmp/*
 tools/clod-poc/textures/pbr/*.zip
 

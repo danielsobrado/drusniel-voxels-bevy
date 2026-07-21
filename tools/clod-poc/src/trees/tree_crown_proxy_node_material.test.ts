@@ -16,11 +16,16 @@ describe("tree crown proxy node material", () => {
     expect(() => handle.dispose()).not.toThrow();
   });
 
-  it("keeps the proxy placement and mask contract in source", () => {
+  it("keeps proxy dimensions and offsets aligned with morphology", () => {
     expect(source).toContain("treeMorphologyRecordNodes(buffers)");
     expect(source).toContain("positionGeometry");
     expect(source).toContain("uRadius.x.mul(crownWidth)");
+    expect(source).toContain("uRadius.z.mul(crownWidth)");
     expect(source).toContain("uRadius.y.mul(crownFlattening).mul(ageHeightScale)");
+    expect(source).toContain("record.morphology1.x.mul(uRadius.x).mul(crownWidth)");
+    expect(source).toContain("record.morphology1.y.mul(uRadius.z).mul(crownWidth)");
+    expect(source).toContain(".mul(uCenterY)");
+    expect(source).toContain(".mul(ageHeightScale)");
     expect(source).toContain("treeCrownProxyDimensions(settings, species)");
     expect(source).toContain("smoothstep(float(0.70), float(1.0), radial)");
     expect(source).toContain("treeMorphologyHash01Node(");

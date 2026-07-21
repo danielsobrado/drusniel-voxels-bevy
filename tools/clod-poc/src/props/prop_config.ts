@@ -10,6 +10,7 @@ import type {
   PropGpuSettings,
   PropLightingProxy,
   PropLodPolicy,
+  PropOcclusionSettings,
   PropPlacementRules,
   PropShadowSettings,
   PropSpatialSettings,
@@ -53,6 +54,14 @@ export const DEFAULT_CUSTOM_PROPS_SETTINGS: CustomPropsSettings = {
   },
   shadows: {
     maxShadowProps: 512,
+  },
+  occlusion: {
+    enabled: true,
+    cellSizeM: 4,
+    buildCellsPerFrame: 256,
+    footprintPaddingM: 0.35,
+    minimumHeightM: 1.5,
+    mistClipStrength: 0.85,
   },
   gpu: {
     enabled: false,
@@ -277,6 +286,30 @@ function parseShadows(raw: YamlRecord | undefined, fallback: PropShadowSettings)
   };
 }
 
+function parseOcclusion(raw: YamlRecord | undefined, fallback: PropOcclusionSettings): PropOcclusionSettings {
+  if (!raw) return { ...fallback };
+  return {
+    enabled: bool(raw.enabled, fallback.enabled),
+    cellSizeM: Math.max(0.25, num(raw.cell_size_m ?? raw.cellSizeM, fallback.cellSizeM)),
+    buildCellsPerFrame: positiveInt(
+      raw.build_cells_per_frame ?? raw.buildCellsPerFrame,
+      fallback.buildCellsPerFrame,
+    ),
+    footprintPaddingM: Math.max(
+      0,
+      num(raw.footprint_padding_m ?? raw.footprintPaddingM, fallback.footprintPaddingM),
+    ),
+    minimumHeightM: Math.max(
+      0,
+      num(raw.minimum_height_m ?? raw.minimumHeightM, fallback.minimumHeightM),
+    ),
+    mistClipStrength: Math.min(
+      1,
+      Math.max(0, num(raw.mist_clip_strength ?? raw.mistClipStrength, fallback.mistClipStrength)),
+    ),
+  };
+}
+
 function parseGpu(raw: YamlRecord | undefined, fallback: PropGpuSettings): PropGpuSettings {
   if (!raw) return { ...fallback };
   const workgroupSize = raw.workgroup_size ?? raw.workgroupSize;
@@ -315,6 +348,10 @@ export function parseCustomPropsConfig(text: string): CustomPropsSettings {
     spatial: parseSpatial(raw, base.spatial),
     culling: parseCullingSettings(asRecord(raw.culling), base.culling),
     shadows: parseShadows(asRecord(raw.shadows), base.shadows),
+    occlusion: parseOcclusion(
+      asRecord(raw.large_prop_occlusion ?? raw.largePropOcclusion),
+      base.occlusion,
+    ),
     gpu: parseGpu(asRecord(raw.gpu), base.gpu),
     categoryBudgets,
     debug: parseDebug(asRecord(raw.debug), base.debug),

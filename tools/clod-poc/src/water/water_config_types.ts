@@ -1,5 +1,6 @@
 import type { CausticsConfig } from "./causticsConfig.js";
 import type { HydrologyConfig } from "./hydrologyConfig.js";
+import type { WaterNormalModel } from "./water_normal_models.js";
 
 /** Debug render modes for the water material. */
 export const WATER_DEBUG_MODES = {
@@ -19,6 +20,7 @@ export const WATER_DEBUG_MODES = {
   reflection: 13,
   ssrHit: 14,
   suspendedScatter: 15,
+  farReflectionHit: 16,
 } as const;
 
 export type WaterDebugMode = keyof typeof WATER_DEBUG_MODES;
@@ -42,40 +44,24 @@ export interface RiverBodyConfig {
 import type { WaterBodyVisualPresets } from "./water_body_presets.js";
 
 export interface WaterGlacialMurkinessConfig {
-  /** Kill switch. Disabled configurations preserve the original body preset objects. */
   enabled: boolean;
-  /** Fraction of the shared glacial-murkiness state applied to lakes. */
   lakeStrength: number;
-  /** Fraction of the shared glacial-murkiness state applied to rivers. */
   riverStrength: number;
-  /** Full-strength RGB Beer-Lambert multiplier. */
   absorptionMultiplier: [number, number, number];
-  /** Full-strength turbidity added to the base body preset. */
   turbidityAdd: number;
-  /** Lower bound approached by reflection damping at full strength. */
   reflectionDampingMin: number;
 }
 
 export interface WaterRockFlourConfig {
-  /** Kill switch for glacial suspended sediment. */
   enabled: boolean;
-  /** Fraction of the shared glacial-murkiness state applied to lakes. */
   lakeStrength: number;
-  /** Fraction of the shared glacial-murkiness state applied to rivers. */
   riverStrength: number;
-  /** Suspended-sediment target colour for lakes. */
   lakeColor: [number, number, number];
-  /** Suspended-sediment target colour for rivers. */
   riverColor: [number, number, number];
-  /** Maximum blend into the shallow body colour. */
   shallowBlend: number;
-  /** Maximum blend into the deep body colour. */
   deepBlend: number;
-  /** Optical extinction controlling how quickly suspended scatter saturates with path length. */
   scatterExtinction: number;
-  /** Full-strength scattering gain. */
   scatterStrength: number;
-  /** Sky-ambient contribution applied to the scattering colour. */
   scatterAmbient: number;
 }
 
@@ -85,7 +71,6 @@ export interface WaterGlitterConfig {
   tightGain: number;
   broadExponent: number;
   broadGain: number;
-  /** Extra gain near the horizon, evaluated from sun elevation. */
   lowSunGain: number;
 }
 
@@ -94,6 +79,7 @@ export interface WaterVisualConfig {
   deepColor: [number, number, number];
   foamColor: [number, number, number];
   alpha: number;
+  normalModel: WaterNormalModel;
   rippleCycle: number;
   fresnelPower: number;
   rippleAmp: number;
@@ -110,13 +96,9 @@ export interface WaterVisualConfig {
   foam: WaterFoamVisualConfig;
   fresnel: WaterFresnelVisualConfig;
   color: WaterColorVisualConfig;
-  /** Per-body-kind colour/absorption/turbidity/reflection presets (Phase 7b). */
   bodies: WaterBodyVisualPresets;
-  /** Optional biome-state multiplier over existing lake/river optical presets. */
   glacialMurkiness: WaterGlacialMurkinessConfig;
-  /** Optional rock-flour colour and optical-scattering response. */
   rockFlour: WaterRockFlourConfig;
-  /** Config-driven two-lobe water glitter shared by all material tiers. */
   glitter: WaterGlitterConfig;
   refraction: WaterRefractionConfig;
   reflection: WaterReflectionConfig;
@@ -137,13 +119,9 @@ export interface WaterFoamVisualConfig {
   speedEnd: number;
   dropStart: number;
   dropEnd: number;
-  /** Shore foam band in metres-to-shoreline (hydrology shoreDistance); complements the
-   *  depth-based band, which stays as the fallback where shoreDistance is unavailable. */
   shoreDistanceStart: number;
   shoreDistanceEnd: number;
-  /** Camera distance where close-range foam detail begins fading. */
   detailFadeStartM: number;
-  /** Camera distance where close-range foam detail reaches zero. */
   detailFadeEndM: number;
 }
 
@@ -170,14 +148,25 @@ export interface WaterRefractionConfig {
 }
 
 export interface WaterReflectionClipmapTiersConfig {
-  /** Kill switch. Disabled tiers preserve the configured reflection object. */
   enabled: boolean;
-  /** Largest grid-cell size that retains the configured full SSR step count. */
   fullQualityMaxCellSizeM: number;
-  /** Largest grid-cell size that receives reduced-step SSR. Coarser levels use fallback only. */
   midQualityMaxCellSizeM: number;
-  /** Maximum SSR steps used by mid-distance clipmap levels. */
   midMaxSteps: number;
+}
+
+export interface WaterFarSummaryReflectionConfig {
+  enabled: boolean;
+  sourceResolution: number;
+  sourceSpanM: number;
+  sourceSnapM: number;
+  sourceBuildCellsPerFrame: number;
+  maxSteps: number;
+  startDistanceM: number;
+  maxDistanceM: number;
+  stepGrowth: number;
+  thicknessM: number;
+  terrainStrength: number;
+  propStrength: number;
 }
 
 export interface WaterReflectionConfig {
@@ -190,6 +179,7 @@ export interface WaterReflectionConfig {
   skyFallbackStrength: number;
   terrainFallbackStrength: number;
   clipmapTiers: WaterReflectionClipmapTiersConfig;
+  farSummary: WaterFarSummaryReflectionConfig;
 }
 
 export interface WaterConfig {
@@ -198,9 +188,6 @@ export interface WaterConfig {
   cellsPerLevel: number;
   cellSizes: number[];
   snapCells: number;
-  /** Offer static clipmap topology to materials that support it (Phase 5b): per-level
-   *  toroidal texel textures + a fixed index buffer, so snaps stop rebuilding indices
-   *  and re-uploading vertex buffers. false forces the legacy CPU vertex-buffer path. */
   staticTopology: boolean;
   drySentinelDepth: number;
   fakeBodies: {

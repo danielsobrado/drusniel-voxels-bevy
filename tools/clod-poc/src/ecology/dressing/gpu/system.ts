@@ -9,6 +9,7 @@ import {
   DRESSING_GPU_DEFAULT_CAPACITY_PER_GROUP,
 } from "./layouts.js";
 import { DressingGpuCompute, dressingGpuComputeUnsupportedReason } from "./compute.js";
+import { DressingGrassContactCompute } from "./dressing_grass_contact_compute.js";
 import { createDressingGpuDrawResources, type DressingGpuDrawResources } from "./render_resources.js";
 
 const DRESSING_GPU_IDLE_REFRESH_FRAMES = 30;
@@ -36,6 +37,8 @@ export class GpuDressingSystem implements DressingSystemLike {
   private readonly diagnostics: DressingDiagnostics;
   private readonly resources: DressingGpuDrawResources;
   private compute: DressingGpuCompute | null = null;
+  private grassContact: DressingGrassContactCompute | null = null;
+  private grassContactFailureReported = false;
   private disposed = false;
   private lastCenterX = Number.POSITIVE_INFINITY;
   private lastCenterZ = Number.POSITIVE_INFINITY;
@@ -60,6 +63,23 @@ export class GpuDressingSystem implements DressingSystemLike {
     this.resources.root.visible = options.config.enabled;
     this.diagnostics.dressing_clusters_active = options.config.enabled ? 1 : 0;
     this.publishDiagnostics();
+
+    void DressingGrassContactCompute.create(
+      options.gpuDevice,
+      options.gpuBackend,
+      this.resources.outputBuffers,
+      DRESSING_GPU_DEFAULT_CAPACITY_PER_GROUP,
+    ).then((contact) => {
+      if (this.disposed) {
+        contact.destroy();
+        return;
+      }
+      this.grassContact = contact;
+      if (Number.isFinite(this.lastCenterX) && Number.isFinite(this.lastCenterZ)) {
+        this.dispatchGrassContact(this.lastCenterX, this.lastCenterZ);
+      }
+    }).catch((error) => this.reportGrassContactFailure(error));
+
     void DressingGpuCompute.create(
       options.gpuDevice,
       this.resources.outputBuffers,
@@ -110,6 +130,8 @@ export class GpuDressingSystem implements DressingSystemLike {
     this.disposed = true;
     this.compute?.destroy();
     this.compute = null;
+    this.grassContact?.destroy();
+    this.grassContact = null;
     this.resources.dispose();
   }
 
@@ -123,6 +145,7 @@ export class GpuDressingSystem implements DressingSystemLike {
       worldCells: this.options.worldCells,
       unboundedWorld: this.options.unboundedWorld === true,
     });
+    this.dispatchGrassContact(centerX, centerZ);
     const stats = compute.stats();
     this.lastCenterX = centerX;
     this.lastCenterZ = centerZ;
@@ -135,6 +158,25 @@ export class GpuDressingSystem implements DressingSystemLike {
     this.publishDiagnostics();
   }
 
+  private dispatchGrassContact(centerX: number, centerZ: number): void {
+    const contact = this.grassContact;
+    if (!contact) return;
+    try {
+      contact.dispatch(centerX, centerZ);
+    } catch (error) {
+      contact.destroy();
+      this.grassContact = null;
+      this.reportGrassContactFailure(error);
+    }
+  }
+
+  private reportGrassContactFailure(error: unknown): void {
+    if (this.disposed || this.grassContactFailureReported) return;
+    this.grassContactFailureReported = true;
+    console.error("[dressing-grass-contact] GPU field disabled after failure", error);
+    this.publishDiagnostics();
+  }
+
   private publishDiagnostics(): void {
     const counters = (globalThis as typeof globalThis & {
       window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
@@ -143,10 +185,18 @@ export class GpuDressingSystem implements DressingSystemLike {
     for (const [name, value] of Object.entries(this.diagnostics)) {
       if (name !== "perClass" && typeof value === "number") counters[name] = value;
     }
+    const contact = this.grassContact?.stats();
     counters["dressing_gpu_authority"] = 1;
     counters["dressing_cpu_candidate_generation"] = 0;
     counters["dressing_gpu_readbacks"] = 0;
     counters["dressing_environment_query_gpu_mirror"] = this.compute?.stats().canonicalHeightAuthorityActive ? 1 : 0;
     counters["dressing_canopy_authority_active"] = this.compute?.stats().canopyAuthorityActive ? 1 : 0;
+    counters["dressing_grass_contact_active"] = contact?.active ? 1 : 0;
+    counters["dressing_grass_contact_revision"] = contact?.contentRevision ?? 0;
+    counters["dressing_grass_contact_dispatches"] = contact?.dispatches ?? 0;
+    counters["dressing_grass_contact_field_cells"] = contact?.fieldCells ?? 0;
+    counters["dressing_grass_contact_submit_cpu_ms"] = contact?.submitCpuMs ?? 0;
+    counters["dressing_grass_contact_readbacks"] = 0;
+    counters["dressing_grass_contact_failed"] = this.grassContactFailureReported ? 1 : 0;
   }
 }

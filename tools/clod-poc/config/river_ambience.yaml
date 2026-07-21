@@ -1,0 +1,36 @@
+river_ambience:
+  cascade_particles:
+    enabled: true
+    mist_strength: 0.58
+    cascade_splash_strength: 0.95
+    rapid_droplet_strength: 0.82
+    foam_drift_strength: 0.72
+    spawn_radius_m: 72
+    max_emitters_per_tick: 24
+    rapid_speed_start: 0.72
+    rapid_speed_end: 1.75
+    rapid_droplet_threshold: 0.28
+    rapid_droplets_per_emitter: 2
+    rapid_droplet_gravity: 5.4
+    drop_start: 0.78
+    drop_end: 4.4
+
+  calm_water_rise_rings:
+    enabled: true
+    strength: 0.55
+    spawn_radius_m: 64
+    scan_interval_s: 0.45
+    scan_grid: 19
+    cell_spacing_m: 7
+    cells_per_frame: 8
+    max_emitters_per_scan: 6
+    max_rings: 48
+    segments_per_ring: 24
+    minimum_depth_m: 0.35
+    minimum_shore_distance_m: 3.0
+    maximum_flow_strength: 0.35
+    maximum_bed_drop_m: 0.18
+    life_min_s: 1.2
+    life_max_s: 2.2
+    start_radius_m: 0.12
+    end_radius_m: 1.35

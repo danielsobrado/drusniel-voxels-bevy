@@ -1,0 +1,63 @@
+qa_path_ownership:
+  schema_version: 1
+  default_battery: clod-smoke
+  rules:
+    - id: qa-infrastructure
+      patterns:
+        - validation/**
+        - tools/clod-poc/package.json
+        - tools/clod-poc/vite*.ts
+        - tools/clod-poc/src/qa/**
+        - tools/clod-poc/tools/qa-*.ts
+        - tools/clod-poc/tools/lookdev-gallery.ts
+        - tools/clod-poc/config/lookdev_qa.yaml
+        - tools/clod-poc/config/qa_path_ownership.yaml
+      battery: clod-smoke
+      scripts: []
+    - id: streaming-terrain
+      patterns:
+        - tools/clod-poc/src/terrain/streaming/**
+        - tools/clod-poc/src/terrain/far_clipmap/**
+        - tools/clod-poc/src/long-view/**
+        - tools/clod-poc/src/world/**
+      battery: clod-smoke
+      scripts: [world:verify, accept:infinite-islands:reuse]
+    - id: water
+      patterns:
+        - tools/clod-poc/src/water/**
+        - tools/clod-poc/tools/water-*.ts
+        - tools/clod-poc/config/water*.yaml
+      battery: clod-smoke
+      scripts: [water:verify]
+    - id: trees-vegetation
+      patterns:
+        - tools/clod-poc/src/trees/**
+        - tools/clod-poc/src/vegetation/**
+        - tools/clod-poc/src/gpu/tree_*.ts
+        - tools/clod-poc/src/gpu/shaders/tree_*.wgsl
+      battery: clod-smoke
+      scripts: [trees:qa-parity]
+    - id: postfx-lighting
+      patterns:
+        - tools/clod-poc/src/gpu/postfx_*.ts
+        - tools/clod-poc/src/gpu/webgpu_postprocess.ts
+        - tools/clod-poc/src/environment/**
+        - tools/clod-poc/src/forest_lighting/**
+      battery: clod-smoke
+      scripts: [postfx:verify, lighting:verify]
+    - id: playable-world
+      patterns:
+        - tools/clod-poc/src/player/**
+        - tools/clod-poc/src/construction/**
+        - tools/clod-poc/src/save/**
+        - tools/clod-poc/src/spells/**
+      battery: clod-smoke
+      scripts: [playable-slice:verify]
+    - id: renderer-foundation
+      patterns:
+        - tools/clod-poc/src/app/clod_frame_loop.ts
+        - tools/clod-poc/src/app/frame_loop/**
+        - tools/clod-poc/src/rendering/**
+        - tools/clod-poc/src/gpu/webgpu_*.ts
+      battery: clod-full
+      scripts: []

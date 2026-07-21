@@ -5,6 +5,7 @@ import {
   type WaterBodyVisualPreset,
   type WaterBodyVisualPresets,
 } from "./water_body_presets.js";
+import { resolveWaterFoamAlbedo } from "./water_foam_albedo.js";
 import {
   readBoolean,
   readColorTuple,
@@ -12,6 +13,7 @@ import {
   readNumberTuple,
   recordFrom,
 } from "./water_config_readers.js";
+import { parseWaterNormalModel } from "./water_normal_models.js";
 
 function readBodyPreset(value: unknown, defaults: WaterBodyVisualPreset): WaterBodyVisualPreset {
   const body = recordFrom(value);
@@ -22,10 +24,7 @@ function readBodyPreset(value: unknown, defaults: WaterBodyVisualPreset): WaterB
     turbidity: readNumber(body.turbidity, defaults.turbidity),
     reflectionDamping: readNumber(body.reflection_damping ?? body.reflectionDamping, defaults.reflectionDamping),
     scatterColor: readColorTuple(body.scatter_color ?? body.scatterColor, defaults.scatterColor),
-    scatterExtinction: readNumber(
-      body.scatter_extinction ?? body.scatterExtinction,
-      defaults.scatterExtinction,
-    ),
+    scatterExtinction: readNumber(body.scatter_extinction ?? body.scatterExtinction, defaults.scatterExtinction),
     scatterStrength: readNumber(body.scatter_strength ?? body.scatterStrength, defaults.scatterStrength),
     scatterAmbient: readNumber(body.scatter_ambient ?? body.scatterAmbient, defaults.scatterAmbient),
   };
@@ -53,6 +52,7 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
   const refraction = recordFrom(visual.refraction);
   const reflection = recordFrom(visual.reflection);
   const reflectionClipmapTiers = recordFrom(reflection.clipmap_tiers ?? reflection.clipmapTiers);
+  const farSummary = recordFrom(reflection.far_summary ?? reflection.farSummary);
   const parsedBase = {
     shallowColor: readColorTuple(visual.shallow_color ?? visual.shallowColor, defaults.shallowColor),
     deepColor: readColorTuple(visual.deep_color ?? visual.deepColor, defaults.deepColor),
@@ -63,8 +63,11 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
   return {
     shallowColor: parsedBase.shallowColor,
     deepColor: parsedBase.deepColor,
-    foamColor: readColorTuple(visual.foam_color ?? visual.foamColor, defaults.foamColor),
+    foamColor: resolveWaterFoamAlbedo(
+      readColorTuple(visual.foam_color ?? visual.foamColor, defaults.foamColor),
+    ),
     alpha: readNumber(visual.alpha, defaults.alpha),
+    normalModel: parseWaterNormalModel(visual.normal_model ?? visual.normalModel, defaults.normalModel),
     rippleCycle: readNumber(visual.ripple_cycle ?? visual.rippleCycle, defaults.rippleCycle),
     fresnelPower: readNumber(visual.fresnel_power ?? visual.fresnelPower, defaults.fresnelPower),
     rippleAmp: readNumber(visual.ripple_amp ?? visual.rippleAmp, defaults.rippleAmp),
@@ -96,24 +99,15 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
       power: readNumber(fresnel.power, defaults.fresnel.power),
       normalFlatten: readNumber(fresnel.normal_flatten ?? fresnel.normalFlatten, defaults.fresnel.normalFlatten),
     },
-    color: {
-      depthScale: parsedBase.depthScale,
-      turbidity: parsedBase.turbidity,
-    },
+    color: { depthScale: parsedBase.depthScale, turbidity: parsedBase.turbidity },
     bodies: readBodyPresets(visual.bodies, deriveDefaultWaterBodyPresets(parsedBase)),
     glacialMurkiness: {
       enabled: readBoolean(glacialMurkiness.enabled, defaults.glacialMurkiness.enabled),
       lakeStrength: readNumber(glacialMurkiness.lake_strength ?? glacialMurkiness.lakeStrength, defaults.glacialMurkiness.lakeStrength),
       riverStrength: readNumber(glacialMurkiness.river_strength ?? glacialMurkiness.riverStrength, defaults.glacialMurkiness.riverStrength),
-      absorptionMultiplier: readColorTuple(
-        glacialMurkiness.absorption_multiplier ?? glacialMurkiness.absorptionMultiplier,
-        defaults.glacialMurkiness.absorptionMultiplier,
-      ),
+      absorptionMultiplier: readColorTuple(glacialMurkiness.absorption_multiplier ?? glacialMurkiness.absorptionMultiplier, defaults.glacialMurkiness.absorptionMultiplier),
       turbidityAdd: readNumber(glacialMurkiness.turbidity_add ?? glacialMurkiness.turbidityAdd, defaults.glacialMurkiness.turbidityAdd),
-      reflectionDampingMin: readNumber(
-        glacialMurkiness.reflection_damping_min ?? glacialMurkiness.reflectionDampingMin,
-        defaults.glacialMurkiness.reflectionDampingMin,
-      ),
+      reflectionDampingMin: readNumber(glacialMurkiness.reflection_damping_min ?? glacialMurkiness.reflectionDampingMin, defaults.glacialMurkiness.reflectionDampingMin),
     },
     rockFlour: {
       enabled: readBoolean(rockFlour.enabled, defaults.rockFlour.enabled),
@@ -123,10 +117,7 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
       riverColor: readColorTuple(rockFlour.river_color ?? rockFlour.riverColor, defaults.rockFlour.riverColor),
       shallowBlend: readNumber(rockFlour.shallow_blend ?? rockFlour.shallowBlend, defaults.rockFlour.shallowBlend),
       deepBlend: readNumber(rockFlour.deep_blend ?? rockFlour.deepBlend, defaults.rockFlour.deepBlend),
-      scatterExtinction: readNumber(
-        rockFlour.scatter_extinction ?? rockFlour.scatterExtinction,
-        defaults.rockFlour.scatterExtinction,
-      ),
+      scatterExtinction: readNumber(rockFlour.scatter_extinction ?? rockFlour.scatterExtinction, defaults.rockFlour.scatterExtinction),
       scatterStrength: readNumber(rockFlour.scatter_strength ?? rockFlour.scatterStrength, defaults.rockFlour.scatterStrength),
       scatterAmbient: readNumber(rockFlour.scatter_ambient ?? rockFlour.scatterAmbient, defaults.rockFlour.scatterAmbient),
     },
@@ -159,15 +150,23 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
       terrainFallbackStrength: readNumber(reflection.terrain_fallback_strength ?? reflection.terrainFallbackStrength, defaults.reflection.terrainFallbackStrength),
       clipmapTiers: {
         enabled: readBoolean(reflectionClipmapTiers.enabled, defaults.reflection.clipmapTiers.enabled),
-        fullQualityMaxCellSizeM: readNumber(
-          reflectionClipmapTiers.full_quality_max_cell_size_m ?? reflectionClipmapTiers.fullQualityMaxCellSizeM,
-          defaults.reflection.clipmapTiers.fullQualityMaxCellSizeM,
-        ),
-        midQualityMaxCellSizeM: readNumber(
-          reflectionClipmapTiers.mid_quality_max_cell_size_m ?? reflectionClipmapTiers.midQualityMaxCellSizeM,
-          defaults.reflection.clipmapTiers.midQualityMaxCellSizeM,
-        ),
+        fullQualityMaxCellSizeM: readNumber(reflectionClipmapTiers.full_quality_max_cell_size_m ?? reflectionClipmapTiers.fullQualityMaxCellSizeM, defaults.reflection.clipmapTiers.fullQualityMaxCellSizeM),
+        midQualityMaxCellSizeM: readNumber(reflectionClipmapTiers.mid_quality_max_cell_size_m ?? reflectionClipmapTiers.midQualityMaxCellSizeM, defaults.reflection.clipmapTiers.midQualityMaxCellSizeM),
         midMaxSteps: readNumber(reflectionClipmapTiers.mid_max_steps ?? reflectionClipmapTiers.midMaxSteps, defaults.reflection.clipmapTiers.midMaxSteps),
+      },
+      farSummary: {
+        enabled: readBoolean(farSummary.enabled, defaults.reflection.farSummary.enabled),
+        sourceResolution: readNumber(farSummary.source_resolution ?? farSummary.sourceResolution, defaults.reflection.farSummary.sourceResolution),
+        sourceSpanM: readNumber(farSummary.source_span_m ?? farSummary.sourceSpanM, defaults.reflection.farSummary.sourceSpanM),
+        sourceSnapM: readNumber(farSummary.source_snap_m ?? farSummary.sourceSnapM, defaults.reflection.farSummary.sourceSnapM),
+        sourceBuildCellsPerFrame: readNumber(farSummary.source_build_cells_per_frame ?? farSummary.sourceBuildCellsPerFrame, defaults.reflection.farSummary.sourceBuildCellsPerFrame),
+        maxSteps: readNumber(farSummary.max_steps ?? farSummary.maxSteps, defaults.reflection.farSummary.maxSteps),
+        startDistanceM: readNumber(farSummary.start_distance_m ?? farSummary.startDistanceM, defaults.reflection.farSummary.startDistanceM),
+        maxDistanceM: readNumber(farSummary.max_distance_m ?? farSummary.maxDistanceM, defaults.reflection.farSummary.maxDistanceM),
+        stepGrowth: readNumber(farSummary.step_growth ?? farSummary.stepGrowth, defaults.reflection.farSummary.stepGrowth),
+        thicknessM: readNumber(farSummary.thickness_m ?? farSummary.thicknessM, defaults.reflection.farSummary.thicknessM),
+        terrainStrength: readNumber(farSummary.terrain_strength ?? farSummary.terrainStrength, defaults.reflection.farSummary.terrainStrength),
+        propStrength: readNumber(farSummary.prop_strength ?? farSummary.propStrength, defaults.reflection.farSummary.propStrength),
       },
     },
     depthWrite: readBoolean(visual.depth_write ?? visual.depthWrite, defaults.depthWrite),

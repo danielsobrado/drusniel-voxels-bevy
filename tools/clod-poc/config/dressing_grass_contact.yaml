@@ -1,0 +1,19 @@
+dressing_grass_contact:
+  enabled: true
+  field_grid: 192
+  field_cell_m: 1.0
+  core_fraction: 0.55
+
+  classes:
+    dead_log_fresh:       { radius_m: 2.25, strength: 1.00 }
+    dead_log_mossy:       { radius_m: 2.35, strength: 1.00 }
+    dead_log_rotten:      { radius_m: 2.20, strength: 0.95 }
+    stump_fresh:          { radius_m: 0.75, strength: 1.00 }
+    stump_rotten:         { radius_m: 0.80, strength: 0.95 }
+    broken_snag:          { radius_m: 0.72, strength: 1.00 }
+    large_driftwood:      { radius_m: 2.10, strength: 0.95 }
+    large_talus_boulder:  { radius_m: 1.65, strength: 1.00 }
+    small_talus:          { radius_m: 0.58, strength: 0.80 }
+    river_cobbles:        { radius_m: 0.42, strength: 0.62 }
+    wet_stone_cluster:    { radius_m: 0.48, strength: 0.70 }
+    small_driftwood:      { radius_m: 0.95, strength: 0.72 }

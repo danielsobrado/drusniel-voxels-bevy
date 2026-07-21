@@ -233,7 +233,11 @@ export function createTreeNodeMaterialHandle(
     );
 
     const n0: TslNode = normalize(normalWorld);
-    const n: TslNode = frontFacing.select(n0, n0.negate());
+    const nFaced: TslNode = frontFacing.select(n0, n0.negate());
+    // Foliage is thin and two-sided; light it from the geometric normal so the per-frame
+    // front/back winner of z-fighting double-sided cards under wind cannot flip the sun
+    // term to black. Trunk/bark keeps the single-sided faced normal.
+    const n: TslNode = normalize(mix(nFaced, n0, aFoliageMask));
     const sun: TslNode = styleWrappedSunTerm(dot(n, uLight));
     const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
     const hemi: TslNode = mix(uGround, uSky, sky);
@@ -426,7 +430,11 @@ export function createTreeRingNodeMaterialHandle(
     const rotatedNormal: TslNode = normalize(
       vec3(c.mul(localNormal.x).add(s.mul(localNormal.z)), localNormal.y, s.mul(localNormal.x).negate().add(c.mul(localNormal.z))),
     );
-    const n: TslNode = frontFacing.select(rotatedNormal, rotatedNormal.negate());
+    const nFaced: TslNode = frontFacing.select(rotatedNormal, rotatedNormal.negate());
+    // Foliage is thin and two-sided; light it from the geometric card normal so the
+    // per-frame front/back winner of z-fighting double-sided cards under wind cannot
+    // flip the sun term to black. Trunk/bark keeps the single-sided faced normal.
+    const n: TslNode = normalize(mix(nFaced, rotatedNormal, aFoliageMask));
     const sun: TslNode = styleWrappedSunTerm(dot(n, uLight));
     const sky: TslNode = clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0);
     const hemi: TslNode = mix(uGround, uSky, sky);

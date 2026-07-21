@@ -31,6 +31,14 @@ export interface QaCommandResult {
   stderr_tail: string;
 }
 
+export interface QaResolvedCommandArtifact {
+  path: string;
+  kind: string;
+  ignoreJsonKeys: string[];
+  numericTolerance: number;
+  numericTolerances: Record<string, number>;
+}
+
 export async function runQaCommand(command: QaCommandDefinition, context: QaCommandContext): Promise<QaCommandResult> {
   validateTarget(command, context);
   const values = placeholders(context);
@@ -102,7 +110,10 @@ export async function runQaCommand(command: QaCommandDefinition, context: QaComm
   };
 }
 
-export function commandArtifactPaths(command: QaCommandDefinition, context: QaCommandContext): Array<{ path: string; kind: string; ignoreJsonKeys: string[]; numericTolerance: number }> {
+export function commandArtifactPaths(
+  command: QaCommandDefinition,
+  context: QaCommandContext,
+): QaResolvedCommandArtifact[] {
   const values = placeholders(context);
   return command.artifacts
     .filter((artifact) => artifact.deterministic)
@@ -111,6 +122,7 @@ export function commandArtifactPaths(command: QaCommandDefinition, context: QaCo
       kind: artifact.kind,
       ignoreJsonKeys: artifact.ignore_json_keys,
       numericTolerance: artifact.numeric_tolerance,
+      numericTolerances: artifact.numeric_tolerances,
     }));
 }
 

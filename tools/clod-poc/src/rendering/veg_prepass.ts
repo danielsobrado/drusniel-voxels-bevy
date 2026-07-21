@@ -1,4 +1,4 @@
-import { EqualDepth, InstancedMesh, Mesh, type Material, type Side } from "three";
+import { LessEqualDepth, InstancedMesh, Mesh, type Material, type Side } from "three";
 import { NodeMaterial, type WebGPURenderer } from "three/webgpu";
 import {
   applyMaterialIfChanged,
@@ -59,11 +59,19 @@ export function depthPrepassTwin(mesh: Mesh, nodes: PrepassNodes, options: Depth
     ? sourceMaterial
     : cloneColorMaterialWithSharedUniforms(sourceMaterial, `veg-depth-prepass-color:${mesh.name || "mesh"}`);
   let colorMaterialChanged = false;
+  // The colour pass tests against the twin's pre-written depth with LessEqual, not
+  // Equal. Equal requires the twin and colour vertex programs to resolve clip-space
+  // depth to the same bit, which they do not (the twin is a NodeMaterial, the colour
+  // pass a MeshBasicNodeMaterial); a 1-ULP mismatch then makes the passing fragment —
+  // and, on double-sided foliage, the front-vs-back face — flip frame to frame, which
+  // reads as the lit side of a trunk/leaf jumping and a harsh light flicker. LessEqual
+  // still rejects the farther overdraw the prepass exists to skip, but tolerates the
+  // ULP wobble so the nearest fragment stays lit.
   colorMaterialChanged = setPipelineSensitiveMaterialProperty(
     materialChurnDiagnostics,
     colorMaterial,
     "depthFunc",
-    EqualDepth,
+    LessEqualDepth,
     "veg-depth-prepass-color-depth-func",
   ) || colorMaterialChanged;
   colorMaterialChanged = setPipelineSensitiveMaterialProperty(

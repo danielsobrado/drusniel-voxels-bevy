@@ -203,7 +203,7 @@ export const DEFAULT_TREE_ECOLOGY_SETTINGS: TreeEcologySettings = {
 export const DEFAULT_TREE_SETTINGS: TreeSettings = {
   enabled: true,
   seed: 7331,
-  distanceM: 900,
+  distanceM: 420,
   refreshDistanceM: 20,
   maxNewPatchesPerFrame: 1,
   maxInstances: 6000,
@@ -220,13 +220,13 @@ export const DEFAULT_TREE_SETTINGS: TreeSettings = {
   lod: {
     nearFraction: 0.062,
     midFraction: 0.24,
-    farFraction: 420 / 900,
+    farFraction: 0.62,
     impostorEndM: 760,
     canopyFadeStartM: 620,
     canopyFadeEndM: 760,
     hysteresisM: 8,
     crossfadeEnabled: true,
-    crossfadeBandM: 28,
+    crossfadeBandM: 20,
     ditherEnabled: true,
     shadowsMaxLod: "impostor",
     budgets: {

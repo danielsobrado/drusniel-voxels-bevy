@@ -56,6 +56,16 @@ debug:
 shadows:
   max_shadow_props: 512
 
+# Shared conservative authority for large-prop lighting, fog, reflection, and mist consumers.
+# Only assets with lighting_proxy.mode=coarse_bounds enter this field.
+large_prop_occlusion:
+  enabled: true
+  cell_size_m: 4
+  build_cells_per_frame: 256
+  footprint_padding_m: 0.35
+  minimum_height_m: 1.5
+  mist_clip_strength: 0.85
+
 props:
   - id: stone_ruin_wall
     source: models/custom_props/ruins/stone_ruin_wall.glb

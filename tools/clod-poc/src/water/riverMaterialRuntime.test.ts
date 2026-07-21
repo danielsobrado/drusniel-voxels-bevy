@@ -10,7 +10,8 @@ describe("river material runtime settings", () => {
 
     expect(settings.geometryThalwegDip).toBeGreaterThan(0);
     expect(settings.geometryBankLift).toBeGreaterThan(0);
-    expect(settings.geometryRiffleStrength).toBeGreaterThan(0);
+    expect(settings.geometryRiffleStrength).toBe(0);
+    expect(settings.geometrySideRiffleStrength).toBe(0);
     expect(settings.geometryMaxOffset).toBeGreaterThanOrEqual(settings.geometryThalwegDip);
     expect(settings.cascadeDropStart).toBeGreaterThanOrEqual(0);
     expect(settings.cascadeDropEnd).toBeGreaterThan(settings.cascadeDropStart);

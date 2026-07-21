@@ -1,0 +1,75 @@
+lookdev:
+  schema_version: 1
+  scene: infinite-islands
+  seed: 1
+  world: 8
+  viewport: [1600, 900]
+  ready_timeout_ms: 360000
+  stable_polls: 4
+  profile:
+    quality: ultra
+    renderPreset: ultra
+    materialTiers: 1
+    water: 1
+    waterQuality: high
+    waterDebug: 1
+    farClipmap: 1
+    farClipmapMode: replace
+    webgpuSelection: 1
+    acceptance: 1
+    qa: 1
+    precisionDiag: 1
+    dynamicResolution: 0
+    taaJitter: 0
+    treeWind: 0
+    grassWind: 0
+  suites:
+    smoke:
+      tone_maps: [agx]
+      poses: [ridge, coast]
+    full:
+      tone_maps: [agx, aces]
+      poses: [river-close, river-aerial, ridge, coast, valley, seam-grazing, ownership]
+  poses:
+    - id: river-close
+      position: [2048, 96, 2048]
+      yaw: 2.65
+      pitch: -0.28
+      fov: 55
+      diagnostic: final
+    - id: river-aerial
+      position: [2048, 420, 2048]
+      yaw: 2.65
+      pitch: -1.50
+      fov: 55
+      diagnostic: final
+    - id: ridge
+      position: [2048, 260, 4096]
+      yaw: 2.65
+      pitch: -0.30
+      fov: 55
+      diagnostic: final
+    - id: coast
+      position: [384, 96, 2048]
+      yaw: -1.57
+      pitch: -0.14
+      fov: 55
+      diagnostic: final
+    - id: valley
+      position: [3072, 120, 2048]
+      yaw: 0.78
+      pitch: -0.20
+      fov: 55
+      diagnostic: final
+    - id: seam-grazing
+      position: [2048, 120, 2816]
+      yaw: 1.57
+      pitch: -0.10
+      fov: 55
+      diagnostic: final
+    - id: ownership
+      position: [2048, 180, 2816]
+      yaw: 1.57
+      pitch: -0.22
+      fov: 55
+      diagnostic: ownership

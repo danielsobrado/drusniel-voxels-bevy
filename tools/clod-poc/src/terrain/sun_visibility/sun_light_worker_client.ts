@@ -5,6 +5,10 @@
 // main-thread budgeted build path. Sun-light tiles are a soft lighting cache, so silent
 // fallback is the correct failure mode (unlike gated WebGPU scenes, which fail loud).
 
+import {
+  cloneLargePropOcclusionHeightPayload,
+  type LargePropOcclusionHeightPayload,
+} from "../../props/large_prop_occlusion_height.js";
 import type { TerrainFieldConfig } from "../terrain.js";
 import type { SunLightOptions } from "./sun_light_options.js";
 import type {
@@ -25,6 +29,7 @@ export interface SunLightRemoteTileBuilder extends SunLightRemoteTileSource {
   configure(input: {
     terrainFieldConfig: TerrainFieldConfig | null;
     summary: SunLightWorkerSummaryPayload | null;
+    propOcclusion: LargePropOcclusionHeightPayload | null;
     options: SunLightOptions;
   }): void;
   dispose(): void;
@@ -151,13 +156,26 @@ export function createSunLightRemoteTileBuilder(): SunLightRemoteTileBuilder | n
           heightMax: input.summary.heightMax.slice(),
         }
         : null;
+      const propOcclusion = input.propOcclusion
+        ? cloneLargePropOcclusionHeightPayload(input.propOcclusion)
+        : null;
+      const transfer: Transferable[] = [];
+      if (summary) transfer.push(summary.heightMax.buffer);
+      if (propOcclusion) {
+        transfer.push(
+          propOcclusion.cellX.buffer,
+          propOcclusion.cellZ.buffer,
+          propOcclusion.topY.buffer,
+        );
+      }
       if (post({
         type: "configure",
         configId: nextConfigId,
         terrainFieldConfig: input.terrainFieldConfig,
         summary,
+        propOcclusion,
         options: input.options,
-      }, summary ? [summary.heightMax.buffer] : [])) {
+      }, transfer)) {
         configId = nextConfigId;
       }
     },

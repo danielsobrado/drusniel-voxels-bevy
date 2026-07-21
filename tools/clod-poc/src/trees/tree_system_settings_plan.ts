@@ -44,8 +44,14 @@ export function planTreeSystemSettingsUpdate(
   );
   const shadowPolicyChanged = patch.lod?.shadowsMaxLod !== undefined &&
     patch.lod.shadowsMaxLod !== current.lod.shadowsMaxLod;
+  // Only rebuild the ring when a gpu setting that actually owns GPU resources changes.
+  // Pure policy/diagnostic flags (fallbackToCpu, debugShowGpuCounts, debugValidateAgainstCpu)
+  // must not tear it down: destroying the compute buffers mid-frame, while the previous
+  // frame's submit still references them, raises "buffer used in submit while destroyed"
+  // on the WebGPU backend.
+  const gpuResourcesChanged = patch.gpu !== undefined && treeGpuRingResourcesChanged(current.gpu, patch.gpu);
   const clearGpuRing = needsGeometry ||
-    patch.gpu !== undefined ||
+    gpuResourcesChanged ||
     gpuRenderChanged ||
     shadowPolicyChanged ||
     ecologyChanged ||
@@ -67,6 +73,34 @@ export function planTreeSystemSettingsUpdate(
     applyGpuRingDebugColor: debugColorChanged && !clearGpuRing,
     nextGpuStatus,
   };
+}
+
+type TreeGpuSettingsShape = TreeSettings["gpu"];
+
+/** True when a gpu setting that owns GPU resources changed, so the ring must be
+ *  rebuilt. Excludes pure policy/diagnostic flags (fallbackToCpu, debugShowGpuCounts,
+ *  debugValidateAgainstCpu) that never touch a buffer or pipeline. */
+function treeGpuRingResourcesChanged(current: TreeGpuSettingsShape, next: TreeGpuSettingsShape): boolean {
+  return current.enabled !== next.enabled ||
+    current.preferWebGpu !== next.preferWebGpu ||
+    current.scatterEnabled !== next.scatterEnabled ||
+    current.cullEnabled !== next.cullEnabled ||
+    current.maxVisible !== next.maxVisible ||
+    current.workgroupSize !== next.workgroupSize ||
+    current.readbackVisibleLists !== next.readbackVisibleLists ||
+    current.debugForceCpu !== next.debugForceCpu ||
+    treeGpuTerrainVisibilityChanged(current.terrainVisibility, next.terrainVisibility);
+}
+
+function treeGpuTerrainVisibilityChanged(
+  current: TreeGpuSettingsShape["terrainVisibility"],
+  next: TreeGpuSettingsShape["terrainVisibility"],
+): boolean {
+  return current.enabled !== next.enabled ||
+    current.minDistanceM !== next.minDistanceM ||
+    current.sampleCount !== next.sampleCount ||
+    current.heightMarginM !== next.heightMarginM ||
+    current.crownHeightM !== next.crownHeightM;
 }
 
 function structuredCloneTreeSettings(settings: TreeSettings): TreeSettings {

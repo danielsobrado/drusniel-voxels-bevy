@@ -1,5 +1,6 @@
 import type { ClodHooks } from "../../core/hooks.js";
 import { DeterministicSequenceClock } from "../sequence/sequence_clock.js";
+import { qaBuildIdentity } from "./build_identity.js";
 import type { DrusnielQaHook, QaEnvironment, QaWorldState } from "./browser_contract.js";
 import { readinessBlockers } from "./readiness.js";
 
@@ -8,6 +9,7 @@ export function installBrowserQaHook(): DrusnielQaHook {
   let checkpoint: string | null = null;
   let frozen = false;
   let sequenceClock: DeterministicSequenceClock | null = null;
+  let appliedWorldState: QaWorldState = {};
   const runtime = (): ClodHooks => {
     const hooks = window.__drusnielClod;
     if (!hooks) throw new Error("window.__drusnielClod is not initialized");
@@ -24,7 +26,9 @@ export function installBrowserQaHook(): DrusnielQaHook {
       viewport: [window.innerWidth, window.innerHeight],
       devicePixelRatio: window.devicePixelRatio,
       gpu: window.__drusnielClod?.diag ? { ...window.__drusnielClod.diag } : null,
+      build: qaBuildIdentity(),
     }),
+    worldState: () => structuredClone(appliedWorldState),
     getPose: () => {
       const getPose = runtime().getPose;
       if (!getPose) throw new Error("runtime pose getter is not ready");
@@ -37,6 +41,7 @@ export function installBrowserQaHook(): DrusnielQaHook {
       await nextFrame();
     },
     setWorldState: async (state: QaWorldState) => {
+      appliedWorldState = { ...appliedWorldState, ...validateWorldState(state) };
       runtime().setAcceptanceSceneOptions?.({
         freeze: state.freeze ?? frozen,
         proceduralDebug: state.proceduralDebug,
@@ -56,11 +61,13 @@ export function installBrowserQaHook(): DrusnielQaHook {
       runtime().flyCamEnabled?.(false);
       runtime().setAcceptanceSceneOptions?.({ freeze: true });
       frozen = true;
+      appliedWorldState = { ...appliedWorldState, freeze: true };
       await nextFrame();
     },
     unfreeze: async () => {
       runtime().setAcceptanceSceneOptions?.({ freeze: false });
       frozen = false;
+      appliedWorldState = { ...appliedWorldState, freeze: false };
       await nextFrame();
     },
     captureStats: async () => {
@@ -88,6 +95,7 @@ export function installBrowserQaHook(): DrusnielQaHook {
       runtime().flyCamEnabled?.(false);
       runtime().setAcceptanceSceneOptions?.({ freeze: true });
       frozen = true;
+      appliedWorldState = { ...appliedWorldState, freeze: true };
       await settleRuntime(runtime(), 1);
     },
     getCameraMatrices: () => {
@@ -107,8 +115,7 @@ export function installBrowserQaHook(): DrusnielQaHook {
     },
     endSequence: async () => {
       sequenceClock = null;
-      runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "final", proceduralDebug: "final" });
-      runtime().setQaDiagnosticBuffer?.("final");
+      setFinalDiagnosticState(runtime());
       await settleRuntime(runtime(), 1);
     },
     captureDiagnosticBuffer: async (kind) => {
@@ -118,19 +125,20 @@ export function installBrowserQaHook(): DrusnielQaHook {
         const canvas = document.querySelector("canvas");
         if (!(canvas instanceof HTMLCanvasElement)) throw new Error("render canvas is missing");
         const dataUrl = canvas.toDataURL("image/png");
-        runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "final" });
+        setFinalDiagnosticState(runtime());
         await settleRuntime(runtime(), 1);
         return dataUrl;
       }
       const setBuffer = runtime().setQaDiagnosticBuffer;
       if (!setBuffer) throw new Error("runtime diagnostic-buffer capture is unavailable");
-      setBuffer(kind);
+      if (kind === "final") setFinalDiagnosticState(runtime());
+      else setBuffer(kind);
       await settleRuntime(runtime(), 1);
       const canvas = document.querySelector("canvas");
       if (!(canvas instanceof HTMLCanvasElement)) throw new Error("render canvas is missing");
       const dataUrl = canvas.toDataURL("image/png");
       if (kind !== "final") {
-        setBuffer("final");
+        setFinalDiagnosticState(runtime());
         await settleRuntime(runtime(), 1);
       }
       return dataUrl;
@@ -143,7 +151,8 @@ export function installBrowserQaHook(): DrusnielQaHook {
       }
       const setBuffer = runtime().setQaDiagnosticBuffer;
       if (!setBuffer) throw new Error("runtime diagnostic-buffer capture is unavailable");
-      setBuffer(kind);
+      if (kind === "final") setFinalDiagnosticState(runtime());
+      else setBuffer(kind);
       await settleRuntime(runtime(), 1);
     },
     runSequenceEvent: async (action) => {
@@ -155,12 +164,38 @@ export function installBrowserQaHook(): DrusnielQaHook {
       }
       else if (action === "streaming-on") runtime().setTerrainStreamingEnabled?.(true);
       else if (action === "ownership-debug") runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "ownership" });
-      else runtime().setAcceptanceSceneOptions?.({ farClipmapDebug: "final", proceduralDebug: "final" });
+      else setFinalDiagnosticState(runtime());
       await settleRuntime(runtime(), 1);
     },
   };
   window.__drusnielQa = hook;
   return hook;
+}
+
+function validateWorldState(state: QaWorldState): QaWorldState {
+  const numericFields: Array<keyof QaWorldState> = [
+    "timeOfDayHours",
+    "sunElevationDeg",
+    "sunAzimuthDeg",
+    "windTimeS",
+    "cloudTimeS",
+    "particleTimeS",
+  ];
+  for (const field of numericFields) {
+    const value = state[field];
+    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) {
+      throw new Error(`QA world state ${field} must be finite`);
+    }
+  }
+  if (state.precipitation !== undefined && state.precipitation.trim().length === 0) {
+    throw new Error("QA world state precipitation must not be empty");
+  }
+  return { ...state };
+}
+
+function setFinalDiagnosticState(runtime: ClodHooks): void {
+  runtime.setAcceptanceSceneOptions?.({ farClipmapDebug: "final", proceduralDebug: "final" });
+  runtime.setQaDiagnosticBuffer?.("final");
 }
 
 async function settleRuntime(runtime: ClodHooks, frames: number): Promise<void> {

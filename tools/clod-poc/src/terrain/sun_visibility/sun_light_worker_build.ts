@@ -2,6 +2,7 @@
 // The actual Worker entry (sun_light_build_worker.ts) is a thin shell around this.
 
 import { surfaceHeightCore } from "../../gpu/terrain_field_core.js";
+import { createLargePropOcclusionHeightSampler } from "../../props/large_prop_occlusion_height.js";
 import { createSunLightHeightSampler } from "./far_light_height.js";
 import { buildLightTile, type LightTileHeightSource } from "./light_builder.js";
 import type { SunLightOptions } from "./sun_light_options.js";
@@ -22,9 +23,10 @@ export function sunLightWorkerStateFromConfigure(request: SunLightWorkerConfigur
   const analytic = terrainConfig
     ? (x: number, z: number) => surfaceHeightCore(x, z, terrainConfig)
     : (x: number, z: number) => surfaceHeightCore(x, z);
-  const heightAt = request.summary
+  const terrainHeightAt = request.summary
     ? createSunLightHeightSampler(request.summary.res, request.summary.worldSize, request.summary.heightMax, analytic)
     : analytic;
+  const heightAt = createLargePropOcclusionHeightSampler(request.propOcclusion, terrainHeightAt);
   return {
     configId: request.configId,
     options: request.options,

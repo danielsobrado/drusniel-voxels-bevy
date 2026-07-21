@@ -1,5 +1,9 @@
 import { getDigEditRevision, getVoxelEditSnapshot } from "../terrain.js";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
+import {
+  createLargePropOcclusionHeightSampler,
+  type LargePropOcclusionHeightPayload,
+} from "../../props/large_prop_occlusion_height.js";
 
 export interface TerrainChangedRegion {
   minX: number;
@@ -82,13 +86,29 @@ export function createSunLightHeightSampler(
 
 export function createTerrainSummaryLightHeightProvider(field: TerrainSummaryField) {
   const terrainRevision = () => getDigEditRevision();
-  const heightAt = createSunLightHeightSampler(field.res, field.worldSize, field.heightMax, field.analyticHeightSampler);
+  const terrainHeightAt = createSunLightHeightSampler(
+    field.res,
+    field.worldSize,
+    field.heightMax,
+    field.analyticHeightSampler,
+  );
+  let propOcclusionRevision = 0;
+  let compositeHeightAt = terrainHeightAt;
+
+  const setPropOcclusion = (payload: LargePropOcclusionHeightPayload | null): void => {
+    propOcclusionRevision = payload?.revision ?? 0;
+    compositeHeightAt = createLargePropOcclusionHeightSampler(payload, terrainHeightAt);
+  };
 
   return {
     terrainRevision,
-    heightAt,
+    propOcclusionRevision: () => propOcclusionRevision,
+    setPropOcclusion,
+    heightAt(x: number, z: number) {
+      return compositeHeightAt(x, z);
+    },
     readHeight(x: number, z: number) {
-      const height = heightAt(x, z);
+      const height = compositeHeightAt(x, z);
       return Number.isNaN(height)
         ? { height: 0, present: false, revision: terrainRevision() }
         : { height, present: true, revision: terrainRevision() };
