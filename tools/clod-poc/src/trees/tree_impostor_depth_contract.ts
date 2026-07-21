@@ -1,24 +1,29 @@
 export const TREE_IMPOSTOR_DEPTH_NEAR_M = 0.01;
 export const TREE_IMPOSTOR_DEPTH_FAR_RADIUS_MULTIPLIER = 6;
-export const TREE_IMPOSTOR_CAPTURE_DISTANCE_RADIUS_MULTIPLIER = 3;
-export const TREE_IMPOSTOR_DEPTH_MAX_OFFSET_RADIUS = 0.95;
+export const TREE_IMPOSTOR_DEPTH_EXTENT_DIVISOR = 4;
 export const TREE_IMPOSTOR_DEPTH_GRID_SEGMENTS = 3;
 
 export interface TreeImpostorDepthRange {
   readonly nearM: number;
   readonly farM: number;
-  readonly captureDistanceM: number;
-  readonly maxOffsetM: number;
+  readonly extentM: number;
 }
 
 export function treeImpostorDepthRange(radiusM: number): TreeImpostorDepthRange {
   const radius = Math.max(0.25, finiteOr(radiusM, 1));
+  const nearM = TREE_IMPOSTOR_DEPTH_NEAR_M;
+  const farM = radius * TREE_IMPOSTOR_DEPTH_FAR_RADIUS_MULTIPLIER;
   return {
-    nearM: TREE_IMPOSTOR_DEPTH_NEAR_M,
-    farM: radius * TREE_IMPOSTOR_DEPTH_FAR_RADIUS_MULTIPLIER,
-    captureDistanceM: radius * TREE_IMPOSTOR_CAPTURE_DISTANCE_RADIUS_MULTIPLIER,
-    maxOffsetM: radius * TREE_IMPOSTOR_DEPTH_MAX_OFFSET_RADIUS,
+    nearM,
+    farM,
+    extentM: (farM - nearM) / TREE_IMPOSTOR_DEPTH_EXTENT_DIVISOR,
   };
+}
+
+export function encodeTreeImpostorRelativeDepth(relativeDepthM: number, radiusM: number): number {
+  if (!Number.isFinite(relativeDepthM)) return 0.5;
+  const { extentM } = treeImpostorDepthRange(radiusM);
+  return clamp01(relativeDepthM / Math.max(extentM, 1e-6) * 0.5 + 0.5);
 }
 
 export function decodeTreeImpostorDepthOffset(
@@ -27,12 +32,10 @@ export function decodeTreeImpostorDepthOffset(
   radiusM: number,
 ): number {
   if (!Number.isFinite(normalizedDepth) || !Number.isFinite(coverage) || coverage <= 0) return 0;
-  const range = treeImpostorDepthRange(radiusM);
-  const depth01 = clamp01(normalizedDepth);
-  const distanceM = range.nearM + depth01 * (range.farM - range.nearM);
-  const offsetM = range.captureDistanceM - distanceM;
+  const { extentM } = treeImpostorDepthRange(radiusM);
+  const offsetM = (clamp01(normalizedDepth) * 2 - 1) * extentM;
   const coverageWeight = smoothstep(0.01, 0.15, clamp01(coverage));
-  return clamp(offsetM, -range.maxOffsetM, range.maxOffsetM) * coverageWeight;
+  return clamp(offsetM, -extentM, extentM) * coverageWeight;
 }
 
 function finiteOr(value: number, fallback: number): number {
