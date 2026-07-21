@@ -13,6 +13,7 @@ import type { TreeImpostorAtlas } from "./tree_impostor_baker.js";
 type TslNode = any;
 
 const DEPTH_MIN_COVERAGE = 0.0001;
+const DEPTH_SAMPLE_MIP_LEVEL = 0;
 
 export interface TreeImpostorDepthSampleNode {
   readonly depth: TslNode;
@@ -105,8 +106,8 @@ function treeImpostorDepthAtlasSample(
 ): TreeImpostorDepthSampleNode {
   const atlasUv = treeImpostorDepthAtlasUv(atlas, baseUv, frameX, frameY, variantIndex);
   return {
-    depth: texture(atlas.normalDepth!, atlasUv).w,
-    coverage: texture(atlas.albedo ?? atlas.texture, atlasUv).w,
+    depth: texture(atlas.normalDepth!, atlasUv, DEPTH_SAMPLE_MIP_LEVEL).w,
+    coverage: texture(atlas.albedo ?? atlas.texture, atlasUv, DEPTH_SAMPLE_MIP_LEVEL).w,
   };
 }
 
