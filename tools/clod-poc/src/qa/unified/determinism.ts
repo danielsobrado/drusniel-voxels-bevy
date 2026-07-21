@@ -177,18 +177,16 @@ function toleranceForPath(path: string, policy: QaNumericTolerancePolicy): numbe
   const normalizedTolerance = policy.pathTolerances[normalized];
   if (normalizedTolerance !== undefined) return normalizedTolerance;
   for (const [pattern, value] of Object.entries(policy.pathTolerances)) {
-    if (pathPatternMatches(pattern, path)) return value;
+    if (pathPatternMatches(pattern, normalized)) return value;
   }
   return policy.defaultTolerance;
 }
 
-function pathPatternMatches(pattern: string, path: string): boolean {
-  const expression = pattern
-    .replace(/[.+?^${}()|[\]\\]/gu, "\\$&")
-    .replaceAll("\\[\\*\\]", "\\[\\d+\\]")
-    .replaceAll("**", ".*")
-    .replaceAll("*", "[^.\\[]+");
-  return new RegExp(`^${expression}$`, "u").test(path);
+function pathPatternMatches(pattern: string, normalizedPath: string): boolean {
+  if (pattern === normalizedPath) return true;
+  const recursivePrefix = pattern.endsWith(".**") ? pattern.slice(0, -3) : null;
+  return recursivePrefix !== null
+    && (normalizedPath === recursivePrefix || normalizedPath.startsWith(`${recursivePrefix}.`));
 }
 
 function sameCommandOutcomes(left: QaBatteryReport, right: QaBatteryReport): boolean {
