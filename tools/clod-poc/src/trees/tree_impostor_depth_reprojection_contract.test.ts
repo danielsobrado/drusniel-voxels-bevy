@@ -17,9 +17,10 @@ describe("tree impostor depth reprojection contract", () => {
     expect(captureSource).toContain("gl_FragColor = vec4(packedNormal, vTreeImpostorRelativeDepth)");
   });
 
-  it("coverage-weights depth across view and age layers", () => {
-    expect(samplingSource).toContain("depth: texture(atlas.normalDepth!, atlasUv).w");
-    expect(samplingSource).toContain("coverage: texture(atlas.albedo ?? atlas.texture, atlasUv).w");
+  it("coverage-weights depth across view and age layers at explicit vertex LOD", () => {
+    expect(samplingSource).toContain("depth: texture(atlas.normalDepth!, atlasUv, DEPTH_SAMPLE_MIP_LEVEL).w");
+    expect(samplingSource).toContain("coverage: texture(atlas.albedo ?? atlas.texture, atlasUv, DEPTH_SAMPLE_MIP_LEVEL).w");
+    expect(samplingSource).toContain("const DEPTH_SAMPLE_MIP_LEVEL = 0");
     expect(samplingSource).toContain("const cw00: TslNode = s00.coverage.mul(w00)");
     expect(samplingSource).toContain("const lowerWeight: TslNode = float(1).sub(layerBlend).mul(lower.coverage)");
     expect(depthSource).toContain("clamp(sample.depth, 0, 1).mul(2).sub(1).mul(range.extentM)");
