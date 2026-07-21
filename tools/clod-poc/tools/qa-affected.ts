@@ -39,20 +39,31 @@ async function main(): Promise<void> {
 }
 
 function gitChangedFiles(base: string): string[] {
-  const ranges = [`${base}...HEAD`, `${base}..HEAD`];
-  for (const range of ranges) {
+  const committed = diffFromBase(base);
+  const unstaged = gitDiff(["diff", "--name-only", "--diff-filter=ACMR"]);
+  const staged = gitDiff(["diff", "--cached", "--name-only", "--diff-filter=ACMR"]);
+  const untracked = gitDiff(["ls-files", "--others", "--exclude-standard"]);
+  return [...new Set([...committed, ...unstaged, ...staged, ...untracked])].sort();
+}
+
+function diffFromBase(base: string): string[] {
+  for (const range of [`${base}...HEAD`, `${base}..HEAD`]) {
     try {
-      const output = execFileSync("git", ["diff", "--name-only", "--diff-filter=ACMR", range], {
-        cwd: REPOSITORY_ROOT,
-        encoding: "utf8",
-        windowsHide: true,
-      });
-      return output.split(/\r?\n/u).map((entry) => entry.trim()).filter(Boolean);
+      return gitDiff(["diff", "--name-only", "--diff-filter=ACMR", range]);
     } catch {
       // Try the non-merge-base range before failing with a useful error.
     }
   }
   throw new Error(`unable to resolve QA diff base ${base}`);
+}
+
+function gitDiff(args: readonly string[]): string[] {
+  const output = execFileSync("git", [...args], {
+    cwd: REPOSITORY_ROOT,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  return output.split(/\r?\n/u).map((entry) => entry.trim()).filter(Boolean);
 }
 
 function validateScripts(scripts: readonly string[]): void {
