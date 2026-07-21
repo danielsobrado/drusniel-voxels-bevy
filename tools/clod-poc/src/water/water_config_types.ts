@@ -1,5 +1,6 @@
 import type { CausticsConfig } from "./causticsConfig.js";
 import type { HydrologyConfig } from "./hydrologyConfig.js";
+import type { WaterNormalModel } from "./water_normal_models.js";
 
 /** Debug render modes for the water material. */
 export const WATER_DEBUG_MODES = {
@@ -94,6 +95,7 @@ export interface WaterVisualConfig {
   deepColor: [number, number, number];
   foamColor: [number, number, number];
   alpha: number;
+  normalModel: WaterNormalModel;
   rippleCycle: number;
   fresnelPower: number;
   rippleAmp: number;

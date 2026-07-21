@@ -58,6 +58,8 @@ import { buildWaterStaticGridNodes } from "./water_node_static_grid.js";
 import { buildWaterAtlasGridNodes } from "./water_node_atlas_grid.js";
 import { buildWaterGlitter, buildWaterSuspendedScatter } from "./water_node_optics.js";
 import { buildWaterFoamNodes } from "./water_foam_nodes.js";
+import { buildSelectedWaterNormal } from "./water_node_normal_models.js";
+import { waterNormalModelId } from "./water_normal_models.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // three 0.184's TSL node graph types are intentionally loose: extension methods
@@ -109,6 +111,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
   const uCameraPos = uniform(u.uCameraPos.value) as TslNode;
   const uSunDir = uniform(u.uSunDir.value) as TslNode;
   const uWorldBounds = uniform(u.uWorldBounds.value) as TslNode;
+  const uNormalModel = uniform(waterNormalModelId(params.visual.normalModel)) as TslNode;
   const uRiverFlowNormalStrength = uniform(riverMaterial.flowNormalStrength) as TslNode;
   const uRiverCrossCurrentStrength = uniform(riverMaterial.crossCurrentStrength) as TslNode;
   const uRiverRapidNormalBoost = uniform(riverMaterial.rapidNormalBoost) as TslNode;
@@ -213,50 +216,30 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     const blend: TslNode = abs(phaseA.sub(0.5)).mul(2.0);
     const advectA: TslNode = advectDir.mul(phaseA.mul(uRippleLoopDistance).mul(advectSpeed));
     const advectB: TslNode = advectDir.mul(phaseB.mul(uRippleLoopDistance).mul(advectSpeed));
-    const tau = 6.28318530718;
-    const uvA: TslNode = worldPos.xz.mul(uRippleScaleA)
-      .add(advectDir.mul(phaseA.mul(uRippleLoopDistance).mul(advectSpeed)));
-    const uvB: TslNode = worldPos.xz.mul(uRippleScaleB)
-      .add(advectDir.mul(phaseB.mul(uRippleLoopDistance).mul(advectSpeed)))
-      .add(vec2(17.31, -9.47));
-    // Four rotated directional waves with non-harmonic frequencies (1.0, 1.83,
-    // 3.11, 5.27); the previous paired axis-aligned sinusoids interfered into
-    // stable moire bands over calm pools.
-    const rippleGrad = (uv: TslNode, phase: TslNode): { x: TslNode; z: TslNode } => {
-      const w1: TslNode = cos(uv.x.mul(0.94).add(uv.y.mul(0.34)).add(phase.mul(tau))).mul(uRippleStrengthA);
-      const w2: TslNode = cos(uv.x.mul(-0.75).add(uv.y.mul(1.665)).sub(phase.mul(tau * 0.7))).mul(uRippleStrengthA.mul(0.55));
-      const w3: TslNode = cos(uv.x.mul(1.773).add(uv.y.mul(-2.55)).add(phase.mul(tau * 0.9))).mul(uRippleStrengthB);
-      const w4: TslNode = cos(uv.x.mul(-4.585).add(uv.y.mul(-2.635)).sub(phase.mul(tau * 1.3))).mul(uRippleStrengthB.mul(0.6));
-      return {
-        x: w1.mul(0.94).add(w2.mul(-0.41)).add(w3.mul(0.57)).add(w4.mul(-0.87)),
-        z: w1.mul(0.34).add(w2.mul(0.91)).add(w3.mul(-0.82)).add(w4.mul(-0.50)),
-      };
-    };
-    const gradA = rippleGrad(uvA, phaseA);
-    const gradB = rippleGrad(uvB, phaseB);
-    const gAx: TslNode = gradA.x;
-    const gAz: TslNode = gradA.z;
-    const gBx: TslNode = gradB.x;
-    const gBz: TslNode = gradB.z;
-    const flowCoord: TslNode = vec2(dot(worldPos.xz, riverDir), dot(worldPos.xz, sideDir));
-    const channelPhase: TslNode = uTime.mul(advectSpeed).mul(1.35);
-    const channelWave: TslNode = sin(
-      flowCoord.x.mul(uRippleScaleA.mul(5.5))
-        .sub(channelPhase)
-        .add(sin(flowCoord.y.mul(0.08)).mul(0.7)),
-    );
-    const sideRipple: TslNode = cos(
-      flowCoord.y.mul(uRippleScaleB.mul(4.0))
-        .add(flowCoord.x.mul(0.018))
-        .add(channelPhase.mul(0.45)),
-    );
-    const channelGrad: TslNode = riverDir.mul(channelWave.mul(uRippleStrengthA).mul(uRiverFlowNormalStrength))
-      .add(sideDir.mul(sideRipple.mul(uRippleStrengthB).mul(uRiverCrossCurrentStrength)))
-      .mul(riverWeight)
-      .mul(float(0.45).add(rapidMask.mul(uRiverRapidNormalBoost)));
-    const gradX: TslNode = mix(gAx, gBx, blend).add(channelGrad.x).mul(uRippleAmp);
-    const gradZ: TslNode = mix(gAz, gBz, blend).add(channelGrad.y).mul(uRippleAmp);
-    const normal: TslNode = normalize(vec3(gradX.negate(), float(1), gradZ.negate()));
+    const normal: TslNode = buildSelectedWaterNormal({
+      model: uNormalModel,
+      worldXZ: worldPos.xz,
+      time: uTime,
+      cameraDistance: uCameraPos.sub(worldPos).length(),
+      riverDir,
+      sideDir,
+      riverWeight,
+      rapidMask,
+      phaseA,
+      phaseB,
+      phaseBlend: blend,
+      advectA,
+      advectB,
+      advectSpeed,
+      rippleAmp: uRippleAmp,
+      rippleScaleA: uRippleScaleA,
+      rippleScaleB: uRippleScaleB,
+      rippleStrengthA: uRippleStrengthA,
+      rippleStrengthB: uRippleStrengthB,
+      riverFlowNormalStrength: uRiverFlowNormalStrength,
+      riverCrossCurrentStrength: uRiverCrossCurrentStrength,
+      riverRapidNormalBoost: uRiverRapidNormalBoost,
+    });
 
     const viewDir: TslNode = normalize(uCameraPos.sub(worldPos));
     const sunDir: TslNode = normalize(uSunDir);
@@ -538,6 +521,7 @@ export function createWaterNodeMaterialImpl(params: WaterMaterialParams): WaterM
     body.sync(v.bodies);
     uFoam.value.copy(u.uFoamColor.value);
     uAlpha.value = v.alpha;
+    uNormalModel.value = waterNormalModelId(v.normalModel);
     uRippleCycle.value = v.rippleCycle;
     uFresnelPower.value = v.fresnel.power;
     uRippleAmp.value = v.rippleAmp;

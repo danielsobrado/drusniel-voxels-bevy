@@ -1,5 +1,6 @@
 import type { HydrologyConfig } from "./hydrologyConfig.js";
 import type { WaterConfig } from "./water_config_types.js";
+import { parseWaterNormalModel, type WaterNormalModel } from "./water_normal_models.js";
 
 export interface WaterRuntimeOverrideOptions {
   clone(config: WaterConfig): WaterConfig;
@@ -19,12 +20,20 @@ export function applyRuntimeRiverOverrides(config: WaterConfig, options: WaterRu
   next.hydrology.rivers.visibleDepthM = queryNumber(params, "riverVisibleDepth", next.hydrology.rivers.visibleDepthM);
   next.hydrology.rivers.carveDepthM = queryNumber(params, "riverCarveDepth", next.hydrology.rivers.carveDepthM);
   next.hydrology.rivers.flowSpeedMultiplier = queryNumber(params, "riverFlowSpeed", next.hydrology.rivers.flowSpeedMultiplier);
+  next.visual.normalModel = readWaterNormalModelOverride(params, next.visual.normalModel);
   next.visual.foam.shoreStrength = queryNumber(params, "shoreFoamStrength", next.visual.foam.shoreStrength);
   next.visual.foam.riverStrength = queryNumber(params, "riverFoamStrength", next.visual.foam.riverStrength);
   for (const river of next.fakeBodies.rivers) {
     river.width = Math.max(0.1, river.width * Math.max(0.1, next.hydrology.rivers.widenRadius / options.defaultHydrology.rivers.widenRadius));
   }
   return next;
+}
+
+export function readWaterNormalModelOverride(
+  params: URLSearchParams,
+  fallback: WaterNormalModel,
+): WaterNormalModel {
+  return parseWaterNormalModel(params.get("waterNormalModel"), fallback);
 }
 
 function runtimeSearchParams(): URLSearchParams | null {

@@ -13,6 +13,7 @@ import {
   readNumberTuple,
   recordFrom,
 } from "./water_config_readers.js";
+import { parseWaterNormalModel } from "./water_normal_models.js";
 
 function readBodyPreset(value: unknown, defaults: WaterBodyVisualPreset): WaterBodyVisualPreset {
   const body = recordFrom(value);
@@ -68,6 +69,7 @@ export function readWaterVisualConfig(value: unknown, defaults: WaterVisualConfi
       readColorTuple(visual.foam_color ?? visual.foamColor, defaults.foamColor),
     ),
     alpha: readNumber(visual.alpha, defaults.alpha),
+    normalModel: parseWaterNormalModel(visual.normal_model ?? visual.normalModel, defaults.normalModel),
     rippleCycle: readNumber(visual.ripple_cycle ?? visual.rippleCycle, defaults.rippleCycle),
     fresnelPower: readNumber(visual.fresnel_power ?? visual.fresnelPower, defaults.fresnelPower),
     rippleAmp: readNumber(visual.ripple_amp ?? visual.rippleAmp, defaults.rippleAmp),
