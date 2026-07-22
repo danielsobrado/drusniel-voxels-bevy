@@ -3,6 +3,7 @@ import type { BorderCoastOceanConfig } from "./border_coast_config.js";
 import { DEFAULT_BORDER_COAST_OCEAN_CONFIG } from "./border_coast_config.js";
 import { domainWarpedFbm2, fbm2, ridgedFbm2, smooth01, smoothstepRange } from "./procedural_noise.js";
 import { applyIslandShape, resolveIslandShapeConfig, type IslandShapeConfig } from "../world_source/island_shape.js";
+import { sampleHeightmapHeight } from "./heightmap_source.js";
 
 export const WATER_LEVEL = 18;
 export const DEFAULT_TERRAIN_SEED = 0;
@@ -210,6 +211,10 @@ export function getBorderCoastRuntime(): BorderCoastRuntime | null {
 }
 
 export function baseSurfaceHeight(x: number, z: number): number {
+  // An installed heightmap fully replaces the analytic shape (finite-world authority).
+  const heightmapHeight = sampleHeightmapHeight(x, z);
+  if (heightmapHeight !== null) return heightmapHeight;
+
   const cfg = TERRAIN_CONFIG;
   const field = terrainFieldConfig;
   const seed = field.seed;

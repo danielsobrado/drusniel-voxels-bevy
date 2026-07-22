@@ -1,52 +1,54 @@
 import * as THREE from "three";
 import type { ClodPagesConfig } from "../../config.js";
-import {
-  createChunkMeshBuild,
-  finalizeChunkMeshBuild,
-  stepChunkMeshBuild,
-  getDigEditsSnapshot,
-  voxelEditsRequireCpuDerivedMeshing,
-  type ChunkMeshBuild,
-} from "../../terrain/terrain.js";
+import { voxelEditsRequireCpuDerivedMeshing } from "../../terrain/terrain.js";
 import {
   getVoxelOverlaySource,
   setVoxelOverlayResidentBounds,
   voxelOverlayIntersectsBounds,
-  type VoxelOverlayBounds,
 } from "../voxel_overlay/voxel_overlay.js";
-import { resolveDigEdits } from "../../gpu/terrain_field_core.js";
 import type { ChunkMesh, GpuChunkMesher } from "../../gpu/gpu_chunk_mesher.js";
-import { toGeometry } from "../geometry/page_geometry.js";
 import type { ClodPageNode, PageMesh } from "../../types.js";
 import type { TerrainMaterialController } from "../material/terrain_material_controller.js";
-import type { TerrainMaterialHandle } from "../../rendering/terrain_material.js";
 import type { TerrainColliderFootprint, TerrainColliderSet } from "../../terrain/terrain_collider.js";
 import type { WorldBounds } from "../../terrain/terrain_surface.js";
+import {
+  liveBubbleBuildBudget,
+  liveBubbleColliderRadiusOverride,
+  liveBubbleGpuChunkBudget,
+  liveBubbleMaxInflightChunks,
+} from "./near_field_bubble_budgets.js";
+import { createNearFieldCpuPageQueue, type PendingCpuPageBuild } from "./near_field_cpu_page_queue.js";
+import {
+  createNearFieldGpuPageQueue,
+  pageChunks,
+  type PendingGpuPageBuild,
+  type PendingGpuWaitPageBuild,
+} from "./near_field_gpu_page_queue.js";
+import {
+  chunkColliderId,
+  createNearFieldBubbleSceneApply,
+  footprintIntersectsCircle,
+  liveBubbleChunkFootprint,
+  pageEntryReady,
+  pageGroupKey,
+  parsePageGroupKey,
+  showReadyGroup,
+  type ChunkGroupEntry,
+} from "./near_field_bubble_scene_apply.js";
 
-const INFINITE_ISLANDS_SCENE = "infinite-islands";
-const INFINITE_ISLANDS_DEFAULT_BUILD_BUDGET = 1;
-/** Per-frame budget for resumable CPU-fallback chunk meshing. */
-const CPU_CHUNK_MESH_BUDGET_MS = 6;
-const DEFAULT_GPU_CHUNK_DISPATCH_BUDGET = 2;
-const DEFAULT_GPU_MAX_INFLIGHT_CHUNKS = Number.MAX_SAFE_INTEGER;
-const GPU_PAGE_RETRY_LIMIT = 3;
-const GPU_PAGE_RETRY_DELAY_FRAMES = 12;
-/** Per-frame budget for turning completed GPU chunk meshes into scene objects + colliders. */
-const GPU_APPLY_BUDGET_MS = 2;
+export {
+  resolveLiveBubbleBuildBudget,
+  resolveLiveBubbleColliderRadius,
+  resolveLiveBubbleGpuChunkBudget,
+  resolveLiveBubbleMaxInflightChunks,
+} from "./near_field_bubble_budgets.js";
 
-export interface ChunkGroupEntry {
-  group: THREE.Group;
-  mats: TerrainMaterialHandle[];
-  unsubs: Array<() => void>;
-  colliderIds: string[];
-  ready: boolean;
-  failed: boolean;
-  validEmpty: boolean;
-  centerX: number;
-  centerZ: number;
-  lastTouchFrame: number;
-  voxelOverlayBounds: Pick<VoxelOverlayBounds, "minX" | "minZ" | "maxX" | "maxZ"> | null;
-}
+export {
+  liveBubbleChunkFootprint,
+  pageEntryReady,
+  pageGroupKey,
+  type ChunkGroupEntry,
+} from "./near_field_bubble_scene_apply.js";
 
 export interface NearFieldBubbleView {
   node: ClodPageNode;
@@ -164,65 +166,6 @@ export function createRequiredStreamingPageCoordCache(): RequiredStreamingPageCo
   };
 }
 
-interface PendingCpuPageBuild {
-  px: number;
-  pz: number;
-  worldBounds: WorldBounds;
-  chunks: Array<[number, number]>;
-  active: { dx: number; dz: number; build: ChunkMeshBuild } | null;
-  failures: number;
-}
-
-interface PendingGpuPageBuild {
-  px: number;
-  pz: number;
-  worldBounds: WorldBounds;
-  edits: ReturnType<typeof resolveDigEdits>;
-  chunks: Array<[number, number]>;
-  inflight: number;
-  failures: number;
-  attempts: number;
-  nextRetryFrame: number;
-  meshChunks: number;
-  emptyChunks: number;
-  startedAtMs: number;
-}
-
-interface PendingGpuWaitPageBuild {
-  px: number;
-  pz: number;
-}
-
-function pageGroupKey(px: number, pz: number): string {
-  return `L0:${px},${pz}`;
-}
-
-function chunkColliderId(pageKey: string, dx: number, dz: number): string {
-  return `${pageKey}:chunk:${dx},${dz}`;
-}
-
-export function liveBubbleChunkFootprint(
-  px: number,
-  pz: number,
-  dx: number,
-  dz: number,
-  chunksPerPage: number,
-  chunkSize: number,
-): TerrainColliderFootprint {
-  const minX = (px * chunksPerPage + dx) * chunkSize;
-  const minZ = (pz * chunksPerPage + dz) * chunkSize;
-  return { minX, minZ, maxX: minX + chunkSize, maxZ: minZ + chunkSize };
-}
-
-function parsePageGroupKey(key: string): { px: number; pz: number } {
-  const [, coordText] = key.split(":");
-  const [pxText, pzText] = (coordText ?? "").split(",");
-  const px = Number(pxText);
-  const pz = Number(pzText);
-  if (!Number.isInteger(px) || !Number.isInteger(pz)) throw new Error(`Invalid page key ${key}`);
-  return { px, pz };
-}
-
 function pageIntersectsFiniteWorld(px: number, pz: number, pageSize: number, world: WorldBounds): boolean {
   if (world.finite === false) return true;
   const minX = px * pageSize;
@@ -230,68 +173,6 @@ function pageIntersectsFiniteWorld(px: number, pz: number, pageSize: number, wor
   const minZ = pz * pageSize;
   const maxZ = minZ + pageSize;
   return maxX > 0 && minX < world.cellsX && maxZ > 0 && minZ < world.cellsZ;
-}
-
-function positiveIntegerParam(params: URLSearchParams, key: string): number | null {
-  const parsed = Number(params.get(key));
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
-}
-
-function positiveNumberParam(params: URLSearchParams, key: string): number | null {
-  const parsed = Number(params.get(key));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-export function resolveLiveBubbleBuildBudget(defaultBudget: number, params: URLSearchParams): number {
-  const queryBudget = positiveIntegerParam(params, "liveBubbleBudget")
-    ?? positiveIntegerParam(params, "live_bubble_budget");
-  if (queryBudget !== null) return Math.max(1, queryBudget);
-
-  if (params.get("scene") === INFINITE_ISLANDS_SCENE) return INFINITE_ISLANDS_DEFAULT_BUILD_BUDGET;
-
-  const fallback = Number.isFinite(defaultBudget) && defaultBudget > 0 ? Math.floor(defaultBudget) : 1;
-  return Math.max(1, fallback);
-}
-
-export function resolveLiveBubbleGpuChunkBudget(defaultBudget: number, params: URLSearchParams): number {
-  const queryBudget = positiveIntegerParam(params, "liveBubbleGpuChunkBudget")
-    ?? positiveIntegerParam(params, "live_bubble_gpu_chunk_budget");
-  if (queryBudget !== null) return Math.max(1, queryBudget);
-  const fallback = Number.isFinite(defaultBudget) && defaultBudget > 0 ? Math.floor(defaultBudget) : DEFAULT_GPU_CHUNK_DISPATCH_BUDGET;
-  return Math.max(1, fallback);
-}
-
-export function resolveLiveBubbleMaxInflightChunks(defaultMax: number, params: URLSearchParams): number {
-  const queryMax = positiveIntegerParam(params, "liveBubbleMaxInflightChunks")
-    ?? positiveIntegerParam(params, "live_bubble_max_inflight_chunks");
-  if (queryMax !== null) return Math.max(1, queryMax);
-  const fallback = Number.isFinite(defaultMax) && defaultMax > 0 ? Math.floor(defaultMax) : DEFAULT_GPU_MAX_INFLIGHT_CHUNKS;
-  return Math.max(1, fallback);
-}
-
-export function resolveLiveBubbleColliderRadius(params: URLSearchParams): number | null {
-  return positiveNumberParam(params, "liveBubbleColliderRadius")
-    ?? positiveNumberParam(params, "live_bubble_collider_radius");
-}
-
-function liveBubbleBuildBudget(defaultBudget: number): number {
-  if (typeof window === "undefined") return resolveLiveBubbleBuildBudget(defaultBudget, new URLSearchParams());
-  return resolveLiveBubbleBuildBudget(defaultBudget, new URLSearchParams(window.location.search));
-}
-
-function liveBubbleGpuChunkBudget(): number {
-  if (typeof window === "undefined") return resolveLiveBubbleGpuChunkBudget(DEFAULT_GPU_CHUNK_DISPATCH_BUDGET, new URLSearchParams());
-  return resolveLiveBubbleGpuChunkBudget(DEFAULT_GPU_CHUNK_DISPATCH_BUDGET, new URLSearchParams(window.location.search));
-}
-
-function liveBubbleMaxInflightChunks(): number {
-  if (typeof window === "undefined") return resolveLiveBubbleMaxInflightChunks(DEFAULT_GPU_MAX_INFLIGHT_CHUNKS, new URLSearchParams());
-  return resolveLiveBubbleMaxInflightChunks(DEFAULT_GPU_MAX_INFLIGHT_CHUNKS, new URLSearchParams(window.location.search));
-}
-
-function liveBubbleColliderRadiusOverride(): number | null {
-  if (typeof window === "undefined") return null;
-  return resolveLiveBubbleColliderRadius(new URLSearchParams(window.location.search));
 }
 
 export function requiredStreamingPageCoords(
@@ -348,18 +229,6 @@ export function liveBubbleOwnsPageView(
   return dx * dx + dz * dz <= radius * radius;
 }
 
-function footprintIntersectsCircle(
-  footprint: TerrainColliderFootprint,
-  center: THREE.Vector3,
-  radius: number,
-): boolean {
-  const closestX = THREE.MathUtils.clamp(center.x, footprint.minX, footprint.maxX);
-  const closestZ = THREE.MathUtils.clamp(center.z, footprint.minZ, footprint.maxZ);
-  const dx = center.x - closestX;
-  const dz = center.z - closestZ;
-  return dx * dx + dz * dz <= radius * radius;
-}
-
 export function createNearFieldBubbleController(deps: NearFieldBubbleControllerDeps): NearFieldBubbleController {
   const P = deps.cfg.page.chunks_per_page;
   const S = deps.cfg.page.chunk_size;
@@ -373,7 +242,14 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   const cpuPendingBuilds = new Map<string, PendingCpuPageBuild>();
   const gpuWaitBuilds = new Map<string, PendingGpuWaitPageBuild>();
   const gpuPendingBuilds = new Map<string, PendingGpuPageBuild>();
-  const gpuApplyQueue: Array<{ key: string; entry: ChunkGroupEntry; job: PendingGpuPageBuild; dx: number; dz: number; cm: ChunkMesh }> = [];
+  const gpuApplyQueue: Array<{
+    key: string;
+    entry: ChunkGroupEntry;
+    job: PendingGpuPageBuild;
+    dx: number;
+    dz: number;
+    cm: ChunkMesh;
+  }> = [];
   const requiredCoordCache = createRequiredStreamingPageCoordCache();
   const terrainColliders = deps.terrainColliders ?? null;
   const pageRevisions = new Map<string, number>();
@@ -391,22 +267,81 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
   let cpuWorkUnitMaxMsThisFrame = 0;
   let gpuApplyMaxMsThisFrame = 0;
 
-  const pageCenter = (node: ClodPageNode): [number, number] => [
-    (node.footprint.minX + node.footprint.maxX) / 2,
-    (node.footprint.minZ + node.footprint.maxZ) / 2,
-  ];
+  const sceneApply = createNearFieldBubbleSceneApply({
+    scene: deps.scene,
+    materialController: deps.materialController,
+    getTintBubble: deps.getTintBubble,
+    terrainColliders,
+    chunksPerPage: P,
+    chunkGroups,
+    getBubbleCenter: () => currentBubbleCenter,
+    getColliderRadius: () => currentColliderRadius,
+    onColliderRegistered: () => {
+      colliderRegistrations++;
+    },
+    onColliderRemoved: () => {
+      colliderRemovals++;
+    },
+  });
 
-  const buildChunkMaterial = (): TerrainMaterialHandle => {
-    const mat = deps.materialController.makeTerrainMaterial(deps.getTintBubble() ? 0xc94b4b : 0xffffff);
-    deps.materialController.configureChunkMaterial(mat);
-    return mat;
-  };
+  const cpuQueue = createNearFieldCpuPageQueue({
+    pending: cpuPendingBuilds,
+    gpuPendingHas: (key) => gpuPendingBuilds.has(key),
+    getEntry: (key) => chunkGroups.get(key),
+    chunksPerPage: P,
+    chunkSize: S,
+    cfg: deps.cfg,
+    sceneApply,
+    onWorkUnitMs: (ms) => {
+      cpuWorkUnitMaxMsThisFrame = Math.max(cpuWorkUnitMaxMsThisFrame, ms);
+    },
+  });
 
   const buildWorldBoundsForPage = (px: number, pz: number): WorldBounds => {
     if (!liveStreamingEnabled) return deps.worldBounds;
     if (pageIntersectsFiniteWorld(px, pz, pageSize, deps.worldBounds)) return deps.worldBounds;
     return { ...deps.worldBounds, finite: false };
   };
+
+  const gpuQueue = createNearFieldGpuPageQueue({
+    pending: gpuPendingBuilds,
+    wait: gpuWaitBuilds,
+    applyQueue: gpuApplyQueue,
+    cpuPendingHas: (key) => cpuPendingBuilds.has(key),
+    enqueueCpuChunk: cpuQueue.enqueueChunk,
+    getEntry: (key) => chunkGroups.get(key),
+    getGpuMesher: deps.getGpuMesher,
+    buildWorldBoundsForPage,
+    getFrame: () => currentFrame,
+    liveStreamingEnabled,
+    terrainColliders,
+    chunksPerPage: P,
+    chunkSize: S,
+    dispatchBudget: gpuChunkDispatchBudget,
+    maxInflightChunks: gpuMaxInflightChunks,
+    sceneApply,
+    onGpuRetry: () => {
+      gpuRetriesTotal++;
+    },
+    onGpuTerminalFailure: () => {
+      gpuTerminalFailuresTotal++;
+    },
+    onChunkMs: (ms) => {
+      totalChunkMs += ms;
+      completedChunks++;
+    },
+    onSlowestPageMs: (ms) => {
+      slowestPageMs = Math.max(slowestPageMs, ms);
+    },
+    onApplyMs: (ms) => {
+      gpuApplyMaxMsThisFrame = Math.max(gpuApplyMaxMsThisFrame, ms);
+    },
+  });
+
+  const pageCenter = (node: ClodPageNode): [number, number] => [
+    (node.footprint.minX + node.footprint.maxX) / 2,
+    (node.footprint.minZ + node.footprint.maxZ) / 2,
+  ];
 
   const activeColliderPages = (): number => {
     let total = 0;
@@ -424,177 +359,21 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     return total;
   };
 
-  const gpuRetryPages = (): number => {
-    let total = 0;
-    for (const job of gpuPendingBuilds.values()) {
-      if (job.attempts > 0 || currentFrame < job.nextRetryFrame) total++;
-    }
-    return total;
-  };
-
-  const addChunkMesh = (
-    group: THREE.Group,
-    mats: TerrainMaterialHandle[],
-    unsubs: Array<() => void>,
-    colliderIds: string[],
-    cm: PageMesh | ChunkMesh,
-    colliderId: string,
-    footprint: TerrainColliderFootprint,
-    localIndex: number,
-  ) => {
-    const mat = buildChunkMaterial();
-    const geometry = toGeometry(cm);
-    const mesh = new THREE.Mesh(geometry, mat.material);
-    const unsub = mat.onMaterialChanged((material) => {
-      mesh.material = material;
-    });
-    unsubs.push(unsub);
-    mesh.userData["liveChunkIndex"] = localIndex;
-    mesh.userData["liveChunkMaterial"] = mat;
-    mesh.userData["liveChunkUnsub"] = unsub;
-    group.add(mesh);
-    mats.push(mat);
-    const colliderAllowed = currentColliderRadius === null
-      || footprintIntersectsCircle(footprint, currentBubbleCenter, currentColliderRadius);
-    if (cm.indices.length > 0 && terrainColliders && colliderAllowed) {
-      terrainColliders.upsertPage({ id: colliderId, geometry, footprint });
-      if (!colliderIds.includes(colliderId)) colliderIds.push(colliderId);
-      colliderRegistrations++;
-    }
-  };
-
-  const disposeChunkMesh = (nodeId: string, entry: ChunkGroupEntry, mesh: THREE.Mesh, removeCollider: boolean): void => {
-    const localIndex = Number(mesh.userData["liveChunkIndex"]);
-    const mat = mesh.userData["liveChunkMaterial"] as TerrainMaterialHandle | undefined;
-    const unsub = mesh.userData["liveChunkUnsub"] as (() => void) | undefined;
-    entry.group.remove(mesh);
-    mesh.geometry.dispose();
-    if (unsub) {
-      unsub();
-      const index = entry.unsubs.indexOf(unsub);
-      if (index >= 0) entry.unsubs.splice(index, 1);
-    }
-    if (mat) {
-      const index = entry.mats.indexOf(mat);
-      if (index >= 0) entry.mats.splice(index, 1);
-      if (mat !== deps.materialController.sharedMaterial) {
-        deps.materialController.materials.delete(mat);
-        mat.material.dispose();
-      }
-    }
-    if (removeCollider && Number.isInteger(localIndex)) {
-      const dx = localIndex % P;
-      const dz = (localIndex / P) | 0;
-      const colliderId = chunkColliderId(nodeId, dx, dz);
-      if (terrainColliders?.removePage(colliderId)) colliderRemovals++;
-      const colliderIndex = entry.colliderIds.indexOf(colliderId);
-      if (colliderIndex >= 0) entry.colliderIds.splice(colliderIndex, 1);
-    }
-  };
-
-  const clearEntryContent = (entry: ChunkGroupEntry): void => {
-    for (const colliderId of entry.colliderIds.splice(0)) {
-      if (terrainColliders?.removePage(colliderId)) colliderRemovals++;
-    }
-    for (const child of [...entry.group.children]) {
-      entry.group.remove(child);
-      (child as THREE.Mesh).geometry.dispose();
-    }
-    for (const unsub of entry.unsubs.splice(0)) unsub();
-    for (const m of entry.mats.splice(0)) {
-      if (m === deps.materialController.sharedMaterial) continue;
-      deps.materialController.materials.delete(m);
-      m.material.dispose();
-    }
-  };
-
   const disposeEntry = (nodeId: string, entry: ChunkGroupEntry) => {
     setVoxelOverlayResidentBounds(nodeId, null);
     deps.scene.remove(entry.group);
-    clearEntryContent(entry);
+    sceneApply.clearEntryContent(entry);
     chunkGroups.delete(nodeId);
-    cpuPendingBuilds.delete(nodeId);
-    gpuWaitBuilds.delete(nodeId);
-    gpuPendingBuilds.delete(nodeId);
+    cpuQueue.delete(nodeId);
+    gpuQueue.delete(nodeId);
     pageRevisions.delete(nodeId);
-  };
-
-  const createDeferredEntry = (
-    key: string,
-    group: THREE.Group,
-    mats: TerrainMaterialHandle[],
-    unsubs: Array<() => void>,
-    colliderIds: string[],
-    centerX: number,
-    centerZ: number,
-    voxelOverlayBounds: ChunkGroupEntry["voxelOverlayBounds"],
-  ): ChunkGroupEntry => {
-    group.visible = false;
-    deps.scene.add(group);
-    const entry: ChunkGroupEntry = {
-      group,
-      mats,
-      unsubs,
-      colliderIds,
-      ready: false,
-      failed: false,
-      validEmpty: false,
-      centerX,
-      centerZ,
-      lastTouchFrame: 0,
-      voxelOverlayBounds,
-    };
-    chunkGroups.set(key, entry);
-    return entry;
-  };
-
-  const pageChunks = (): Array<[number, number]> => {
-    const chunks: Array<[number, number]> = [];
-    for (let dz = 0; dz < P; dz++) {
-      for (let dx = 0; dx < P; dx++) chunks.push([dx, dz]);
-    }
-    return chunks;
-  };
-
-  const enqueueGpuPageBuild = (
-    key: string,
-    px: number,
-    pz: number,
-    worldBounds: WorldBounds,
-    attempts = 0,
-    nextRetryFrame = 0,
-  ): void => {
-    const edits = resolveDigEdits(getDigEditsSnapshot());
-    gpuPendingBuilds.set(key, {
-      px,
-      pz,
-      worldBounds,
-      edits,
-      chunks: pageChunks(),
-      inflight: 0,
-      failures: 0,
-      attempts,
-      nextRetryFrame,
-      meshChunks: 0,
-      emptyChunks: 0,
-      startedAtMs: performance.now(),
-    });
-  };
-
-  const enqueueCpuChunkBuild = (key: string, px: number, pz: number, worldBounds: WorldBounds, dx: number, dz: number): void => {
-    const existing = cpuPendingBuilds.get(key);
-    if (existing) {
-      existing.chunks.push([dx, dz]);
-      return;
-    }
-    cpuPendingBuilds.set(key, { px, pz, worldBounds, chunks: [[dx, dz]], active: null, failures: 0 });
   };
 
   const ensureChunkGroupForPage = (key: string, px: number, pz: number, centerX: number, centerZ: number): ChunkGroupEntry => {
     const existing = chunkGroups.get(key);
     if (existing) return existing;
     const group = new THREE.Group();
-    const mats: TerrainMaterialHandle[] = [];
+    const mats: ChunkGroupEntry["mats"] = [];
     const unsubs: Array<() => void> = [];
     const colliderIds: string[] = [];
     const worldBounds = buildWorldBoundsForPage(px, pz);
@@ -609,215 +388,23 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     const gpuMesher = requiresCpuMeshing ? null : deps.getGpuMesher();
 
     if (gpuMesher) {
-      const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ, complexOverlay ? pageBounds : null);
-      enqueueGpuPageBuild(key, px, pz, worldBounds);
+      const entry = sceneApply.createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ, complexOverlay ? pageBounds : null);
+      gpuQueue.enqueuePageBuild(key, px, pz, worldBounds);
       return entry;
     }
 
     if (liveStreamingEnabled && !requiresCpuMeshing) {
-      const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ, complexOverlay ? pageBounds : null);
-      gpuWaitBuilds.set(key, { px, pz });
+      const entry = sceneApply.createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ, complexOverlay ? pageBounds : null);
+      gpuQueue.enqueueWait(key, px, pz);
       return entry;
     }
 
     // CPU fallback: never mesh a whole page synchronously — queue the chunks
     // and drain them in update() under a per-frame budget. The entry follows
     // the same deferred-ready contract as the GPU path.
-    const entry = createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ, complexOverlay ? pageBounds : null);
-    cpuPendingBuilds.set(key, { px, pz, worldBounds, chunks: pageChunks(), active: null, failures: 0 });
+    const entry = sceneApply.createDeferredEntry(key, group, mats, unsubs, colliderIds, centerX, centerZ, complexOverlay ? pageBounds : null);
+    cpuQueue.enqueuePage(key, px, pz, worldBounds, pageChunks(P));
     return entry;
-  };
-
-  const promoteGpuWaitBuilds = () => {
-    if (gpuWaitBuilds.size === 0 || !deps.getGpuMesher()) return;
-    const jobs = [...gpuWaitBuilds.entries()]
-      .sort((a, b) => (chunkGroups.get(b[0])?.lastTouchFrame ?? -1) - (chunkGroups.get(a[0])?.lastTouchFrame ?? -1));
-    for (const [key, job] of jobs) {
-      const entry = chunkGroups.get(key);
-      gpuWaitBuilds.delete(key);
-      if (!entry || entry.ready || entry.failed || gpuPendingBuilds.has(key)) continue;
-      enqueueGpuPageBuild(key, job.px, job.pz, buildWorldBoundsForPage(job.px, job.pz));
-    }
-  };
-
-  const retryGpuPageBuild = (key: string, entry: ChunkGroupEntry, job: PendingGpuPageBuild): boolean => {
-    if (!liveStreamingEnabled || job.attempts >= GPU_PAGE_RETRY_LIMIT) return false;
-    clearEntryContent(entry);
-    entry.ready = false;
-    entry.failed = false;
-    entry.validEmpty = false;
-    gpuRetriesTotal++;
-    enqueueGpuPageBuild(key, job.px, job.pz, job.worldBounds, job.attempts + 1, currentFrame + GPU_PAGE_RETRY_DELAY_FRAMES);
-    return true;
-  };
-
-  const completeGpuChunk = (key: string, entry: ChunkGroupEntry, job: PendingGpuPageBuild) => {
-    job.inflight--;
-    if (chunkGroups.get(key) !== entry || gpuPendingBuilds.get(key) !== job) return;
-    if (job.chunks.length > 0 || job.inflight > 0) return;
-    gpuPendingBuilds.delete(key);
-    if (cpuPendingBuilds.has(key)) return;
-
-    if (job.failures > 0 && retryGpuPageBuild(key, entry, job)) return;
-    if (job.failures > 0) gpuTerminalFailuresTotal++;
-    entry.failed = job.failures > 0;
-    entry.validEmpty = job.failures === 0 && job.meshChunks === 0;
-    entry.ready = true;
-    setVoxelOverlayResidentBounds(key, entry.voxelOverlayBounds);
-    slowestPageMs = Math.max(slowestPageMs, performance.now() - job.startedAtMs);
-  };
-
-  const countGpuInflightChunks = (): number => {
-    let inflightChunks = 0;
-    for (const job of gpuPendingBuilds.values()) inflightChunks += job.inflight;
-    return inflightChunks;
-  };
-
-  // Turn completed GPU chunk meshes into scene objects + colliders under a per-frame budget.
-  // Always applies at least one queued chunk so streaming keeps making progress even when the
-  // budget is tight; the deadline check runs after each apply so a single expensive chunk cannot
-  // be starved forever.
-  const drainGpuApplyQueue = (deadlineMs: number) => {
-    while (gpuApplyQueue.length > 0) {
-      const { key, entry, job, dx, dz, cm } = gpuApplyQueue.shift()!;
-      if (chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job) {
-        const applyStartedAt = performance.now();
-        job.meshChunks++;
-        addChunkMesh(
-          entry.group,
-          entry.mats,
-          entry.unsubs,
-          entry.colliderIds,
-          cm,
-          chunkColliderId(key, dx, dz),
-          liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
-          dz * P + dx,
-        );
-        gpuApplyMaxMsThisFrame = Math.max(gpuApplyMaxMsThisFrame, performance.now() - applyStartedAt);
-      }
-      completeGpuChunk(key, entry, job);
-      if (performance.now() >= deadlineMs) break;
-    }
-  };
-
-  const drainGpuPendingBuilds = () => {
-    let dispatched = 0;
-    let inflightChunks = countGpuInflightChunks();
-    const jobs = [...gpuPendingBuilds.entries()]
-      .sort((a, b) => (chunkGroups.get(b[0])?.lastTouchFrame ?? -1) - (chunkGroups.get(a[0])?.lastTouchFrame ?? -1));
-    for (const [key, job] of jobs) {
-      if (inflightChunks >= gpuMaxInflightChunks) return;
-      if (currentFrame < job.nextRetryFrame) continue;
-      const entry = chunkGroups.get(key);
-      const gpuMesher = deps.getGpuMesher();
-      if (!entry) {
-        gpuPendingBuilds.delete(key);
-        continue;
-      }
-      if (!gpuMesher) {
-        if (job.inflight === 0) {
-          gpuPendingBuilds.delete(key);
-          entry.ready = false;
-          entry.failed = false;
-          entry.validEmpty = false;
-          gpuWaitBuilds.set(key, { px: job.px, pz: job.pz });
-        }
-        continue;
-      }
-      while (job.chunks.length > 0 && dispatched < gpuChunkDispatchBudget && inflightChunks < gpuMaxInflightChunks) {
-        const [dx, dz] = job.chunks.shift()!;
-        job.inflight++;
-        dispatched++;
-        inflightChunks++;
-        const chunkStartedAt = performance.now();
-        gpuMesher.meshChunk(job.px * P + dx, job.pz * P + dz, job.worldBounds, job.edits)
-          .then((cm) => {
-            totalChunkMs += performance.now() - chunkStartedAt;
-            completedChunks++;
-            const current = chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job;
-            if (current && cm.indices.length > 0) {
-              // Defer the expensive geometry/material/collider build to the frame-budgeted apply
-              // drain so a burst of GPU completions landing in one microtask flush cannot spike the
-              // main thread here. Inflight stays held until the mesh is actually applied, so the
-              // page cannot be reported ready before its objects exist.
-              gpuApplyQueue.push({ key, entry, job, dx, dz, cm });
-              return;
-            }
-            if (current) {
-              job.emptyChunks++;
-              if (terrainColliders && !liveStreamingEnabled) {
-                enqueueCpuChunkBuild(key, job.px, job.pz, job.worldBounds, dx, dz);
-              }
-            }
-            completeGpuChunk(key, entry, job);
-          })
-          .catch(() => {
-            totalChunkMs += performance.now() - chunkStartedAt;
-            completedChunks++;
-            if (chunkGroups.get(key) === entry && gpuPendingBuilds.get(key) === job) job.failures++;
-            completeGpuChunk(key, entry, job);
-          });
-      }
-      if (dispatched >= gpuChunkDispatchBudget || inflightChunks >= gpuMaxInflightChunks) return;
-    }
-  };
-
-  const drainCpuPendingBuilds = (tBubbleStart: number) => {
-    const deadlineMs = tBubbleStart + CPU_CHUNK_MESH_BUDGET_MS;
-    while (cpuPendingBuilds.size > 0) {
-      const next = cpuPendingBuilds.entries().next().value as [string, PendingCpuPageBuild];
-      const [key, job] = next;
-      const entry = chunkGroups.get(key);
-      if (!entry || (job.chunks.length === 0 && !job.active)) {
-        cpuPendingBuilds.delete(key);
-        continue;
-      }
-      try {
-        const unitStartedAt = performance.now();
-        if (!job.active) {
-          const [dx, dz] = job.chunks.shift()!;
-          job.active = {
-            dx,
-            dz,
-            build: createChunkMeshBuild(job.px * P + dx, job.pz * P + dz, deps.cfg, job.worldBounds),
-          };
-        }
-        const complete = stepChunkMeshBuild(job.active.build, deadlineMs);
-        if (!complete) {
-          cpuWorkUnitMaxMsThisFrame = Math.max(cpuWorkUnitMaxMsThisFrame, performance.now() - unitStartedAt);
-          return;
-        }
-        const { dx, dz, build } = job.active;
-        addChunkMesh(
-          entry.group,
-          entry.mats,
-          entry.unsubs,
-          entry.colliderIds,
-          finalizeChunkMeshBuild(build),
-          chunkColliderId(key, dx, dz),
-          liveBubbleChunkFootprint(job.px, job.pz, dx, dz, P, S),
-          dz * P + dx,
-        );
-        job.active = null;
-        cpuWorkUnitMaxMsThisFrame = Math.max(cpuWorkUnitMaxMsThisFrame, performance.now() - unitStartedAt);
-      } catch (error) {
-        job.failures++;
-        const dx = job.active?.dx ?? -1;
-        const dz = job.active?.dz ?? -1;
-        job.active = null;
-        console.error(`[bubble] CPU chunk meshing failed for page ${key} chunk (${dx},${dz})`, error);
-      }
-      if (job.chunks.length === 0 && !job.active) {
-        cpuPendingBuilds.delete(key);
-        if (!gpuPendingBuilds.has(key)) {
-          entry.failed = job.failures > 0;
-          entry.validEmpty = job.failures === 0 && entry.group.children.length === 0;
-          entry.ready = true;
-          setVoxelOverlayResidentBounds(key, entry.voxelOverlayBounds);
-        }
-      }
-      if (performance.now() >= deadlineMs) return;
-    }
   };
 
   const ensureChunkGroup = (node: ClodPageNode): ChunkGroupEntry => {
@@ -851,28 +438,11 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
     return { evictions, colliderEvictions };
   };
 
-  const showReadyGroup = (entry: ChunkGroupEntry, fallbackMesh?: THREE.Mesh): boolean => {
-    if (entry.ready && !entry.failed && entry.group.children.length > 0) {
-      if (fallbackMesh) fallbackMesh.visible = false;
-      entry.group.visible = true;
-      return true;
-    }
-    entry.group.visible = false;
-    return false;
-  };
-
-  const pageEntryReady = (entry: ChunkGroupEntry): boolean =>
-    entry.ready && !entry.failed && (entry.group.children.length > 0 || entry.colliderIds.length > 0 || entry.validEmpty);
-
-  const countGpuChunks = (): { pendingChunks: number; inflightChunks: number } => {
-    let pendingChunks = 0;
-    let inflightChunks = 0;
-    for (const job of gpuPendingBuilds.values()) {
-      pendingChunks += job.chunks.length;
-      inflightChunks += job.inflight;
-    }
+  const countPendingChunks = (): { pendingChunks: number; inflightChunks: number } => {
+    const gpu = gpuQueue.countChunks();
+    let pendingChunks = gpu.pendingChunks;
     for (const job of cpuPendingBuilds.values()) pendingChunks += job.chunks.length + (job.active ? 1 : 0);
-    return { pendingChunks, inflightChunks };
+    return { pendingChunks, inflightChunks: gpu.inflightChunks };
   };
 
   const countRequiredPages = (requiredCoords: PageCoord[], colliderRadius: number | null) => {
@@ -966,10 +536,10 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           }
         }
 
-        promoteGpuWaitBuilds();
-        drainGpuApplyQueue(performance.now() + GPU_APPLY_BUDGET_MS);
-        drainGpuPendingBuilds();
-        drainCpuPendingBuilds(tBubbleStart);
+        gpuQueue.promoteWaitBuilds();
+        gpuQueue.drainApplyQueue();
+        gpuQueue.drainPendingBuilds();
+        cpuQueue.drain(tBubbleStart);
         const centerPage = `${Math.floor(input.bubbleCenter.x / pageSize)},${Math.floor(input.bubbleCenter.z / pageSize)}:${input.bubbleRadius}`;
         if (centerPage !== lastEvictionCenterPage || chunkGroups.size > deps.maxCachedChunkGroups) {
           lastEvictionCenterPage = centerPage;
@@ -985,7 +555,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         }
       }
       const required = countRequiredPages(requiredCoords, currentColliderRadius);
-      const chunkCounts = countGpuChunks();
+      const chunkCounts = countPendingChunks();
       return {
         chunkGroupsBuiltThisFrame,
         bubbleMs: performance.now() - tBubbleStart,
@@ -998,7 +568,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
         colliderEvictions,
         streamedColliderPages: activeColliderPages(),
         validEmptyPages: validEmptyPages(),
-        gpuRetryPages: gpuRetryPages(),
+        gpuRetryPages: gpuQueue.retryPages(),
         gpuRetriesTotal,
         gpuTerminalFailuresTotal,
         colliderRegistrations,
@@ -1038,7 +608,7 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
           (child) => Number(child.userData["liveChunkIndex"]) === localIndex,
         ) as THREE.Mesh | undefined;
         if (chunkMesh.indices.length > 0) {
-          addChunkMesh(
+          sceneApply.addChunkMesh(
             entry.group,
             entry.mats,
             entry.unsubs,
@@ -1048,9 +618,9 @@ export function createNearFieldBubbleController(deps: NearFieldBubbleControllerD
             liveBubbleChunkFootprint(px, pz, dx, dz, P, S),
             localIndex,
           );
-          if (oldMesh) disposeChunkMesh(nodeId, entry, oldMesh, false);
+          if (oldMesh) sceneApply.disposeChunkMesh(nodeId, entry, oldMesh, false);
         } else if (oldMesh) {
-          disposeChunkMesh(nodeId, entry, oldMesh, true);
+          sceneApply.disposeChunkMesh(nodeId, entry, oldMesh, true);
         }
       }
       entry.validEmpty = entry.group.children.length === 0;

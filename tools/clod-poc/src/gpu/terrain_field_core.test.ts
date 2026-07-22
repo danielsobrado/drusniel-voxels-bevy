@@ -19,6 +19,7 @@ import {
   resolveDigEdits,
   setTerrainFieldCoreConfig,
 } from "./terrain_field_core.js";
+import { setHeightmapSource, type HeightmapSource } from "../terrain/heightmap_source.js";
 
 // A spread of coords: negatives, fractionals, and large values that exercise the massif cell
 // offsets (x+4096, z-2048) and valley/region terms.
@@ -29,7 +30,15 @@ afterEach(() => {
   clearDigEdits();
   setTerrainFieldConfig(null);
   setTerrainFieldCoreConfig(null);
+  setHeightmapSource(null);
 });
+
+function makeHeightmapSource(detailM: number): HeightmapSource {
+  // A 4x4 raster with a non-trivial gradient so bilinear reconstruction is exercised.
+  const data = new Float32Array(16);
+  for (let i = 0; i < 16; i++) data[i] = ((i * 37) % 100) / 100;
+  return { width: 4, height: 4, data, worldCells: 512, baseM: 4, spanM: 90, flipZ: false, detailM, seed: 0 };
+}
 
 describe("terrain_field_core surfaceHeight parity", () => {
   it("matches canonical surfaceHeight exactly across the grid", () => {
@@ -47,6 +56,28 @@ describe("terrain_field_core surfaceHeight parity", () => {
     const seededHeight = surfaceHeight(285.71, 911);
     expect(surfaceHeightCore(285.71, 911)).toBe(seededHeight);
     expect(seededHeight).not.toBe(defaultHeight);
+  });
+
+  it("matches canonical surfaceHeight exactly when a heightmap source is installed", () => {
+    setHeightmapSource(makeHeightmapSource(0));
+    for (const x of XS) {
+      for (const z of ZS) {
+        expect(surfaceHeightCore(x, z)).toBe(surfaceHeight(x, z));
+      }
+    }
+  });
+
+  it("stays in parity with heightmap micro-relief enabled", () => {
+    setHeightmapSource(null);
+    const analytic = surfaceHeight(37.5, 96);
+    setHeightmapSource(makeHeightmapSource(1.5));
+    for (const x of XS) {
+      for (const z of ZS) {
+        expect(surfaceHeightCore(x, z)).toBe(surfaceHeight(x, z));
+      }
+    }
+    // The heightmap must actually override the analytic field, not coincidentally equal it.
+    expect(surfaceHeight(37.5, 96)).not.toBe(analytic);
   });
 
   it("applies island shaping in parity when enabled", () => {

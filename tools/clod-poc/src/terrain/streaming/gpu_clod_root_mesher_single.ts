@@ -1,37 +1,11 @@
 import type { ClodPagesConfig } from "../../config.js";
-import { initSimplifier, simplifyPage } from "../../clod/simplify.js";
-import { concatPageSourceMeshes, filterPageSourceSections } from "../../clod/pageSource.js";
-import type { PageSourceSection } from "../../clod/pageSourceSections.js";
-import { weldVertices } from "../../clod/weld.js";
+import { initSimplifier } from "../../clod/simplify.js";
 import {
-  stripDegenerateTriangles,
-  validateFinalPageMesh,
-  validatePageMesh,
-  validateWeldedIntermediate,
-} from "../../clod/validate.js";
-import {
-  boundsOf,
-  clonePageMesh,
-  footprintFor,
-  INITIAL_NODE_REVISION,
-  requireFourChildren,
-} from "../../clod/quadtree_support.js";
-import { selectParentSimplificationCandidate } from "../../clod/quadtree.js";
-import {
-  DIG_EDIT_BYTES,
-  FIELD_PARAM_WORDS,
-  MESH_PARAM_WORDS,
   Y_CELLS,
   assembleChunkMesh,
   computeMeshDims,
-  packDigEdits,
-  packFieldParams,
-  packMeshParams,
-  type MeshDims,
 } from "../../gpu/gpu_mesh_buffers.js";
-import { composeTerrainFieldShader } from "../../gpu/wgsl_modules.js";
 import { requestWebGpuDevice } from "../../gpu/webgpu_device.js";
-import { buildParentSimplifyLocks } from "../../lock.js";
 import { ClodBuildError, type ClodPageNode, type PageMesh } from "../../types.js";
 import type { WorldBounds } from "../terrain_surface.js";
 import {
@@ -53,11 +27,29 @@ import {
   type RootGpuBatchLimits,
 } from "./gpu_clod_root_batch_buffers.js";
 import type { StreamingRootGpuMesherConfig } from "./streamed_root_gpu_config.js";
-import { continentTileMeshingEnabled } from "./streamed_root_gpu_config.js";
-import { createHeightfieldTileGpuAtlas } from "../../world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
+import {
+  createHeightAtlasBindings,
+  terrainFieldShaderWithTileAtlas,
+  type HeightAtlasBindings,
+} from "./gpu_clod_root_field_shader.js";
+import {
+  PackedRootGpuBufferPool,
+  type GpuRootChunkSlot,
+} from "./gpu_clod_root_packed_pool.js";
+import {
+  buildLod0Page,
+  buildParentNode,
+  childNodes,
+  chunkMeshToPageMesh,
+} from "./gpu_clod_root_page_assembly.js";
+
+export {
+  terrainFieldShaderWithTileAtlas,
+  createHeightAtlasBindings,
+} from "./gpu_clod_root_field_shader.js";
+export type { HeightAtlasBindings } from "./gpu_clod_root_field_shader.js";
 
 const STREAM_COUNTER_SAMPLE_LIMIT = 128;
-const DEFAULT_MATERIAL_WEIGHT_STRIDE = 4;
 const WORKGROUP_SIZE = 64;
 const F32 = Float32Array.BYTES_PER_ELEMENT;
 const U32 = Uint32Array.BYTES_PER_ELEMENT;
@@ -66,16 +58,6 @@ const DEFAULT_MAX_TOTAL_SLOT_BYTES = 512 * 1024 * 1024;
 const DEFAULT_MAX_READBACK_BUFFER_BYTES = 256 * 1024 * 1024;
 const READBACK_BUFFER_HEADROOM = 0.75;
 const TOTAL_SLOT_BUFFER_HEADROOM = 2;
-const STORAGE = (extra = 0) => GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | extra;
-
-interface ChunkMesh {
-  positions: Float32Array;
-  normals: Float32Array;
-  materials: Float32Array;
-  materialWeights?: Float32Array;
-  materialWeightStride?: number;
-  indices: Uint32Array;
-}
 
 export interface GpuClodRootBuildRequest {
   px: number;
@@ -124,158 +106,8 @@ export interface CreateGpuClodRootMesherOptions {
   sharedDevice?: GPUDevice;
 }
 
-interface GpuRootChunkSlot extends GpuRootChunkPlan {
-  dims: MeshDims;
-  counterSlot: number;
-  positionOffsetBytes: number;
-  normalOffsetBytes: number;
-  materialOffsetBytes: number;
-  indexOffsetBytes: number;
-  bindGroup: GPUBindGroup;
-}
-
 interface RuntimeBatchLimits extends RootGpuBatchLimits {
   maxReadbackBufferBytes: number;
-}
-
-interface HeightAtlasBindings {
-  readonly view: GPUTextureView;
-  readonly params: GPUBuffer;
-  readonly dispose?: () => void;
-}
-
-class PackedRootGpuBufferPool {
-  readonly dims: MeshDims;
-  readonly positionStrideBytes: number;
-  readonly normalStrideBytes: number;
-  readonly materialStrideBytes: number;
-  readonly cellIndexStrideBytes: number;
-  readonly indexStrideBytes: number;
-  readonly digEdits: GPUBuffer;
-  readonly fieldParams: GPUBuffer;
-  readonly positions: GPUBuffer;
-  readonly normals: GPUBuffer;
-  readonly materials: GPUBuffer;
-  readonly cellIndex: GPUBuffer;
-  readonly indices: GPUBuffer;
-  readonly indexCounts: GPUBuffer;
-  readonly vertexCounts: GPUBuffer;
-  private readonly meshParams: GPUBuffer[] = [];
-  private readonly bindGroups: GPUBindGroup[] = [];
-
-  constructor(
-    private readonly device: GPUDevice,
-    private readonly layout: GPUBindGroupLayout,
-    private readonly cfg: ClodPagesConfig,
-    private readonly world: WorldBounds,
-    readonly capacity: number,
-    private readonly heightAtlas: HeightAtlasBindings,
-  ) {
-    this.dims = computeMeshDims(0, 0, cfg.page.chunk_size);
-    this.positionStrideBytes = this.dims.maxVertices * 3 * F32;
-    this.normalStrideBytes = this.dims.maxVertices * 3 * F32;
-    this.materialStrideBytes = this.dims.maxVertices * F32;
-    this.cellIndexStrideBytes = this.dims.slotCount * U32;
-    this.indexStrideBytes = this.dims.maxIndices * U32;
-    const mk = (label: string, size: number, usage: number) => device.createBuffer({
-      label: `gpu clod root pool ${label}`,
-      size: Math.max(4, size),
-      usage,
-    });
-    this.digEdits = mk("digEdits", DIG_EDIT_BYTES, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-    this.fieldParams = mk("fieldParams", FIELD_PARAM_WORDS * U32, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
-    this.positions = mk("positions", this.positionStrideBytes * capacity, STORAGE());
-    this.normals = mk("normals", this.normalStrideBytes * capacity, STORAGE());
-    this.materials = mk("materials", this.materialStrideBytes * capacity, STORAGE());
-    this.cellIndex = mk("cellIndex", this.cellIndexStrideBytes * capacity, STORAGE());
-    this.indices = mk("indices", this.indexStrideBytes * capacity, STORAGE());
-    this.indexCounts = mk("indexCounts", U32 * capacity, STORAGE(GPUBufferUsage.COPY_DST));
-    this.vertexCounts = mk("vertexCounts", U32 * capacity, STORAGE(GPUBufferUsage.COPY_DST));
-    for (let slot = 0; slot < capacity; slot++) this.createSlotResources(slot);
-  }
-
-  prepare(plans: readonly GpuRootChunkPlan[]): GpuRootChunkSlot[] {
-    if (plans.length > this.capacity) {
-      throw new RootGpuBatchLimitError(
-        `GPU streamed-root packed pool needs ${plans.length} slots, capacity ${this.capacity}`,
-        plans[0] ? { px: plans[0].rootPx, pz: plans[0].rootPz, level: plans[0].rootLevel } : { px: 0, pz: 0 },
-        plans.length,
-        0,
-        { batchSize: 1, maxChunkSlots: this.capacity, maxTotalSlotBytes: 0 },
-      );
-    }
-    this.device.queue.writeBuffer(this.digEdits, 0, packDigEdits([]));
-    this.device.queue.writeBuffer(this.fieldParams, 0, packFieldParams(0) as Uint32Array<ArrayBuffer>);
-    const zeros = new Uint32Array(Math.max(1, plans.length));
-    this.device.queue.writeBuffer(this.indexCounts, 0, zeros.buffer as ArrayBuffer, zeros.byteOffset, plans.length * U32);
-    this.device.queue.writeBuffer(this.vertexCounts, 0, zeros.buffer as ArrayBuffer, zeros.byteOffset, plans.length * U32);
-    return plans.map((plan) => this.prepareSlot(plan));
-  }
-
-  destroy(): void {
-    this.digEdits.destroy();
-    this.fieldParams.destroy();
-    this.positions.destroy();
-    this.normals.destroy();
-    this.materials.destroy();
-    this.cellIndex.destroy();
-    this.indices.destroy();
-    this.indexCounts.destroy();
-    this.vertexCounts.destroy();
-    for (const buffer of this.meshParams) buffer.destroy();
-  }
-
-  private createSlotResources(slot: number): void {
-    const meshParams = this.device.createBuffer({
-      label: `gpu clod root pool meshParams ${slot}`,
-      size: MESH_PARAM_WORDS * U32,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.meshParams[slot] = meshParams;
-    this.bindGroups[slot] = this.device.createBindGroup({
-      label: `gpu clod root pool bind group ${slot}`,
-      layout: this.layout,
-      entries: [
-        { binding: 0, resource: { buffer: this.digEdits } },
-        { binding: 1, resource: { buffer: this.fieldParams } },
-        { binding: 2, resource: { buffer: meshParams } },
-        { binding: 3, resource: { buffer: this.positions } },
-        { binding: 4, resource: { buffer: this.normals } },
-        { binding: 5, resource: { buffer: this.materials } },
-        { binding: 6, resource: { buffer: this.cellIndex } },
-        { binding: 7, resource: { buffer: this.indices } },
-        { binding: 8, resource: { buffer: this.indexCounts } },
-        { binding: 9, resource: { buffer: this.vertexCounts } },
-        { binding: 10, resource: this.heightAtlas.view },
-        { binding: 11, resource: { buffer: this.heightAtlas.params } },
-      ],
-    });
-  }
-
-  private prepareSlot(plan: GpuRootChunkPlan): GpuRootChunkSlot {
-    const dims = computeMeshDims(plan.cx, plan.cz, this.cfg.page.chunk_size, plan.vyBase ?? -1);
-    const counterSlot = plan.slotIndex;
-    const positionBaseF32 = (this.positionStrideBytes / F32) * counterSlot;
-    const normalBaseF32 = (this.normalStrideBytes / F32) * counterSlot;
-    const materialBaseF32 = (this.materialStrideBytes / F32) * counterSlot;
-    const cellIndexBase = (this.cellIndexStrideBytes / U32) * counterSlot;
-    const indexBase = (this.indexStrideBytes / U32) * counterSlot;
-    this.device.queue.writeBuffer(
-      this.meshParams[counterSlot]!,
-      0,
-      packMeshParams(dims, this.world, { positionBaseF32, normalBaseF32, materialBaseF32, cellIndexBase, indexBase, counterSlot }) as Int32Array<ArrayBuffer>,
-    );
-    return {
-      ...plan,
-      dims,
-      counterSlot,
-      positionOffsetBytes: positionBaseF32 * F32,
-      normalOffsetBytes: normalBaseF32 * F32,
-      materialOffsetBytes: materialBaseF32 * F32,
-      indexOffsetBytes: indexBase * U32,
-      bindGroup: this.bindGroups[counterSlot]!,
-    };
-  }
 }
 
 class BatchedGpuClodRootMesher implements GpuClodRootMesher {
@@ -756,73 +588,6 @@ class BatchedGpuClodRootMesher implements GpuClodRootMesher {
   }
 }
 
-function tileAtlasMesherRequested(): boolean {
-  const search = (globalThis as typeof globalThis & { window?: { location?: { search?: string } } }).window?.location?.search ?? "";
-  return continentTileMeshingEnabled(new URLSearchParams(search));
-}
-
-export function terrainFieldShaderWithTileAtlas(): string {
-  const procedural = composeTerrainFieldShader()
-    .replace(
-      "fn surfaceHeightField(x : f32, z : f32) -> f32 {",
-      "fn proceduralSurfaceHeightField(x : f32, z : f32) -> f32 {",
-    )
-    .replace(
-      "let nrm = densityGradient(p.x, p.y, p.z);",
-      "let nrm = densityGradient(continentStableNormalCoordinate(p.x), continentStableNormalCoordinate(p.y), continentStableNormalCoordinate(p.z));",
-    );
-  return `${procedural}
-@group(0) @binding(10) var continentHeightAtlas : texture_2d<f32>;
-@group(0) @binding(11) var<uniform> continentHeightAtlasParams : vec4<f32>;
-
-fn continentPositiveMod(value : i32, divisor : i32) -> i32 {
-  return ((value % divisor) + divisor) % divisor;
-}
-
-// Adjacent surface-net chunks can differ by one f32 ULP at an otherwise shared
-// vertex. Snap only the finite-difference probe in atlas mode so the nearest-
-// lattice lookup cannot select opposite sides of a half-cell boundary.
-fn continentStableNormalCoordinate(value : f32) -> f32 {
-  if (continentHeightAtlasParams.w < 0.5) { return value; }
-  return floor(value * 64.0 + 0.5) / 64.0;
-}
-
-fn surfaceHeightField(x : f32, z : f32) -> f32 {
-  if (continentHeightAtlasParams.w < 0.5) {
-    return proceduralSurfaceHeightField(x, z);
-  }
-  let tileSize = continentHeightAtlasParams.x;
-  let tileRes = i32(continentHeightAtlasParams.y);
-  let tilesPerSide = i32(continentHeightAtlasParams.z);
-  let tileX = i32(floor(x / tileSize));
-  let tileZ = i32(floor(z / tileSize));
-  let localX = clamp(i32(round(x - f32(tileX) * tileSize)), 0, tileRes - 1);
-  let localZ = clamp(i32(round(z - f32(tileZ) * tileSize)), 0, tileRes - 1);
-  let slotX = continentPositiveMod(tileX, tilesPerSide);
-  let slotZ = continentPositiveMod(tileZ, tilesPerSide);
-  return textureLoad(continentHeightAtlas, vec2<i32>(slotX * tileRes + localX, slotZ * tileRes + localZ), 0).x;
-}
-`;
-}
-
-function createHeightAtlasBindings(device: GPUDevice): HeightAtlasBindings {
-  const active = tileAtlasMesherRequested() ? createHeightfieldTileGpuAtlas(device) : null;
-  if (active) return { view: active.view, params: active.params };
-  const texture = device.createTexture({
-    label: "continent heightfield tile atlas disabled",
-    size: { width: 1, height: 1 },
-    format: "r32float",
-    usage: GPUTextureUsage.TEXTURE_BINDING,
-  });
-  const params = device.createBuffer({
-    label: "continent heightfield tile atlas disabled params",
-    size: 16,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-  device.queue.writeBuffer(params, 0, new Float32Array([1, 1, 1, 0]));
-  return { view: texture.createView(), params, dispose: () => { texture.destroy(); params.destroy(); } };
-}
-
 export async function createGpuClodRootMesher(opts: CreateGpuClodRootMesherOptions): Promise<GpuClodRootMesher | null> {
   let device = opts.sharedDevice ?? null;
   try {
@@ -985,130 +750,6 @@ function f32Slice(buffer: ArrayBuffer, byteOffset: number, byteLength: number): 
 
 function u32Slice(buffer: ArrayBuffer, byteOffset: number, byteLength: number): Uint32Array {
   return new Uint32Array(buffer.slice(byteOffset, byteOffset + byteLength));
-}
-
-function buildLod0Page(px: number, pz: number, chunkMeshes: readonly PageMesh[], cfg: ClodPagesConfig): ClodPageNode {
-  const mesh = weldChunkMeshes(chunkMeshes, cfg);
-  const footprint = footprintFor(0, px, pz, cfg);
-  const nodeId = `L0:${px},${pz}`;
-  validatePageMesh(mesh, footprint, cfg.validation.zero_area_epsilon, nodeId);
-  return {
-    id: nodeId,
-    revision: INITIAL_NODE_REVISION,
-    level: 0,
-    children: [],
-    mesh,
-    footprint,
-    bounds: boundsOf(mesh),
-    errorWorld: 0,
-    lowBenefit: false,
-    chunkMeshes: [...chunkMeshes],
-  };
-}
-
-function chunkMeshToPageMesh(mesh: ChunkMesh): PageMesh {
-  const vertexTotal = mesh.positions.length / 3;
-  const materialWeightStride = mesh.materialWeightStride ?? DEFAULT_MATERIAL_WEIGHT_STRIDE;
-  const materialWeights = mesh.materialWeights?.length === vertexTotal * materialWeightStride
-    ? mesh.materialWeights
-    : oneHotMaterialWeights(mesh.materials, vertexTotal, materialWeightStride);
-  return {
-    positions: mesh.positions,
-    normals: mesh.normals,
-    paintSlots: mesh.materials.length === vertexTotal ? mesh.materials : new Float32Array(vertexTotal),
-    materialWeights,
-    materialWeightStride,
-    indices: mesh.indices,
-  };
-}
-
-function oneHotMaterialWeights(materials: Float32Array, vertexTotal: number, stride: number): Float32Array {
-  const weights = new Float32Array(vertexTotal * stride);
-  for (let vertex = 0; vertex < vertexTotal; vertex++) {
-    weights[vertex * stride + Math.max(0, Math.min(stride - 1, Math.floor(materials[vertex] ?? 0)))] = 1;
-  }
-  return weights;
-}
-
-function weldChunkMeshes(chunks: readonly PageMesh[], cfg: ClodPagesConfig): PageMesh {
-  const sections: PageSourceSection[] = chunks.map((mesh, index) => ({
-    kind: "mainTerrain",
-    terrainClass: "inland",
-    positionSource: "extracted",
-    label: `gpu-chunk-${index}`,
-    mesh,
-  }));
-  const filtered = filterPageSourceSections(sections);
-  return weldVertices(filtered.mesh, cfg.simplify.weld_epsilon_cells, {
-    position: cfg.validation.position_epsilon,
-    normalDot: cfg.validation.normal_dot_min,
-    material: cfg.validation.material_weight_epsilon,
-  }).mesh;
-}
-
-function buildParentNode(level: number, nx: number, nz: number, children: readonly ClodPageNode[], cfg: ClodPagesConfig): ClodPageNode {
-  requireFourChildren(level, nx, nz, children);
-  const merged = concatPageSourceMeshes(children.map((child) => child.mesh));
-  const { mesh: welded } = weldVertices(merged, cfg.simplify.weld_epsilon_cells, {
-    position: cfg.validation.position_epsilon,
-    normalDot: cfg.validation.normal_dot_min,
-    material: cfg.validation.material_weight_epsilon,
-  });
-  const footprint = footprintFor(level, nx, nz, cfg);
-  validateWeldedIntermediate(welded, `L${level}:${nx},${nz} gpu welded`, cfg.validation.zero_area_epsilon);
-  const locks = buildParentSimplifyLocks(welded);
-  const label = `L${level}:${nx},${nz}`;
-  const selected = selectParentSimplificationCandidate(
-    simplifyPage(clonePageMesh(welded), locks, cfg),
-    welded,
-    footprint,
-    cfg.validation.zero_area_epsilon,
-    `${label} gpu`,
-  );
-  stripDegenerateTriangles(selected.mesh, cfg.validation.zero_area_epsilon);
-  try {
-    validateFinalPageMesh(selected.mesh, footprint, cfg.validation.zero_area_epsilon, `${label} gpu final`);
-    return {
-      id: `${label}`,
-      revision: INITIAL_NODE_REVISION,
-      level,
-      children: [...children],
-      mesh: selected.mesh,
-      footprint,
-      bounds: boundsOf(selected.mesh),
-      errorWorld: selected.errorWorld + Math.max(...children.map((child) => child.errorWorld)),
-      lowBenefit: selected.lowBenefit,
-    };
-  } catch {
-    // Last resort: keep the pre-simplify welded parent when near-edge open borders survive
-    // simplify. Prefer a coarser valid parent over failing the whole GPU batch into worker
-    // fallback (which trips the zero-fallback acceptance gate).
-    stripDegenerateTriangles(welded, cfg.validation.zero_area_epsilon);
-    validateFinalPageMesh(welded, footprint, cfg.validation.zero_area_epsilon, `${label} gpu welded last-resort`);
-    return {
-      id: `${label}`,
-      revision: INITIAL_NODE_REVISION,
-      level,
-      children: [...children],
-      mesh: welded,
-      footprint,
-      bounds: boundsOf(welded),
-      errorWorld: Math.max(...children.map((child) => child.errorWorld)),
-      lowBenefit: true,
-    };
-  }
-}
-
-function childNodes(index: Map<string, ClodPageNode>[], level: number, nx: number, nz: number): ClodPageNode[] {
-  const children: ClodPageNode[] = [];
-  for (let dz = 0; dz < 2; dz++) {
-    for (let dx = 0; dx < 2; dx++) {
-      const child = index[level - 1]?.get(`${nx * 2 + dx},${nz * 2 + dz}`);
-      if (child) children.push(child);
-    }
-  }
-  requireFourChildren(level, nx, nz, children);
-  return children;
 }
 
 function transferBytesForNode(node: ClodPageNode): number {

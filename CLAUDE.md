@@ -21,6 +21,8 @@ npm --prefix tools/clod-poc run qa -- --summary tests/qa-sample-summary.json   #
 
 The QA runner reads a web summary JSON, validates configured screenshots, probes, and timing thresholds, then writes `qa-report.json` and `qa-report.md` under `tools/clod-poc/qa-runs` unless `--output` is provided. The sample summary is only a harness smoke test; use a captured summary for real browser visual/perf conclusions.
 
+**Before trusting any visual or perf metric, read [`docs/qa/visual-qa.md`](docs/qa/visual-qa.md)** — specifically "Validate the discriminator before you trust it". Run a new signal on a known-good and a known-bad build and require clear separation *before* using it to accept a fix, reject a hypothesis, or drive a bisect. It also lists the confounds that invalidate browser measurements: probe flags not matching the repro URL, world layout moving between commits, 250ms throttled counters, counters that freeze after `setPose`, and broken builds that render nothing (skips, not verdicts).
+
 For infinite-islands browser acceptance, prefer the single-page reuse profile so the runner does not reboot the scene for every gate/pose:
 
 ```powershell

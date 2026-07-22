@@ -1,81 +1,52 @@
 import * as THREE from "three";
-import { parseConfig, type ClodPagesConfig } from "../../config.js";
+import type { ClodPagesConfig } from "../../config.js";
 import { ClodWorkerClient } from "../../clod_worker_client.js";
 import { emitAudio } from "../../audio/index.js";
 import {
   baseSurfaceHeight,
-  resolveTerrainFieldConfig,
-  setTerrainFieldConfig,
-  getDigEditRevision,
   getVoxelEditSnapshot,
   replaceVoxelEdits,
-  setTerrainSurfaceOverride,
+  setTerrainFieldConfig,
   setBorderCoastRuntime,
-  parseBorderCoastOceanConfig,
-  buildCaveTestVoxelOverlay,
   setVoxelOverlaySource,
+  buildCaveTestVoxelOverlay,
+  resolveTerrainFieldConfig,
   type BorderCoastOceanConfig,
   type VoxelEditSnapshot,
 } from "../../terrain/terrain.js";
 import { setTerrainFieldCoreConfig } from "../../gpu/terrain_field_core.js";
-import {
-  buildStartupHeightfieldRaster,
-  makeStartupHeightfieldSampler,
-  planStartupHeightfieldRaster,
-  startupHeightfieldDescriptor,
-} from "../../terrain/startup_heightfield_raster.js";
-import { startupRasterHeightfieldSampler } from "../../world/heightfield_sampler.js";
-import { buildWorldManifest, withWorldManifestArtifact, type WorldManifest } from "../../world/world_manifest.js";
-import {
-  computeHydrologyGraphParamsHash,
-  createHydrologyGraphWorkerClient,
-  IndexedDbHydrologyGraphStore,
-  openHydrologyGraphDb,
-  type HydrologyGraphArtifact,
-} from "../../world/hydrology_graph/index.js";
+import type { WorldManifest } from "../../world/world_manifest.js";
+import type { HydrologyGraphArtifact } from "../../world/hydrology_graph/index.js";
 import { publishWorldManifestForDiagnostics } from "../../core/hooks.js";
-import { publishTerrainSummaryForDiagnostics } from "./diagnostics_startup.js";
-import {
-  initClodCacheContext,
-  loadTerrainSummaryWithCacheSimple,
-  createCacheDebugOverlay,
-  isCacheSessionDisabled,
-  setCacheSessionDisabled,
-  buildAcceptanceWorldCacheKey,
-} from "../../cache/index.js";
-import {
-  buildProceduralTextureHash,
-  buildStagedImportHash,
-  buildVoxelSnapshotHash,
-  type TerrainSourceInputs,
-} from "../../cache/terrainSource.js";
 import {
   clearWorkerCacheSnapshot,
-  getWorkerCacheBuildStats,
 } from "../../cache/cacheMetricsBridge.js";
+import {
+  setCacheSessionDisabled,
+} from "../../cache/index.js";
+import { lightweightArrayDigest } from "../../cache/terrainSource.js";
+import { loadHeightmapSource } from "../../terrain/heightmap_loader.js";
+import {
+  describeHeightmapSource,
+  setHeightmapSource,
+  type HeightmapSource,
+} from "../../terrain/heightmap_source.js";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
 import { createBakedMacroTintTexture } from "../../gpu/terrain_node_baked_macro_tint.js";
-import { aggregateDiagonalPolishStats, formatDiagonalPolishStats } from "../../diagonalPolish.js";
 import { parseProceduralTextureConfig } from "../../textures/materialRecipes.js";
 import { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
-import { parseGrassConfig, applyGrassMaterialBiasFromYaml } from "../../grass.js";
+import { parseGrassConfig } from "../../grass.js";
 import { parseStoneConfig } from "../../stones/stone_config.js";
-import { parseTreeConfig, applyTreeMaterialBiasFromYaml } from "../../trees/index.js";
+import { parseTreeConfig } from "../../trees/index.js";
 import { parseUnderstoryConfig } from "../../understory/index.js";
+import { parseForestLightingConfig } from "../../forest_lighting/index.js";
 import {
-  createForestLightingIntegrationWarner,
-  parseForestLightingConfig,
-} from "../../forest_lighting/index.js";
-import {
-  parseWaterConfig,
-  resolveWaterConfig,
-  HydrologySystem,
-  makeFakeBodyCarvedSampler,
   applyRiverParityTestWaterConfig,
   isRiverParityTestScene,
+  resolveWaterConfig,
+  type HydrologySystem,
   type WaterConfig,
 } from "../../water/index.js";
-import { applyWaterQueryOverrides } from "../../water/water_quality_overrides.js";
 import type { ClodPageNode } from "../../types.js";
 import type { VoxelProjectArchiveContents } from "../../project/voxel_project_archive.js";
 import type { ClodRuntimeConfig } from "../runtime_config.js";
@@ -90,165 +61,45 @@ import {
 import { isLongViewCapableScene } from "./bootstrap_long_view.js";
 import { farClipmapRendererAllowed } from "../../terrain/far_clipmap/far_clipmap_config.js";
 import { updateClodOverlay } from "../../ui/overlay_panel.js";
-import configText from "../../../config/clod_pages.yaml?raw";
-import stoneConfigText from "../../../config/stones.yaml?raw";
-import treeConfigText from "../../../config/trees.yaml?raw";
-import understoryConfigText from "../../../config/understory.yaml?raw";
-import proceduralConfigText from "../../../config/procedural_textures.yaml?raw";
-import grassConfigText from "../../../config/grass.yaml?raw";
-import waterConfigText from "../../../config/water.yaml?raw";
-import borderCoastOceanConfigText from "../../../config/border_coast_ocean.yaml?raw";
-import borderOceanSceneConfigText from "../../../config/border_ocean_scene.yaml?raw";
-import forestLightingConfigText from "../../../config/forest_lighting.yaml?raw";
-import customPropsConfigText from "../../../config/custom_props.yaml?raw";
-import customPropPlacementsText from "../../../config/custom_prop_placements.yaml?raw";
-import customPropPlacements500Text from "../../../config/custom_prop_placements_500.yaml?raw";
-import customPropPlacements5000Text from "../../../config/custom_prop_placements_5000.yaml?raw";
-import customPropPlacements20000Text from "../../../config/custom_prop_placements_20000.yaml?raw";
-import { parseCustomPropsConfig } from "../../props/prop_config.js";
-import { parsePropPlacements } from "../../props/prop_placements.js";
 import type { CustomPropsSettings } from "../../props/prop_types.js";
 import type { PropPlacementScene } from "../../props/prop_types.js";
-import { parseBorderOceanSceneConfig } from "../../debug/border_ocean_scene.js";
-import { splitWorldBuildNodes } from "./world_build_nodes.js";
 import { CanonicalWorldSource } from "../../world_source/world_source.js";
 import type { WorldSource } from "../../world_source/world_source.js";
-import { createCarvedGraphHydrologySampler, createGraphHydrologySampler } from "../../water/graph_hydrology.js";
-import {
-  CHANNEL_CORRIDOR_LOCK_MARGIN_M,
-  carveInfiniteHydrologyHeight,
-  createTracedHydrologyCarver,
-  isNearTracedChannel,
-  measureTracedRiverContinuity,
-  sampleInfiniteHydrology,
-} from "../../water/infinite_hydrology.js";
-import { setStreamingRootGpuMesherRuntimeControls } from "../../terrain/streaming/streamed_root_gpu_config.js";
-import { setSimplifyCorridorLockQuery } from "../../lock.js";
-import type { HydrologyWorldSampler } from "../../water/hydrologyTileSource.js";
 import { getSaveRuntimeFeatureStamps } from "../../save/save_runtime.js";
+import {
+  booleanParam,
+  configuredWorldPages,
+  measure,
+  measureAsync,
+  numberParam,
+  startupWorldPages,
+  type StartupTimings,
+} from "./world_build_startup_params.js";
+import { parseWorldBuildConfigs } from "./world_build_config_startup.js";
+import {
+  buildNonContinentStartupHeightfield,
+  buildStartupHydrologySystem,
+  graphCarveConfigFromWater,
+  hydrologyTerrainPayload,
+  measureTracedRiverContinuityGate,
+  runContinentHydrologyGraphStartup,
+  setupTracedHydrologyCarve,
+} from "./world_build_hydrology_startup.js";
+import {
+  assembleTerrainSourceInputs,
+  rekeyContinentTerrainSource,
+} from "./world_build_terrain_source_startup.js";
+import { runWorldBuildCacheWorkerStartup } from "./world_build_cache_worker_startup.js";
 
-function numberParam(searchParams: URLSearchParams, keys: readonly string[]): number | undefined {
-  for (const key of keys) {
-    const raw = searchParams.get(key);
-    if (raw === null) continue;
-    const value = Number(raw);
-    if (Number.isFinite(value)) return value;
-  }
-  return undefined;
-}
-
-function booleanParam(searchParams: URLSearchParams, keys: readonly string[], fallback: boolean): boolean {
-  for (const key of keys) {
-    const raw = searchParams.get(key);
-    if (raw === null) continue;
-    return raw !== "0" && raw !== "false";
-  }
-  return fallback;
-}
-
-const DEFAULT_INFINITE_BOOTSTRAP_WORLD_PAGES = 2;
-const HEIGHTFIELD_RASTER_REASON_CODES = {
-  enabled: 0,
-  invalid_world_cells: 1,
-  sample_budget: 2,
-  byte_budget: 3,
-} as const;
-
-type StartupTimings = Record<string, number>;
-
-function measure<T>(timings: StartupTimings, key: string, fn: () => T): T {
-  const startedAt = performance.now();
-  try {
-    return fn();
-  } finally {
-    timings[key] = performance.now() - startedAt;
-  }
-}
-
-async function measureAsync<T>(timings: StartupTimings, key: string, fn: () => Promise<T>): Promise<T> {
-  const startedAt = performance.now();
-  try {
-    return await fn();
-  } finally {
-    timings[key] = performance.now() - startedAt;
-  }
-}
-
-function addTiming(timings: StartupTimings, key: string, ms: number): void {
-  timings[key] = (timings[key] ?? 0) + ms;
-}
-
-function createLazyPropPlacementScenes(timings: StartupTimings): Record<string, PropPlacementScene> {
-  const texts: Record<string, string> = {
-    smoke: customPropPlacementsText,
-    "500": customPropPlacements500Text,
-    "5000": customPropPlacements5000Text,
-    "20000": customPropPlacements20000Text,
-  };
-  const cache = new Map<string, PropPlacementScene>();
-  const scenes = {} as Record<string, PropPlacementScene>;
-  for (const [sceneId, text] of Object.entries(texts)) {
-    Object.defineProperty(scenes, sceneId, {
-      enumerable: true,
-      configurable: false,
-      get: () => {
-        const cached = cache.get(sceneId);
-        if (cached) return cached;
-        const startedAt = performance.now();
-        const parsed = parsePropPlacements(text);
-        const elapsed = performance.now() - startedAt;
-        cache.set(sceneId, parsed);
-        addTiming(timings, "startup.prop_placements_ms", elapsed);
-        timings[`startup.prop_placement_${sceneId}_ms`] = elapsed;
-        return parsed;
-      },
-    });
-  }
-  return scenes;
-}
-
-function configuredWorldPages(
-  stagedImport: VoxelProjectArchiveContents | null,
-  clodRuntime: ClodRuntimeConfig,
-  searchParams: URLSearchParams,
-  queries: {
-    queryGrassPerfScene: boolean;
-    queryTreePerfScene: boolean;
-    queryForestFloorScene: boolean;
-    queryLongViewScene: boolean;
-    queryBorderOceanScene: boolean;
-  },
-  borderOceanDefaultWorldPages: number,
-): number {
-  const requested = Number(searchParams.get("world"));
-  return stagedImport?.manifest.worldSize ?? (
-    clodRuntime.runtime.worldOptions.includes(requested)
-      ? requested
-      : queries.queryGrassPerfScene || queries.queryTreePerfScene || queries.queryForestFloorScene || queries.queryLongViewScene || queries.queryBorderOceanScene
-        ? queries.queryBorderOceanScene
-          ? borderOceanDefaultWorldPages
-          : 16
-        : 8
-  );
-}
-
-function startupWorldPages(
-  configuredWorld: number,
-  stagedImport: VoxelProjectArchiveContents | null,
-  clodRuntime: ClodRuntimeConfig,
-  searchParams: URLSearchParams,
-  sceneName: string,
-): number {
-  if (stagedImport) return configuredWorld;
-  const requestedStartupWorld = Number(searchParams.get("infiniteStartupWorld") ?? searchParams.get("startupWorld"));
-  if (clodRuntime.runtime.worldOptions.includes(requestedStartupWorld)) {
-    return Math.min(requestedStartupWorld, configuredWorld);
-  }
-  if (sceneName === INFINITE_ISLANDS_SCENE && searchParams.get("acceptance") === "1") {
-    return Math.min(DEFAULT_INFINITE_BOOTSTRAP_WORLD_PAGES, configuredWorld);
-  }
-  return configuredWorld;
-}
+export {
+  booleanParam,
+  numberParam,
+  configuredWorldPages,
+  startupWorldPages,
+  measure,
+  measureAsync,
+  type StartupTimings,
+} from "./world_build_startup_params.js";
 
 export interface WorldBuildStartupInput {
   stagedImport: VoxelProjectArchiveContents | null;
@@ -328,35 +179,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const startupTimings: StartupTimings = { "startup.started_at_ms": startupStartedAt };
   window.__drusnielStartupTimings = startupTimings;
 
-  const parsedConfigs = measure(startupTimings, "startup.parse_configs_ms", () => {
-    const cfg = stagedImport?.manifest.config ?? parseConfig(configText);
-    const stoneConfig = parseStoneConfig(stoneConfigText);
-    const treeConfig = applyTreeMaterialBiasFromYaml(parseTreeConfig(treeConfigText), treeConfigText);
-    const understoryConfig = parseUnderstoryConfig(understoryConfigText);
-    const forestLightingConfig = parseForestLightingConfig(forestLightingConfigText);
-    createForestLightingIntegrationWarner()(forestLightingConfig);
-    const grassConfig = applyGrassMaterialBiasFromYaml(parseGrassConfig(grassConfigText), grassConfigText);
-    const customPropsConfig = parseCustomPropsConfig(customPropsConfigText);
-    const propPlacementScenes = createLazyPropPlacementScenes(startupTimings);
-    const waterConfig = applyWaterQueryOverrides(parseWaterConfig(waterConfigText), searchParams);
-    const borderCoastOceanConfig = parseBorderCoastOceanConfig(borderCoastOceanConfigText);
-    const borderOceanSceneConfig = parseBorderOceanSceneConfig(borderOceanSceneConfigText);
-    const proceduralTextureConfig = parseProceduralTextureConfig(proceduralConfigText);
-    return {
-      cfg,
-      stoneConfig,
-      treeConfig,
-      understoryConfig,
-      forestLightingConfig,
-      grassConfig,
-      customPropsConfig,
-      propPlacementScenes,
-      waterConfig,
-      borderCoastOceanConfig,
-      borderOceanSceneConfig,
-      proceduralTextureConfig,
-    };
-  });
+  const parsedConfigs = parseWorldBuildConfigs({ stagedImport, searchParams, startupTimings });
   const {
     cfg,
     stoneConfig,
@@ -373,6 +196,13 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   let { waterConfig } = parsedConfigs;
   const seed = numberParam(searchParams, ["seed"]) ?? 0;
   const seaLevel = numberParam(searchParams, ["seaLevel", "sea_level"]) ?? 18;
+  // Imported finite-world heightmap (e.g. an Azgaar Fantasy-Map-Generator grayscale export).
+  // Vertical mapping defaults put luminance 0.2 (FMG sea level 20/100) at the engine sea level.
+  const heightmapUrl = searchParams.get("heightmap");
+  const heightmapBaseM = numberParam(searchParams, ["heightmapBaseM"]) ?? 0;
+  const heightmapSpanM = numberParam(searchParams, ["heightmapSpanM"]) ?? 90;
+  const heightmapDetailM = numberParam(searchParams, ["heightmapDetail"]) ?? 1.2;
+  const heightmapFlipZ = booleanParam(searchParams, ["heightmapFlipZ"], false);
   const isInfiniteIslands = sceneName === INFINITE_ISLANDS_SCENE;
   const isContinent = sceneName === CONTINENT_SCENE || sceneName === CAVE_TEST_SCENE;
   const isStreamedWorld = isInfiniteIslands || isContinent;
@@ -409,6 +239,27 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const WORLD = startupWorldPages(configuredWorld, stagedImport, clodRuntime, searchParams, sceneName);
   const pageCells = cfg.page.chunks_per_page * cfg.page.chunk_size;
   const worldCells = WORLD * pageCells;
+  // Load the imported heightmap now that the finite world extent (worldCells) is known, then
+  // install it as the shared CPU-field authority for the main thread; the worker receives the
+  // raster in the buildWorld request below. It fully replaces the analytic field and its coast,
+  // so the finite border coast is disabled (heightmapEnabled -> borderCoast off).
+  let heightmapSource: HeightmapSource | null = null;
+  if (heightmapUrl) {
+    heightmapSource = await measureAsync(startupTimings, "startup.heightmap_load_ms", () =>
+      loadHeightmapSource(heightmapUrl, {
+        worldCells,
+        baseM: heightmapBaseM,
+        spanM: heightmapSpanM,
+        flipZ: heightmapFlipZ,
+        detailM: heightmapDetailM,
+        seed,
+      }));
+  }
+  setHeightmapSource(heightmapSource);
+  const heightmapEnabled = heightmapSource !== null;
+  const heightmapSourceHash = heightmapSource
+    ? `${JSON.stringify(describeHeightmapSource(heightmapSource))}:${await lightweightArrayDigest(heightmapSource.data)}`
+    : null;
   const worldMode: WorldModeConfig = resolveWorldMode({
     scene: sceneName,
     searchParams,
@@ -421,6 +272,7 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
     worldRadiusM: terrainFieldConfig.islandShape.worldRadiusM,
     longViewCapable: isLongViewCapableScene(sceneName),
     farClipmapRendererAllowed: farClipmapRendererAllowed(searchParams),
+    heightmapEnabled,
   });
   window.__drusnielWorldMode = worldMode;
   startupTimings["startup.configured_world_pages"] = configuredWorld;
@@ -484,381 +336,158 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   replaceVoxelEdits(voxelSnapshot);
   const featureStamps = getSaveRuntimeFeatureStamps();
 
-  const unifiedHydrologyRequested = isInfiniteIslands
-    && waterConfig.enabled
-    && waterConfig.source === "hydrology"
-    && waterConfig.hydrology.enabled
-    && waterConfig.hydrology.infinite.unifiedStartup;
-  // Traced-channel terrain carve (streamed worlds): rivers and lake beds dip under the
-  // channel/spill level everywhere the terrain authority samples — same contract as the
-  // continent graph carve, same config knobs.
-  const tracedCarveConfig = unifiedHydrologyRequested ? {
-    depthM: waterConfig.hydrology.rivers.carveDepthM,
-    power: waterConfig.hydrology.rivers.carvePower,
-    lakeBedDepthM: waterConfig.hydrology.rivers.visibleDepthM,
-  } : null;
-  const tracedCarvedHeight = tracedCarveConfig
-    ? (() => {
-        const carver = createTracedHydrologyCarver({ surfaceHeight: baseSurfaceHeight });
-        return (x: number, z: number) => carver.carveHeight(x, z, baseSurfaceHeight(x, z), tracedCarveConfig);
-      })()
-    : null;
-  // Far-summary carve imprint: same traced polylines, but with the channel half-width
-  // floored at the consumer's cell size so a 10-28 m channel survives far-LOD sampling
-  // instead of aliasing back into the pothole chain. One shared sampler object keeps the
-  // channel/basin memos (WeakMap-keyed per sampler) warm across imprint and lock calls.
-  const tracedMainSampler = { surfaceHeight: baseSurfaceHeight };
-  const farCarveImprint = tracedCarveConfig
-    ? (x: number, z: number, height: number, cellSizeM: number) =>
-        carveInfiniteHydrologyHeight(x, z, height, tracedMainSampler, tracedCarveConfig, Math.max(0, cellSizeM))
-    : null;
-  // Main-thread analogue of the worker's corridor-lock install: parent simplification
-  // that runs on this thread (the GPU root mesher's weld+simplify) locks river-corridor
-  // vertices so channels survive coarse LODs.
-  setSimplifyCorridorLockQuery(tracedCarveConfig
-    ? (x, z) => isNearTracedChannel(x, z, tracedMainSampler, CHANNEL_CORRIDOR_LOCK_MARGIN_M)
-    : null);
-  // GPU-meshed roots evaluate the terrain field in WGSL, where the traced polyline carve
-  // cannot run: root-level terrain reverts to uncarved pothole chains at mid distance
-  // while near CPU pages and the imprinted far summary both carry the carve. Default the
-  // GPU root mesher off on traced worlds (before any build, so startup pages are covered
-  // too); an explicit liveClodRootGpuMesher param still wins for A/B runs.
-  if (tracedCarveConfig && searchParams.get("liveClodRootGpuMesher") === null) {
-    setStreamingRootGpuMesherRuntimeControls({ enabled: false });
-  }
-  const tracedWorldSampler: HydrologyWorldSampler | undefined = tracedCarveConfig
-    ? (x, z, sampler, options) => sampleInfiniteHydrology(x, z, sampler, { ...options, carve: tracedCarveConfig })
-    : undefined;
-  let hydrologySystem = measure(startupTimings, "startup.hydrology_ms", () => {
-    if (continentHydrologyRequested) return null;
-    const baseTerrainSampler = { surfaceHeight: baseSurfaceHeight };
-    const preHydrologyTerrain = unifiedHydrologyRequested
-      ? baseTerrainSampler
-      : makeFakeBodyCarvedSampler(waterConfig, baseTerrainSampler);
-    const system = waterConfig.enabled && waterConfig.source === "hydrology" && waterConfig.hydrology.enabled
-      ? HydrologySystem.build(waterConfig.hydrology, worldCells, preHydrologyTerrain, {
-          infiniteWorldSamples: isStreamedWorld,
-          ...(tracedCarveConfig && tracedCarvedHeight && tracedWorldSampler ? {
-            worldSampler: tracedWorldSampler,
-            remoteTileAuthority: { graph: null, carve: tracedCarveConfig },
-            carvedTerrainHeight: tracedCarvedHeight,
-          } : {}),
-        })
-      : null;
-    if (system?.unifiedStartupActive()) {
-      // Water is a raster/view of the traced authority. With the carve enabled the
-      // terrain authority is the carved field; without it the raw procedural field.
-      setTerrainSurfaceOverride(tracedCarvedHeight);
-    } else if (system) {
-      const hydroCells = system.grid.worldCells;
-      setTerrainSurfaceOverride((x, z) =>
-        (x < 0 || z < 0 || x > hydroCells || z > hydroCells)
-          ? baseSurfaceHeight(x, z)
-          : system.terrainHeight(x, z));
-    } else if (waterConfig.enabled && waterConfig.fakeBodies.carveTerrain) {
-      setTerrainSurfaceOverride((x, z) => preHydrologyTerrain.surfaceHeight(x, z));
-    } else {
-      setTerrainSurfaceOverride(null);
-    }
-    if (system) console.log("[water] hydrology built", system.stats);
-    return system;
+  const {
+    unifiedHydrologyRequested,
+    tracedCarveConfig,
+    tracedCarvedHeight,
+    farCarveImprint,
+    tracedWorldSampler,
+  } = setupTracedHydrologyCarve({ isInfiniteIslands, waterConfig, searchParams });
+  let hydrologySystem = buildStartupHydrologySystem({
+    continentHydrologyRequested,
+    waterConfig,
+    worldCells,
+    isStreamedWorld,
+    unifiedHydrologyRequested,
+    tracedCarveConfig,
+    tracedCarvedHeight,
+    tracedWorldSampler,
+    startupTimings,
   });
   const unifiedHydrology = continentHydrologyRequested || hydrologySystem?.unifiedStartupActive() === true;
   startupTimings["startup.hydrology_unified_startup"] = unifiedHydrology ? 1 : 0;
-  if (tracedCarveConfig && hydrologySystem?.unifiedStartupActive()) {
-    // W1 continuity gate: every traced channel vertex near spawn must have a carved bed
-    // below level - minVisibleDepth (continuous rivers, not pothole chains).
-    const continuity = measure(startupTimings, "startup.river_continuity_ms", () =>
-      measureTracedRiverContinuity(
-        worldCells / 2,
-        worldCells / 2,
-        1536,
-        { surfaceHeight: baseSurfaceHeight },
-        tracedCarveConfig,
-        waterConfig.hydrology.rivers.minVisibleDepth,
-      ));
-    startupTimings["river_continuity_pct"] = continuity.pct;
-    startupTimings["river_continuity_channels"] = continuity.channels;
-    console.info(
-      `[water] traced river continuity ${continuity.pct.toFixed(1)}% ` +
-        `(${continuity.okPoints}/${continuity.points} points, ${continuity.channels} channels)`,
-    );
+  if (tracedCarveConfig) {
+    measureTracedRiverContinuityGate({
+      tracedCarveConfig,
+      hydrologySystem,
+      worldCells,
+      waterConfig,
+      startupTimings,
+    });
   }
 
-  const heightfieldRasterRequested = unifiedHydrology
-    && booleanParam(searchParams, ["heightfieldRaster", "heightfield_raster"], true);
-  const heightfieldRasterPlan = planStartupHeightfieldRaster(worldCells);
-  startupTimings["startup.heightfield_raster_requested"] = heightfieldRasterRequested ? 1 : 0;
-  startupTimings["startup.heightfield_raster_budget_enabled"] = heightfieldRasterPlan.enabled ? 1 : 0;
-  startupTimings["startup.heightfield_raster_budget_reason_code"] = HEIGHTFIELD_RASTER_REASON_CODES[heightfieldRasterPlan.reason];
-  startupTimings["startup.heightfield_raster_samples"] = heightfieldRasterPlan.sampleCount;
-  startupTimings["startup.heightfield_raster_bytes"] = heightfieldRasterPlan.byteLength;
-  let startupHeightfield = heightfieldRasterRequested && heightfieldRasterPlan.enabled && !continentHydrologyRequested
-    ? measure(startupTimings, "startup.heightfield_raster_ms", () =>
-        buildStartupHeightfieldRaster(worldCells, tracedCarvedHeight ?? undefined))
-    : null;
-  if (startupHeightfield) {
-    // With the traced carve active the raster bakes carved heights, so everything the
-    // raster does not answer (fractional reads, outside the padded domain) must fall
-    // back to the carved field, not the raw one.
-    setTerrainSurfaceOverride(tracedCarvedHeight
-      ? makeStartupHeightfieldSampler(startupHeightfield, tracedCarvedHeight)
-      : startupRasterHeightfieldSampler(startupHeightfield).sampleHeight);
-    startupTimings["startup.heightfield_raster_res"] = startupHeightfield.res;
-  }
-  startupTimings["startup.heightfield_raster_enabled"] = startupHeightfield ? 1 : 0;
+  let { heightfieldRasterRequested, heightfieldRasterPlan, startupHeightfield } = buildNonContinentStartupHeightfield({
+    unifiedHydrology,
+    continentHydrologyRequested,
+    searchParams,
+    worldCells,
+    tracedCarvedHeight,
+    startupTimings,
+  });
 
-  const hydrologyTerrain = hydrologySystem && !unifiedHydrology
-    ? {
-        res: hydrologySystem.grid.res,
-        worldCells: hydrologySystem.grid.worldCells,
-        carvedBed: hydrologySystem.grid.carvedBed,
-      }
-    : null;
-
-  const proceduralTextureHash = await buildProceduralTextureHash(
-    proceduralTextureConfig.enabled,
-    proceduralTextureConfig.enabled ? `${proceduralTextureConfig.seed}:${proceduralTextureConfig.noise.resolution}` : null,
-  );
-  const stagedImportHash = await buildStagedImportHash(stagedImport?.manifest ?? null);
-  const voxelSnapshotHash = await buildVoxelSnapshotHash(voxelSnapshot);
-  const graphCarveConfig = continentHydrologyRequested ? {
-    depthM: waterConfig.hydrology.rivers.carveDepthM,
-    power: waterConfig.hydrology.rivers.carvePower,
-    lakeBedDepthM: waterConfig.hydrology.rivers.visibleDepthM,
-  } : null;
+  const hydrologyTerrain = hydrologyTerrainPayload(hydrologySystem, unifiedHydrology);
+  const graphCarveConfig = graphCarveConfigFromWater(waterConfig, continentHydrologyRequested);
   let voxelOverlay = sceneName === CAVE_TEST_SCENE ? buildCaveTestVoxelOverlay(baseSurfaceHeight) : null;
-  const terrainSource: TerrainSourceInputs = {
-    scene: sceneName,
-    worldSeed: String(seed),
+
+  let { terrainSource, acceptanceCacheKey, worldManifest } = await assembleTerrainSourceInputs({
+    cfg,
+    sceneName,
+    seed,
+    seaLevel,
     terrainFieldConfig,
-    worldPages: WORLD,
-    worldMode: worldMode.mode,
-    borderCoastMode: worldMode.borderCoastEnabled ? "finite_rect" : "none",
-    generatorVersion: cfg.meshopt_package_version,
-    digRevision: getDigEditRevision(),
-    hydrologyTerrain,
-    startupHeightfield: startupHeightfieldDescriptor(startupHeightfield),
-    borderCoastOceanConfig: effectiveBorderCoast,
-    waterConfig: {
-      enabled: waterConfig.enabled,
-      source: waterConfig.source,
-      fakeBodies: { carveTerrain: waterConfig.fakeBodies.carveTerrain },
-      hydrology: { enabled: waterConfig.hydrology.enabled, unifiedStartup: unifiedHydrology },
-    },
-    proceduralTextureEnabled: proceduralTextureConfig.enabled,
-    stagedImportHash,
-    voxelSnapshotHash,
-    proceduralTextureHash,
-    longViewScene: queryLongViewScene,
-    hydrologyGraphHash: null,
-    hydrologyCarve: tracedCarveConfig,
-    featureStampHash: featureStamps?.hash ?? null,
-    featureStampRevision: featureStamps?.revision ?? 0,
-    voxelOverlay,
-  };
-  let acceptanceCacheKey = await buildAcceptanceWorldCacheKey({ cfg, terrainSource });
-  window.__drusnielAcceptanceWorldCacheKey = acceptanceCacheKey;
-  let worldManifest = buildWorldManifest({
+    WORLD,
     worldMode,
-    terrainFieldConfig,
-    terrainSourceHash: acceptanceCacheKey.terrainSourceHash,
-    seaLevelM: seaLevel,
+    hydrologyTerrain,
+    startupHeightfield,
+    effectiveBorderCoast,
+    waterConfig,
+    unifiedHydrology,
+    proceduralTextureConfig,
+    stagedImport,
+    voxelSnapshot,
+    queryLongViewScene,
+    tracedCarveConfig,
+    featureStamps,
+    voxelOverlay,
+    heightmapSourceHash,
   });
   let hydrologyGraphArtifact: HydrologyGraphArtifact | null = null;
   startupTimings["hydrology_graph_present"] = 0;
   startupTimings["hydrology_graph_build_pct"] = 0;
   startupTimings["hydrology_graph_store_hit"] = 0;
   if (continentHydrologyRequested) {
-    if (!worldManifest.sizeM) throw new Error("continent hydrology requires bounded manifest size");
-    const originM = { x: -worldManifest.sizeM.x / 2, z: -worldManifest.sizeM.z / 2 };
-    const graphParamsHash = await computeHydrologyGraphParamsHash({
-      worldId: worldManifest.worldId,
+    const continent = await runContinentHydrologyGraphStartup({
+      waterConfig,
+      worldManifest,
+      acceptanceTerrainSourceHash: acceptanceCacheKey.terrainSourceHash,
       seed,
-      sizeM: worldManifest.sizeM,
-      originM,
       terrainFieldConfig,
-    });
-    const graphDb = await openHydrologyGraphDb();
-    const graphStore = new IndexedDbHydrologyGraphStore(
-      graphDb,
-      acceptanceCacheKey.terrainSourceHash,
-      graphParamsHash,
-    );
-    const graphStartedAt = performance.now();
-    try {
-      hydrologyGraphArtifact = await graphStore.load();
-      if (hydrologyGraphArtifact) {
-        startupTimings["hydrology_graph_store_hit"] = 1;
-        startupTimings["hydrology_graph_build_pct"] = 100;
-      } else {
-        const graphWorker = createHydrologyGraphWorkerClient();
-        if (!graphWorker) throw new Error("continent hydrology graph worker is unavailable");
-        try {
-          hydrologyGraphArtifact = await graphWorker.build({
-            worldId: worldManifest.worldId,
-            seed,
-            sizeM: worldManifest.sizeM,
-            originM,
-            terrainFieldConfig,
-          }, (buildPct) => {
-            startupTimings["hydrology_graph_build_pct"] = buildPct;
-            buildProgress.hidden = false;
-            buildProgressPhase.textContent = "continental hydrology";
-            buildProgressPercent.textContent = `${Math.round(buildPct)}%`;
-            buildProgressBar.value = buildPct / 100;
-            buildStatus.value = "continental hydrology";
-            updateBuildOverlay();
-          });
-          await graphStore.save(hydrologyGraphArtifact);
-        } finally {
-          graphWorker.dispose();
-        }
-      }
-    } finally {
-      graphStore.close();
-      startupTimings["startup.hydrology_graph_ms"] = performance.now() - graphStartedAt;
-    }
-    startupTimings["hydrology_graph_present"] = 1;
-    const graphSampler = createGraphHydrologySampler(
-      hydrologyGraphArtifact.graph,
-      { surfaceHeight: baseSurfaceHeight },
-      waterConfig.hydrology.waterSurface.drySentinelDepth,
-    );
-    const carvedGraphSampler = createCarvedGraphHydrologySampler(
-      hydrologyGraphArtifact.graph,
-      { surfaceHeight: baseSurfaceHeight },
-      graphCarveConfig!,
-      waterConfig.hydrology.waterSurface.drySentinelDepth,
-    );
-    waterConfig.hydrology.infinite.source = "graph";
-    if (heightfieldRasterRequested && heightfieldRasterPlan.enabled) {
-      startupHeightfield = measure(startupTimings, "startup.heightfield_raster_ms", () =>
-        buildStartupHeightfieldRaster(worldCells, (x, z) => {
-          const carved = graphSampler.carveHeight(x, z, baseSurfaceHeight(x, z), graphCarveConfig!);
-          return Math.fround(featureStamps?.sampleHeight(x, z, carved) ?? carved);
-        }));
-      if (startupHeightfield) {
-        setTerrainSurfaceOverride(startupRasterHeightfieldSampler(startupHeightfield).sampleHeight);
-        startupTimings["startup.heightfield_raster_res"] = startupHeightfield.res;
-      }
-      startupTimings["startup.heightfield_raster_enabled"] = startupHeightfield ? 1 : 0;
-    }
-    hydrologySystem = measure(startupTimings, "startup.hydrology_graph_grid_ms", () => HydrologySystem.build(
-      waterConfig.hydrology,
       worldCells,
-      { surfaceHeight: baseSurfaceHeight },
-      {
-        infiniteWorldSamples: true,
-        worldSampler: (x, z) => carvedGraphSampler.sample(x, z),
-        remoteTileAuthority: {
-          graph: hydrologyGraphArtifact!.graph,
-          carve: graphCarveConfig!,
-        },
-      },
-    ));
-    terrainSource.startupHeightfield = startupHeightfieldDescriptor(startupHeightfield);
-    terrainSource.hydrologyGraphHash = hydrologyGraphArtifact.ref.hash;
-    terrainSource.hydrologyCarve = graphCarveConfig;
-    if (sceneName === CAVE_TEST_SCENE) {
-      voxelOverlay = buildCaveTestVoxelOverlay((x, z) => graphSampler.carveHeight(x, z, baseSurfaceHeight(x, z), graphCarveConfig!));
-      terrainSource.voxelOverlay = voxelOverlay;
-    }
-    acceptanceCacheKey = await buildAcceptanceWorldCacheKey({ cfg, terrainSource });
-    window.__drusnielAcceptanceWorldCacheKey = acceptanceCacheKey;
-    worldManifest = withWorldManifestArtifact(buildWorldManifest({
+      heightfieldRasterRequested,
+      heightfieldRasterPlan,
+      featureStamps,
+      sceneName,
+      startupHeightfield,
+      voxelOverlay,
+      graphCarveConfig: graphCarveConfig!,
+      buildProgress,
+      buildProgressPhase,
+      buildProgressPercent,
+      buildProgressBar,
+      buildStatus,
+      updateBuildOverlay,
+      startupTimings,
+    });
+    hydrologyGraphArtifact = continent.hydrologyGraphArtifact;
+    startupHeightfield = continent.startupHeightfield;
+    hydrologySystem = continent.hydrologySystem;
+    voxelOverlay = continent.voxelOverlay;
+    const rekeyed = await rekeyContinentTerrainSource({
+      cfg,
+      terrainSource,
       worldMode,
       terrainFieldConfig,
-      terrainSourceHash: acceptanceCacheKey.terrainSourceHash,
-      seaLevelM: seaLevel,
-    }), "hydrologyGraph", hydrologyGraphArtifact.ref);
+      seaLevel,
+      startupHeightfield,
+      hydrologyGraphArtifact,
+      graphCarveConfig: graphCarveConfig!,
+      voxelOverlay,
+    });
+    acceptanceCacheKey = rekeyed.acceptanceCacheKey;
+    worldManifest = rekeyed.worldManifest;
   }
   terrainSource.worldManifest = worldManifest;
   setVoxelOverlaySource(voxelOverlay);
   startupTimings["world_manifest_present"] = 1;
   startupTimings["world_manifest_seed"] = worldManifest.seed;
   publishWorldManifestForDiagnostics(worldManifest);
-  const cacheContext = await initClodCacheContext({
+
+  const {
+    result,
+    lod0Nodes,
+    allNodes,
+    maxTerrainLevel,
+    terrainSummary,
+    polishLine,
+  } = await runWorldBuildCacheWorkerStartup({
     cfg,
-    worldPages: WORLD,
+    WORLD,
+    worldCells,
     terrainSource,
-    forceDisabled: isCacheSessionDisabled(),
+    clodWorker,
+    searchParams,
+    voxelSnapshot,
+    terrainFieldConfig,
+    hydrologyTerrain,
+    effectiveBorderCoast,
+    startupHeightfield,
+    hydrologyGraphArtifact,
+    graphCarveConfig,
+    tracedCarveConfig,
+    featureStamps,
+    heightmapSource,
+    worldSource,
+    buildProgress,
+    buildProgressPhase,
+    buildProgressPercent,
+    buildProgressBar,
+    buildStatus,
+    updateBuildOverlay,
+    info,
+    startupTimings,
+    startupStartedAt,
+    configuredWorld,
   });
-  const cacheOverlay = searchParams.get("cacheDebug") === "1"
-    ? createCacheDebugOverlay({ clearWorkerCache: () => clodWorker.clearCache() })
-    : null;
-
-  const result = await measureAsync(startupTimings, "startup.build_world_ms", () =>
-    clodWorker.buildWorld(
-      WORLD,
-      WORLD,
-      cfg,
-      voxelSnapshot,
-      (progress) => {
-        const fraction = progress.total > 0 ? progress.done / progress.total : 0;
-        buildProgress.hidden = false;
-        buildProgressPhase.textContent = progress.phase;
-        buildProgressPercent.textContent = `${Math.round(fraction * 100)}%`;
-        buildProgressBar.value = fraction;
-        buildStatus.value = progress.phase;
-        updateBuildOverlay();
-      },
-      terrainFieldConfig,
-      hydrologyTerrain,
-      effectiveBorderCoast,
-      isCacheSessionDisabled(),
-      terrainSource,
-      startupHeightfield,
-      hydrologyGraphArtifact?.graph ?? null,
-      hydrologyGraphArtifact ? graphCarveConfig : tracedCarveConfig,
-      featureStamps?.stamps,
-    ));
-  const workerCacheStats = getWorkerCacheBuildStats();
-  startupTimings["startup_build_world_ms"] = startupTimings["startup.build_world_ms"];
-  startupTimings["clod_cache_hit"] = workerCacheStats && workerCacheStats.cacheHits > 0 && workerCacheStats.cacheMisses === 0 ? 1 : 0;
-  startupTimings["clod_cache_miss"] = workerCacheStats && workerCacheStats.cacheMisses > 0 ? 1 : 0;
-  startupTimings["clod_cache_rehydrate_ms"] = workerCacheStats?.cacheDecodeMs ?? 0;
-  startupTimings["clod_cache_key_match"] = cacheContext?.effective ? 1 : 0;
-  startupTimings["clod_cache_nodes_from_cache"] = workerCacheStats?.nodesFromCache ?? 0;
-  startupTimings["clod_cache_nodes_built"] = workerCacheStats?.nodesBuilt ?? 0;
-  startupTimings["clod_cache_hits"] = workerCacheStats?.cacheHits ?? 0;
-  startupTimings["clod_cache_misses"] = workerCacheStats?.cacheMisses ?? 0;
-  startupTimings["clod_cache_cold_build_ms_avoided"] = workerCacheStats?.coldBuildMsAvoided ?? 0;
-  cacheOverlay?.update();
-
-  const { lod0Nodes, allNodes } = splitWorldBuildNodes(result.nodesByLevel);
-  const summaryResult = await measureAsync(startupTimings, "startup.terrain_summary_ms", () =>
-    loadTerrainSummaryWithCacheSimple(
-      lod0Nodes,
-      worldCells,
-      cacheContext?.farReduceFactor ?? 8,
-      cacheContext,
-      worldSource,
-    ));
-  startupTimings["startup_terrain_summary_ms"] = startupTimings["startup.terrain_summary_ms"];
-  startupTimings["terrain_summary_cache_hit"] = summaryResult.fromCache ? 1 : 0;
-  startupTimings["terrain_summary_cache_miss"] = summaryResult.fromCache ? 0 : 1;
-  const terrainSummary = summaryResult.summary;
-  publishTerrainSummaryForDiagnostics(terrainSummary);
-  const maxTerrainLevel = result.nodesByLevel.size > 0 ? Math.max(...result.nodesByLevel.keys()) : 0;
-  const polish = aggregateDiagonalPolishStats(result.stats.map((s) => s.polish));
-  const polishLine = formatDiagonalPolishStats(polish);
-  info.textContent = "ready";
-  buildProgress.hidden = true;
-  buildStatus.value = "ready";
-  updateBuildOverlay();
-  startupTimings["startup.world_build_startup_ms"] = performance.now() - startupStartedAt;
-  startupTimings["startup_total_ms"] = startupTimings["startup.world_build_startup_ms"];
-  console.info(
-    "[startup]",
-    `parse=${startupTimings["startup.parse_configs_ms"].toFixed(1)}ms`,
-    `textures=${startupTimings["startup.procedural_textures_ms"].toFixed(1)}ms`,
-    `hydrology=${startupTimings["startup.hydrology_ms"].toFixed(1)}ms`,
-    `buildWorld=${startupTimings["startup.build_world_ms"].toFixed(1)}ms`,
-    `terrainSummary=${startupTimings["startup.terrain_summary_ms"].toFixed(1)}ms`,
-    `world=${WORLD}x${WORLD}`,
-    configuredWorld !== WORLD ? `configured=${configuredWorld}x${configuredWorld}` : "",
-  );
 
   return {
     cfg,

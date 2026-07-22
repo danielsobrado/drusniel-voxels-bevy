@@ -37,6 +37,8 @@ npm --prefix tools/clod-poc run qa -- --summary tests/qa-sample-summary.json
 
 The QA runner consumes a captured web summary JSON and writes `qa-report.json` / `qa-report.md` under `tools/clod-poc/qa-runs` by default. The sample summary is a smoke test only; for visual or performance claims, use a summary captured from the relevant browser scenario.
 
+**Read [`docs/qa/visual-qa.md`](docs/qa/visual-qa.md) before trusting any visual or perf metric.** It covers how to validate that a discriminator actually separates known-good from known-bad, and the confounds that silently invalidate browser measurements (flag mismatch between probe and repro URL, world layout moving between commits, throttled/stale counters, broken builds that render nothing). A metric never checked against a known-good build is not evidence — that mistake cost a full investigation's worth of false conclusions and had to be withdrawn.
+
 For infinite-islands browser acceptance, prefer the single-page reuse profile so the runner does not reboot the scene for every gate/pose:
 
 ```powershell
@@ -136,6 +138,10 @@ Issues and PRDs are local Markdown files under `.scratch/`. See `docs/agents/iss
 ### Triage labels
 
 Use the default five-state triage vocabulary. See `docs/agents/triage-labels.md`.
+
+### Visual QA
+
+Validating a visual/perf measurement before trusting it, and running the clod-poc QA, shot, and perf harnesses. See `.claude/skills/visual-qa/SKILL.md` and `docs/qa/visual-qa.md`.
 
 ### Domain docs
 

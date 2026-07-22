@@ -1,24 +1,18 @@
 import type { BuildProgress, BuildResult } from "./clod/quadtree.js";
-import { interpolateMeshHeightAt } from "./clod/mesh_height_probe.js";
 import type { TerrainFieldConfig, VoxelEditSnapshot, VoxelEditTransaction } from "./terrain/terrain.js";
 import type { StartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
+import type { HeightmapSource } from "./terrain/heightmap_source.js";
 import type { HydrologyGraph } from "./world/hydrology_graph/hydrology_graph.js";
 import type { GraphTerrainCarveConfig } from "./water/graph_hydrology.js";
 import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
-import type { ClodPageNode, PageMesh } from "./types.js";
 import type { ClodPagesConfig } from "./config.js";
 import type { TerrainSourceInputs } from "./cache/terrainSource.js";
 import type { FeatureTerrainStamp } from "./world/feature_stamps.js";
-import { initClodCacheContext, type ClodCacheContext } from "./cache/clodCacheContext.js";
-import {
-  createEmptyStreamRootCacheStats,
-  publishStreamRootCacheCounters,
-  storeStreamRootNode,
-  tryLoadStreamRootNode,
-} from "./cache/clodStreamRootCache.js";
+import type { ClodPageNode } from "./types.js";
 import { setWorkerCacheSnapshot } from "./cache/cacheMetricsBridge.js";
 import { attachMainThreadCacheBroker } from "./cache/mainThreadCacheBroker.js";
 import { isCacheRpcMessage } from "./cache/cacheWorkerRpc.js";
+import { publishStreamRootCacheCounters } from "./cache/clodStreamRootCache.js";
 import {
   applySerializedNode,
   indexNodes,
@@ -37,56 +31,23 @@ import {
   sendDigBatchFn,
   splitDigBatch,
 } from "./clod_worker_client_helpers.js";
-import {
-  createGpuClodRootMesher,
-  disabledGpuStats,
-  publishGpuClodRootMesherCounters,
-  type GpuClodRootMesher,
-} from "./terrain/streaming/gpu_clod_root_mesher.js";
-import {
-  continentTileMeshingEnabled,
-  streamingRootGpuMesherConfigFromWindow,
-  type StreamingRootGpuMesherConfig,
-} from "./terrain/streaming/streamed_root_gpu_config.js";
-import {
-  StreamedPageBoundsGuardError,
-  createStreamedPageBoundsGuardStats,
-  isStreamedPageBoundsGuardError,
-  publishStreamedPageBoundsGuardStatsToCounters,
-  recordStreamedPageBoundsGuardBatchReject,
-  recordStreamedPageBoundsGuardCacheDrop,
-  recordStreamedPageBoundsGuardCpuFallbackPages,
-  recordStreamedPageBoundsGuardResult,
-  streamedPageBoundsGuardConfigFromWindow,
-  validateStreamedPageBounds,
-  type StreamedPageBoundsGuardConfig,
-} from "./terrain/streaming/streamed_page_bounds_guard.js";
-import { StreamRootEditState } from "./terrain/streaming/stream_root_edit_state.js";
 import type { HeightfieldTileBuildResult } from "./world/heightfield_tiles/heightfield_tile_cache.js";
 import type { WorldTileKey } from "./world/tile_key.js";
 import type {
   HeightfieldTileWorkerBuildRequest,
   HeightfieldTileWorkerResponse,
 } from "./world/heightfield_tiles/heightfield_tile_worker_protocol.js";
-import { uploadHeightfieldTilesForPage } from "./world/heightfield_tiles/heightfield_tile_gpu_atlas.js";
-import type { StreamRootBuildComparison, StreamRootBuildLegEvidence } from "./core/hooks.js";
+import type { StreamRootBuildComparison } from "./core/hooks.js";
+import {
+  ClodWorkerStreamRoots,
+  type StreamRootCoord,
+  type WorkerStreamRootsResult,
+} from "./clod_worker_stream_roots.js";
 
 export type { WorkerLod0Rebuild, WorkerParentBatch } from "./clod_worker_client_types.js";
+export type { WorkerStreamRootsResult } from "./clod_worker_stream_roots.js";
 
-type StreamRootBoundsGuardSource = "gpu" | "cpu" | "cache";
 type ExtendedClodWorkerResponse = ClodWorkerResponse | HeightfieldTileWorkerResponse;
-
-export interface WorkerStreamRootsResult {
-  nodes: ClodPageNode[];
-  buildMs: number;
-  transferBytes: number;
-}
-
-function globalClodCounters(): Record<string, number> | undefined {
-  return (globalThis as typeof globalThis & {
-    window?: { __drusnielClod?: { stats?: { counters?: Record<string, number> } } };
-  }).window?.__drusnielClod?.stats?.counters;
-}
 
 export class ClodWorkerClient {
   onParentRebuilt: ((batch: WorkerParentBatch) => void) | null = null;
@@ -110,23 +71,25 @@ export class ClodWorkerClient {
   private lastParentError: Error | null = null;
   private parentsWaiters: Array<() => void> = [];
   private stopped = false;
-  private streamRootCfg: ClodPagesConfig | null = null;
-  private streamRootWorldPagesX = 0;
-  private streamRootWorldPagesZ = 0;
-  private streamRootCacheInit: Promise<ClodCacheContext | null> | null = null;
-  private streamRootGpuConfig: StreamingRootGpuMesherConfig = streamingRootGpuMesherConfigFromWindow();
-  private streamRootGpuMesher: GpuClodRootMesher | null = null;
-  private streamRootGpuCreatePromise: Promise<GpuClodRootMesher | null> | null = null;
-  private streamRootGpuUnavailable = false;
-  private streamRootWorkerFallbackPages = 0;
-  private streamRootBoundsGuardConfig: StreamedPageBoundsGuardConfig = streamedPageBoundsGuardConfigFromWindow();
-  private streamRootBoundsGuardStats = createStreamedPageBoundsGuardStats();
-  private readonly streamRootEditState = new StreamRootEditState();
-  private readonly streamRootComplexIds = new Set<string>();
-  private streamRootComplexRequestedTotal = 0;
-  private streamRootOrdinaryRequestedTotal = 0;
-  private readonly streamRootSdfBuildSamplesByLevel: number[][] = [];
-  private readonly streamRootHeightfieldBuildSamplesByLevel: number[][] = [];
+  private readonly streamRoots = new ClodWorkerStreamRoots({
+    isStopped: () => this.stopped,
+    buildOnWorker: (coords, bypassCacheIds) => this.buildStreamRootsOnWorker(coords, bypassCacheIds),
+  });
+
+  /** @internal test seam — forwarded to stream-roots collaborator */
+  get streamRootCfg(): ClodPagesConfig | null {
+    return this.streamRoots.streamRootCfg;
+  }
+  set streamRootCfg(value: ClodPagesConfig | null) {
+    this.streamRoots.streamRootCfg = value;
+  }
+  /** @internal test seam */
+  get streamRootGpuUnavailable(): boolean {
+    return this.streamRoots.streamRootGpuUnavailable;
+  }
+  set streamRootGpuUnavailable(value: boolean) {
+    this.streamRoots.streamRootGpuUnavailable = value;
+  }
 
   constructor() {
     attachMainThreadCacheBroker(this.worker);
@@ -154,25 +117,16 @@ export class ClodWorkerClient {
     hydrologyGraph: HydrologyGraph | null = null,
     hydrologyCarve: GraphTerrainCarveConfig | null = null,
     featureStamps: readonly FeatureTerrainStamp[] | undefined = undefined,
+    heightmap: HeightmapSource | null = null,
   ): Promise<BuildResult> => {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
-    this.resetStreamRootGpuMesherForWorld(worldPagesX, worldPagesZ, cfg, terrainSource, cacheDisabled);
-    if (voxelEdits.deltas.length > 0) {
-      const baseSpan = cfg.page.chunks_per_page * cfg.page.chunk_size;
-      const basePages = new Set(voxelEdits.deltas.map((delta) => `${Math.floor(delta.x / baseSpan)},${Math.floor(delta.z / baseSpan)}`));
-      for (const key of basePages) {
-        const [pageX, pageZ] = key.split(",").map(Number);
-        for (let level = 0; level < cfg.page.quadtree_levels; level++) {
-          const scale = 2 ** level;
-          this.streamRootEditState.markDirty(`L${level}:${Math.floor(pageX / scale)},${Math.floor(pageZ / scale)}`);
-        }
-      }
-    }
+    this.streamRoots.resetForWorld(worldPagesX, worldPagesZ, cfg, terrainSource, cacheDisabled);
+    this.streamRoots.markDirtyFromVoxelEdits(voxelEdits, cfg);
     const requestId = this.nextRequestId++;
     const request: ClodWorkerRequest = {
       type: "build", requestId, worldPagesX, worldPagesZ, cfg, voxelEdits,
       terrainFieldConfig, hydrologyTerrain, startupHeightfield, hydrologyGraph, hydrologyCarve, featureStamps,
-      borderCoastOceanConfig, cacheDisabled, terrainSource,
+      borderCoastOceanConfig, cacheDisabled, terrainSource, heightmap,
     };
     this.progressHandlers.set(requestId, onProgress);
     return postTrackedRequest(this.buildRequests, this.worker, request).catch((error) => {
@@ -194,7 +148,7 @@ export class ClodWorkerClient {
       void this.pumpDigQueue();
     });
     return pending.then((rebuilt) => {
-      this.markStreamRootsDirty(transaction);
+      this.streamRoots.markDirtyFromTransaction(transaction);
       return rebuilt;
     });
   }
@@ -206,9 +160,7 @@ export class ClodWorkerClient {
 
   async clearCache(): Promise<void> {
     if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
-    const cacheCtx = await this.streamRootCacheInit?.catch(() => null);
-    if (cacheCtx) await cacheCtx.service.clear();
-    this.streamRootCacheInit = null;
+    await this.streamRoots.clearMainCache();
     return postTrackedRequest(this.clearCacheRequests, this.worker, { type: "clearCache", requestId: this.nextRequestId++ });
   }
 
@@ -238,129 +190,19 @@ export class ClodWorkerClient {
     });
   }
 
-  async buildStreamRoots(coords: readonly { px: number; pz: number; level?: number }[]): Promise<WorkerStreamRootsResult> {
-    if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
-    this.streamRootGpuConfig = streamingRootGpuMesherConfigFromWindow();
-    this.refreshStreamRootBoundsGuardConfig();
-    const ids = coords.map((coord) => this.streamRootNodeId(coord));
-    const complexIds = ids.filter((id) => this.streamRootComplexIds.has(id));
-    this.streamRootComplexRequestedTotal += complexIds.length;
-    this.streamRootOrdinaryRequestedTotal += ids.length - complexIds.length;
-    this.publishStreamRootComplexStats();
-    const dirtySnapshot = this.streamRootEditState.captureDirty(ids);
-    const cpuAuthoritativeIds = this.streamRootEditState.cpuAuthoritative(ids);
-    if (cpuAuthoritativeIds.length > 0) {
-      const built = await this.buildStreamRootsOnWorker(coords, cpuAuthoritativeIds);
-      if (complexIds.length > 0) this.recordStreamRootSdfBuild(coords, built.buildMs, complexIds);
-      this.assertStreamRootNodesValid(built.nodes, "cpu");
-      this.streamRootEditState.acknowledge(dirtySnapshot);
-      return built;
-    }
-    if (!this.streamRootGpuConfig.enabled) {
-      const built = await this.buildStreamRootsOnWorker(coords);
-      this.assertStreamRootNodesValid(built.nodes, "cpu");
-      return built;
-    }
-
-    try {
-      const mesher = await this.getStreamRootGpuMesher();
-      if (!mesher) {
-        if (!this.streamRootGpuConfig.fallback) throw new Error("WebGPU streamed-root mesher unavailable");
-        const fallback = await this.buildStreamRootsOnWorkerWithFallbackCounter(coords);
-        this.assertStreamRootNodesValid(fallback.nodes, "cpu");
-        return fallback;
-      }
-      if (this.streamRootGpuTileMeshRequested()) {
-        const pageSize = this.streamRootCfg!.page.chunks_per_page * this.streamRootCfg!.page.chunk_size;
-        for (const coord of coords) {
-          if (!uploadHeightfieldTilesForPage(coord, pageSize)) {
-            throw new Error(`GPU tile mesher missing resident heightfield tile for L${coord.level ?? 0}:${coord.px},${coord.pz}`);
-          }
-        }
-      }
-      const built = await this.buildStreamRootsOnGpuWithCache(mesher, coords);
-      this.recordStreamRootHeightfieldBuild(coords, built.buildMs, complexIds);
-      return built;
-    } catch (error) {
-      const guardRejected = isStreamedPageBoundsGuardError(error);
-      const mesherDisabled = this.streamRootGpuMesher?.stats().enabled === 0;
-      this.streamRootGpuMesher?.recordFallbackPages(coords.length);
-      if (mesherDisabled) {
-        this.streamRootGpuUnavailable = true;
-        this.disposeStreamRootGpuMesher();
-      }
-      if (!this.streamRootGpuConfig.fallback) throw error;
-      console.warn(`[clod-stream-gpu] GPU streamed-root batch failed; falling back to CPU worker for ${coords.length} page(s)`, error);
-      const fallback = await this.buildStreamRootsOnWorkerWithFallbackCounter(coords);
-      if (guardRejected) {
-        recordStreamedPageBoundsGuardCpuFallbackPages(this.streamRootBoundsGuardStats, coords.length);
-        this.publishStreamRootBoundsGuardStats();
-      }
-      this.assertStreamRootNodesValid(fallback.nodes, "cpu");
-      return fallback;
-    }
+  buildStreamRoots(coords: readonly StreamRootCoord[]): Promise<WorkerStreamRootsResult> {
+    return this.streamRoots.buildStreamRoots(coords);
   }
 
-  /**
-   * Diagnostic-only: build the same pages through the GPU mesher and the CPU worker
-   * (cache-bypassed) and report both outcomes side by side. Neither leg stores to the
-   * stream-root cache or counts as a route fallback; a GPU-leg failure does increment
-   * the mesher's failed-batch counter, so run this outside acceptance measurement.
-   */
-  async compareStreamRootBuilds(
-    coords: readonly { px: number; pz: number; level?: number }[],
-  ): Promise<StreamRootBuildComparison[]> {
-    if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
-    this.streamRootGpuConfig = streamingRootGpuMesherConfigFromWindow();
-    const mesher = await this.getStreamRootGpuMesher();
-    const comparisons: StreamRootBuildComparison[] = [];
-    for (const coord of coords) {
-      const id = this.streamRootNodeId(coord);
-      comparisons.push({
-        id,
-        gpu: await this.compareStreamRootGpuLeg(mesher, coord, id),
-        cpu: await this.compareStreamRootCpuLeg(coord, id),
-      });
-    }
-    return comparisons;
+  compareStreamRootBuilds(coords: readonly StreamRootCoord[]): Promise<StreamRootBuildComparison[]> {
+    return this.streamRoots.compareStreamRootBuilds(coords);
   }
 
-  private async compareStreamRootGpuLeg(
-    mesher: GpuClodRootMesher | null,
-    coord: { px: number; pz: number; level?: number },
-    id: string,
-  ): Promise<StreamRootBuildLegEvidence> {
-    const startedAt = performance.now();
-    if (!mesher) return streamRootLegFailure(new Error("WebGPU streamed-root mesher unavailable"), 0);
-    try {
-      if (this.streamRootGpuTileMeshRequested()) {
-        const pageSize = this.streamRootCfg!.page.chunks_per_page * this.streamRootCfg!.page.chunk_size;
-        if (!uploadHeightfieldTilesForPage(coord, pageSize)) {
-          throw new Error(`GPU tile mesher missing resident heightfield tile for ${id}`);
-        }
-      }
-      const built = await mesher.buildPages([{ px: coord.px, pz: coord.pz, level: coord.level }]);
-      const node = built.nodes.find((candidate) => candidate.id === id);
-      if (!node) throw new Error(`GPU build returned no node for ${id}`);
-      return streamRootLegEvidence(node.mesh, performance.now() - startedAt);
-    } catch (error) {
-      return streamRootLegFailure(error, performance.now() - startedAt);
-    }
-  }
-
-  private async compareStreamRootCpuLeg(
-    coord: { px: number; pz: number; level?: number },
-    id: string,
-  ): Promise<StreamRootBuildLegEvidence> {
-    const startedAt = performance.now();
-    try {
-      const built = await this.buildStreamRootsOnWorker([coord], [id]);
-      const node = built.nodes.find((candidate) => candidate.id === id);
-      if (!node) throw new Error(`CPU build returned no node for ${id}`);
-      return streamRootLegEvidence(node.mesh, performance.now() - startedAt);
-    } catch (error) {
-      return streamRootLegFailure(error, performance.now() - startedAt);
-    }
+  probeStreamRootHeights(
+    points: readonly { x: number; z: number }[],
+    level?: number,
+  ): Promise<(number | null)[]> {
+    return this.streamRoots.probeStreamRootHeights(points, level);
   }
 
   isParentsHealthy(): boolean { return this.parentsHealthy; }
@@ -370,57 +212,13 @@ export class ClodWorkerClient {
   dispose(): void {
     if (this.stopped) return;
     this.stopped = true;
-    this.disposeStreamRootGpuMesher();
+    this.streamRoots.disposeGpuMesher();
     this.worker.terminate();
     this.doRejectAll(new Error("CLOD worker disposed"));
   }
 
-  private async buildStreamRootsOnGpuWithCache(
-    mesher: GpuClodRootMesher,
-    coords: readonly { px: number; pz: number; level?: number }[],
-  ): Promise<WorkerStreamRootsResult> {
-    const startedAt = performance.now();
-    const cacheCtx = await this.streamRootCacheInit?.catch(() => null) ?? null;
-    const cacheStats = createEmptyStreamRootCacheStats();
-    const nodesById = new Map<string, ClodPageNode>();
-    const misses: Array<{ px: number; pz: number; level?: number }> = [];
-
-    for (const coord of coords) {
-      const rootLevel = this.streamRootLevel(coord.level);
-      const cached = await tryLoadStreamRootNode(cacheCtx, "gpu", rootLevel, coord.px, coord.pz, cacheStats);
-      if (cached && this.acceptStreamRootNode(cached, "cache")) nodesById.set(cached.id, cached);
-      else misses.push(coord);
-    }
-
-    if (misses.length > 0) {
-      const built = await mesher.buildPages(misses);
-      this.assertStreamRootNodesValid(built.nodes, "gpu");
-      const avgBuildMs = built.nodes.length > 0 ? built.buildMs / built.nodes.length : 0;
-      for (const node of built.nodes) {
-        nodesById.set(node.id, node);
-        await storeStreamRootNode(cacheCtx, "gpu", node, avgBuildMs, cacheStats);
-      }
-      if (cacheCtx) await cacheCtx.service.flush();
-    }
-
-    publishStreamRootCacheCounters(cacheStats, "gpu");
-
-    const nodes = coords.map((coord) => {
-      const id = this.streamRootNodeId(coord);
-      const node = nodesById.get(id);
-      if (!node) throw new Error(`streamed root cache/GPU build missing ${id}`);
-      return node;
-    });
-
-    return {
-      nodes,
-      buildMs: performance.now() - startedAt,
-      transferBytes: nodes.reduce((sum, node) => sum + this.streamRootTransferBytes(node), 0),
-    };
-  }
-
   private buildStreamRootsOnWorker(
-    coords: readonly { px: number; pz: number; level?: number }[],
+    coords: readonly StreamRootCoord[],
     bypassCacheIds?: readonly string[],
   ): Promise<WorkerStreamRootsResult> {
     return postTrackedRequest(this.streamRootsRequests, this.worker, {
@@ -429,254 +227,6 @@ export class ClodWorkerClient {
       coords: coords.map(({ px, pz, level }) => ({ px, pz, level })),
       bypassCacheIds: bypassCacheIds ? [...bypassCacheIds] : undefined,
     });
-  }
-
-  private markStreamRootsDirty(transaction: VoxelEditTransaction): void {
-    this.markStreamRootBoundsDirty(transaction.dirtyBounds);
-  }
-
-  private markStreamRootBoundsDirty(bounds: { minX: number; maxX: number; minZ: number; maxZ: number }, complex = false): void {
-    if (!this.streamRootCfg) return;
-    const baseSpan = this.streamRootCfg.page.chunks_per_page * this.streamRootCfg.page.chunk_size;
-    for (let level = 0; level < this.streamRootCfg.page.quadtree_levels; level++) {
-      const span = baseSpan * (2 ** level);
-      const minX = Math.floor(bounds.minX / span);
-      const maxX = Math.floor(bounds.maxX / span);
-      const minZ = Math.floor(bounds.minZ / span);
-      const maxZ = Math.floor(bounds.maxZ / span);
-      for (let pz = minZ; pz <= maxZ; pz++) {
-        for (let px = minX; px <= maxX; px++) {
-          const id = `L${level}:${px},${pz}`;
-          this.streamRootEditState.markDirty(id);
-          if (complex) this.streamRootComplexIds.add(id);
-        }
-      }
-    }
-  }
-
-  private buildStreamRootsOnWorkerWithFallbackCounter(coords: readonly { px: number; pz: number; level?: number }[]): Promise<WorkerStreamRootsResult> {
-    this.streamRootWorkerFallbackPages += coords.length;
-    if (this.streamRootGpuMesher) this.streamRootGpuMesher.recordWorkerFallbackPages(coords.length);
-    else publishGpuClodRootMesherCounters(disabledGpuStats(this.streamRootWorkerFallbackPages));
-    return this.buildStreamRootsOnWorker(coords);
-  }
-
-  private refreshStreamRootBoundsGuardConfig(): void {
-    this.streamRootBoundsGuardConfig = streamedPageBoundsGuardConfigFromWindow();
-    this.streamRootBoundsGuardStats.enabled = this.streamRootBoundsGuardConfig.enabled ? 1 : 0;
-    this.publishStreamRootBoundsGuardStats();
-  }
-
-  private streamRootGpuTileMeshRequested(): boolean {
-    return typeof window !== "undefined" && continentTileMeshingEnabled(new URLSearchParams(window.location.search));
-  }
-
-  private acceptStreamRootNode(node: ClodPageNode, source: StreamRootBoundsGuardSource): boolean {
-    const cfg = this.streamRootCfg;
-    if (!cfg) return true;
-    const result = validateStreamedPageBounds(node, cfg.page.chunk_size, this.streamRootBoundsGuardConfig);
-    recordStreamedPageBoundsGuardResult(this.streamRootBoundsGuardStats, result, this.streamRootBoundsGuardConfig);
-    if (!result.ok) {
-      if (source === "cache") recordStreamedPageBoundsGuardCacheDrop(this.streamRootBoundsGuardStats);
-      console.warn(`[clod-stream-bounds] rejected ${source} streamed page ${node.id}: ${result.reason ?? "unknown"}`);
-      this.publishStreamRootBoundsGuardStats();
-      return false;
-    }
-    this.publishStreamRootBoundsGuardStats();
-    return true;
-  }
-
-  private assertStreamRootNodesValid(nodes: readonly ClodPageNode[], source: StreamRootBoundsGuardSource): void {
-    const rejected = nodes.filter((node) => !this.acceptStreamRootNode(node, source));
-    if (rejected.length === 0) return;
-    if (source === "gpu") recordStreamedPageBoundsGuardBatchReject(this.streamRootBoundsGuardStats);
-    this.publishStreamRootBoundsGuardStats();
-    const results = rejected.map((node) => validateStreamedPageBounds(node, this.streamRootCfg!.page.chunk_size, this.streamRootBoundsGuardConfig));
-    throw new StreamedPageBoundsGuardError(
-      `streamed-root ${source} build produced ${rejected.length} invalid page(s)`,
-      results,
-    );
-  }
-
-  private publishStreamRootBoundsGuardStats(): void {
-    publishStreamedPageBoundsGuardStatsToCounters(globalClodCounters(), this.streamRootBoundsGuardStats);
-  }
-
-  private async getStreamRootGpuMesher(): Promise<GpuClodRootMesher | null> {
-    if (this.streamRootGpuMesher) return this.streamRootGpuMesher;
-    if (this.streamRootGpuUnavailable || !this.streamRootCfg) return null;
-    if (!this.streamRootGpuCreatePromise) {
-      const cfg = this.streamRootCfg;
-      const pageSpan = cfg.page.chunks_per_page * cfg.page.chunk_size;
-      const worldCellsX = this.streamRootWorldPagesX * pageSpan;
-      const worldCellsZ = this.streamRootWorldPagesZ * pageSpan;
-      this.streamRootGpuCreatePromise = createGpuClodRootMesher({
-        cfg,
-        world: { cellsX: worldCellsX, cellsZ: worldCellsZ, finite: false },
-        config: this.streamRootGpuConfig,
-      }).then((mesher) => {
-        this.streamRootGpuMesher = mesher;
-        this.streamRootGpuUnavailable = mesher === null;
-        return mesher;
-      }).catch((error) => {
-        this.streamRootGpuUnavailable = true;
-        console.warn("[clod-stream-gpu] failed to create GPU streamed-root mesher", error);
-        return null;
-      });
-    }
-    return this.streamRootGpuCreatePromise;
-  }
-
-  private resetStreamRootGpuMesherForWorld(
-    worldPagesX: number,
-    worldPagesZ: number,
-    cfg: ClodPagesConfig,
-    terrainSource: TerrainSourceInputs,
-    cacheDisabled: boolean,
-  ): void {
-    this.disposeStreamRootGpuMesher();
-    this.streamRootCfg = cfg;
-    this.streamRootWorldPagesX = worldPagesX;
-    this.streamRootWorldPagesZ = worldPagesZ;
-    this.streamRootGpuConfig = streamingRootGpuMesherConfigFromWindow();
-    this.streamRootBoundsGuardConfig = streamedPageBoundsGuardConfigFromWindow();
-    this.streamRootBoundsGuardStats = createStreamedPageBoundsGuardStats();
-    this.streamRootBoundsGuardStats.enabled = this.streamRootBoundsGuardConfig.enabled ? 1 : 0;
-    this.publishStreamRootBoundsGuardStats();
-    this.streamRootGpuUnavailable = false;
-    this.streamRootWorkerFallbackPages = 0;
-    this.streamRootEditState.reset();
-    this.streamRootComplexIds.clear();
-    this.streamRootComplexRequestedTotal = 0;
-    this.streamRootOrdinaryRequestedTotal = 0;
-    this.streamRootSdfBuildSamplesByLevel.length = 0;
-    this.streamRootHeightfieldBuildSamplesByLevel.length = 0;
-    for (const region of terrainSource.voxelOverlay?.regions ?? []) {
-      this.markStreamRootBoundsDirty(region.bounds, true);
-    }
-    this.publishStreamRootComplexStats();
-    this.streamRootCacheInit = initClodCacheContext({
-      cfg,
-      worldPages: worldPagesX,
-      worldPagesZ,
-      terrainSource,
-      forceDisabled: cacheDisabled,
-      role: "main-pages",
-    }).catch((error) => {
-      console.warn("[clod-stream-cache] failed to initialize main streamed-root cache", error);
-      return null;
-    });
-    publishGpuClodRootMesherCounters(disabledGpuStats());
-  }
-
-  private disposeStreamRootGpuMesher(): void {
-    this.streamRootGpuMesher?.dispose();
-    this.streamRootGpuMesher = null;
-    this.streamRootGpuCreatePromise = null;
-  }
-
-  /**
-   * Diagnostic: rendered-mesh heights at world points, from the stream roots covering
-   * them (cache-honoring, so a stale cache is part of what this measures). Builds each
-   * covering root at `level` (default: the coarsest root level) through the normal
-   * build route and interpolates the top surface per point; null where the root mesh
-   * has no triangle over the point. Used by the traced-carve verify gate to prove the
-   * carved channel survives root-LOD simplification.
-   */
-  async probeStreamRootHeights(
-    points: readonly { x: number; z: number }[],
-    level?: number,
-  ): Promise<(number | null)[]> {
-    if (this.stopped) return Promise.reject(new Error(WORKER_STOPPED_ERROR));
-    if (!this.streamRootCfg) throw new Error("stream root CLOD config unavailable");
-    const rootLevel = this.streamRootLevel(level ?? this.streamRootCfg.page.quadtree_levels - 1);
-    const spanM = this.streamRootCfg.page.chunks_per_page * this.streamRootCfg.page.chunk_size * 2 ** rootLevel;
-    const coordByKey = new Map<string, { px: number; pz: number; level: number }>();
-    const keys = points.map((point) => {
-      const px = Math.floor(point.x / spanM);
-      const pz = Math.floor(point.z / spanM);
-      const key = `${px},${pz}`;
-      if (!coordByKey.has(key)) coordByKey.set(key, { px, pz, level: rootLevel });
-      return key;
-    });
-    const coords = [...coordByKey.values()];
-    const built = await this.buildStreamRoots(coords);
-    const nodeByKey = new Map<string, ClodPageNode>();
-    coords.forEach((coord, index) => nodeByKey.set(`${coord.px},${coord.pz}`, built.nodes[index]));
-    return points.map((point, index) => {
-      const node = nodeByKey.get(keys[index]);
-      return node ? interpolateMeshHeightAt(node.mesh, point.x, point.z) : null;
-    });
-  }
-
-  private streamRootLevel(level: number | undefined): number {
-    if (!this.streamRootCfg) throw new Error("stream root CLOD config unavailable");
-    return Math.max(0, Math.min(this.streamRootCfg.page.quadtree_levels - 1, Math.floor(level ?? 0)));
-  }
-
-  private streamRootNodeId(coord: { px: number; pz: number; level?: number }): string {
-    return `L${this.streamRootLevel(coord.level)}:${coord.px},${coord.pz}`;
-  }
-
-  private streamRootTransferBytes(node: ClodPageNode): number {
-    return node.mesh.positions.byteLength
-      + node.mesh.normals.byteLength
-      + node.mesh.paintSlots.byteLength
-      + node.mesh.materialWeights.byteLength
-      + node.mesh.indices.byteLength;
-  }
-
-  private recordStreamRootSdfBuild(
-    coords: readonly { px: number; pz: number; level?: number }[],
-    buildMs: number,
-    complexIds: readonly string[],
-  ): void {
-    const perPageMs = coords.length > 0 ? buildMs / coords.length : 0;
-    const complexSet = new Set(complexIds);
-    for (const coord of coords) {
-      if (!complexSet.has(this.streamRootNodeId(coord))) continue;
-      const level = this.streamRootLevel(coord.level);
-      const samples = this.streamRootSdfBuildSamplesByLevel[level] ??= [];
-      samples.push(perPageMs);
-      if (samples.length > 128) samples.shift();
-    }
-    this.publishStreamRootComplexStats();
-  }
-
-  private recordStreamRootHeightfieldBuild(
-    coords: readonly { px: number; pz: number; level?: number }[],
-    buildMs: number,
-    complexIds: readonly string[],
-  ): void {
-    const perPageMs = coords.length > 0 ? buildMs / coords.length : 0;
-    const complexSet = new Set(complexIds);
-    for (const coord of coords) {
-      if (complexSet.has(this.streamRootNodeId(coord))) continue;
-      const level = this.streamRootLevel(coord.level);
-      const samples = this.streamRootHeightfieldBuildSamplesByLevel[level] ??= [];
-      samples.push(perPageMs);
-      if (samples.length > 128) samples.shift();
-    }
-    this.publishStreamRootComplexStats();
-  }
-
-  private publishStreamRootComplexStats(): void {
-    const counters = typeof window !== "undefined" ? window.__drusnielClod?.stats?.counters : null;
-    if (!counters) return;
-    const total = this.streamRootComplexRequestedTotal + this.streamRootOrdinaryRequestedTotal;
-    counters["live_clod_stream_complex_pages_requested_total"] = this.streamRootComplexRequestedTotal;
-    counters["live_clod_stream_heightfield_pages_requested_total"] = this.streamRootOrdinaryRequestedTotal;
-    counters["live_clod_stream_complex_page_share"] = total > 0 ? this.streamRootComplexRequestedTotal / total : 0;
-    for (let level = 0; level < this.streamRootSdfBuildSamplesByLevel.length; level++) {
-      const sorted = [...(this.streamRootSdfBuildSamplesByLevel[level] ?? [])].sort((a, b) => a - b);
-      const index = Math.max(0, Math.ceil(sorted.length * 0.95) - 1);
-      counters[`live_clod_stream_sdf_build_ms_p95_l${level}`] = sorted[index] ?? 0;
-    }
-    for (let level = 0; level < this.streamRootHeightfieldBuildSamplesByLevel.length; level++) {
-      const sorted = [...(this.streamRootHeightfieldBuildSamplesByLevel[level] ?? [])].sort((a, b) => a - b);
-      const index = Math.max(0, Math.ceil(sorted.length * 0.95) - 1);
-      counters[`live_clod_stream_heightfield_build_ms_p95_l${level}`] = sorted[index] ?? 0;
-    }
   }
 
   private async pumpDigQueue(): Promise<void> {
@@ -819,7 +369,7 @@ export class ClodWorkerClient {
     if (this.stopped) return;
     const err = error instanceof Error ? error : new Error(String(error));
     this.stopped = true;
-    this.disposeStreamRootGpuMesher();
+    this.streamRoots.disposeGpuMesher();
     this.worker.terminate();
     this.markParentsFailed(err);
     this.doRejectAll(err);
@@ -860,28 +410,4 @@ export class ClodWorkerClient {
     this.rejectPendingDig(error);
     this.parentsWaiters.splice(0);
   }
-}
-
-function streamRootLegEvidence(mesh: PageMesh, buildMs: number): StreamRootBuildLegEvidence {
-  let minY: number | null = null;
-  let maxY: number | null = null;
-  for (let i = 1; i < mesh.positions.length; i += 3) {
-    const y = mesh.positions[i];
-    if (minY === null || y < minY) minY = y;
-    if (maxY === null || y > maxY) maxY = y;
-  }
-  return {
-    ok: true,
-    error: null,
-    triangles: mesh.indices.length / 3,
-    vertices: mesh.positions.length / 3,
-    minY,
-    maxY,
-    buildMs,
-  };
-}
-
-function streamRootLegFailure(error: unknown, buildMs: number): StreamRootBuildLegEvidence {
-  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-  return { ok: false, error: message, triangles: 0, vertices: 0, minY: null, maxY: null, buildMs };
 }

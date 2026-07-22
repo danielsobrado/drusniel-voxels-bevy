@@ -56,7 +56,7 @@ describe("lod0Nodes / allNodes bootstrap wiring", () => {
   });
 
   it("world_build_startup builds terrain summary from lod0Nodes only", () => {
-    const source = readSource("world_build_startup.ts");
+    const source = readSource("world_build_cache_worker_startup.ts");
     expect(source).toContain("splitWorldBuildNodes(result.nodesByLevel)");
     expect(source).toMatch(/loadTerrainSummaryWithCacheSimple\(\s*lod0Nodes\s*,/);
     expect(source).not.toMatch(/loadTerrainSummaryWithCacheSimple\(\s*allNodes\s*,/);

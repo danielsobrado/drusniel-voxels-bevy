@@ -10,7 +10,6 @@ import {
   DEFAULT_FAR_SUMMARY_ATLAS_FORMAT,
   clamp01,
   estimateFarSummaryAtlasBytes,
-  packUnorm8,
   resolveFarSummaryAtlasPackingSpec,
   type FarSummaryAtlasByteEstimate,
   type FarSummaryAtlasFormat,
@@ -21,57 +20,56 @@ import {
   type FarSummaryGpuAtlasUploadOptions,
   type ResolvedFarSummaryGpuAtlasUploadOptions,
 } from "../farSummaryAtlasUploadConfig.js";
+import {
+  type AtlasDirtyRect,
+  type AtlasDirtyUploadPlan,
+  type AtlasPlacementDiff,
+  type FarSummaryGpuAtlasFullUploadReason,
+  type PlannedAtlasTileSnapshot,
+  clipRect,
+  diffAtlasTilePlacements,
+  dirtyArea,
+  mergeDirtyRects,
+  resolveFullUploadReason,
+  shouldUseFullUpload,
+} from "./farSummaryAtlasDirtyRects.js";
+import {
+  RGBA_COMPONENTS,
+  clearRectData,
+  deriveSummaryNormal,
+  encodeNormalChannel,
+  writeCoverage,
+  writeHeight,
+  writeRgba,
+} from "./farSummaryAtlasBlit.js";
+import {
+  type AtlasData,
+  type HeightAtlasData,
+  createCoverageAtlasTexture,
+  createHeightAtlasTexture,
+  createPackedAtlasTexture,
+} from "./farSummaryAtlasTextures.js";
 
 const DEFAULT_ATLAS_TILES_X = 5;
 const DEFAULT_ATLAS_TILES_Z = 5;
-const RGBA_COMPONENTS = 4;
-const NORMAL_ENCODE_BIAS = 0.5;
-const NORMAL_ENCODE_SCALE = 0.5;
-const HALF_FLOAT_MAX = 65504;
 
-type HeightAtlasData = Float32Array | Uint16Array;
-type AtlasData = Float32Array | Uint8Array;
 type UploadMode = "none" | "dirty" | "full";
-export type FarSummaryGpuAtlasFullUploadReason =
-  | "initial"
-  | "explicit"
-  | "disabled"
-  | "too_many_rects"
-  | "threshold"
-  | "invalid_atlas"
-  | "partial_ranges_unsupported"
-  | "full_invalidation";
 
+export type {
+  AtlasDirtyRect,
+  AtlasDirtyUploadPlan,
+  AtlasPlacementDiff,
+  FarSummaryGpuAtlasFullUploadReason,
+  PlannedAtlasTileSnapshot,
+};
+export {
+  diffAtlasTilePlacements,
+  dirtyArea,
+  mergeDirtyRects,
+  resolveFullUploadReason,
+  shouldUseFullUpload,
+};
 export type { FarSummaryGpuAtlasUploadOptions } from "../farSummaryAtlasUploadConfig.js";
-
-export interface AtlasDirtyRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export interface AtlasDirtyUploadPlan {
-  rects: AtlasDirtyRect[];
-  dirtyPixels: number;
-  fullUpload: boolean;
-}
-
-export interface PlannedAtlasTileSnapshot {
-  key: string;
-  revision: number;
-  ringIndex: number;
-  atlasTileX: number;
-  atlasTileZ: number;
-  atlasX: number;
-  atlasY: number;
-  copyCells: number;
-}
-
-export interface AtlasPlacementDiff {
-  clearRects: AtlasDirtyRect[];
-  blitKeys: string[];
-}
 
 export interface FarSummaryGpuAtlasUploadStats {
   fullUploads: number;
@@ -420,16 +418,16 @@ export class FarSummaryGpuAtlas {
       for (let x = 0; x < copyCells; x++) {
         const src = z * tile.resolution + x;
         const pixel = (baseZ + z) * atlasWidth + baseX + x;
-        this.writeHeight(pixel, tile.avgHeight[src] ?? 0, tile.minHeight[src] ?? 0, tile.maxHeight[src] ?? 0);
+        writeHeight(this.heightData, this.packing, pixel, tile.avgHeight[src] ?? 0, tile.minHeight[src] ?? 0, tile.maxHeight[src] ?? 0);
 
         if (!this.writeBakedFarColor(baked, src, pixel)) {
           const color = materialColorForDebugId(tile.dominantMaterial[src] ?? 0);
-          this.writeRgba(this.materialData, pixel * RGBA_COMPONENTS, color[0], color[1], color[2], 1);
+          writeRgba(this.materialData, pixel * RGBA_COMPONENTS, color[0], color[1], color[2], 1);
         }
 
         if (this.packing.storesNormalAtlas) {
           const normal = deriveSummaryNormal(tile, x, z);
-          this.writeRgba(
+          writeRgba(
             this.normalData,
             pixel * RGBA_COMPONENTS,
             encodeNormalChannel(normal.x),
@@ -440,7 +438,9 @@ export class FarSummaryGpuAtlas {
         }
 
         if (!this.writeBakedCoverage(baked, src, pixel)) {
-          this.writeCoverage(
+          writeCoverage(
+            this.coverageData,
+            this.packing,
             pixel,
             clamp01(tile.canopyCoverage[src] ?? 0),
             clamp01(tile.waterCoverage[src] ?? 0),
@@ -552,7 +552,7 @@ export class FarSummaryGpuAtlas {
     if (!channel?.available) return false;
     const src = srcPixel * RGBA_COMPONENTS;
     const dst = atlasPixel * RGBA_COMPONENTS;
-    this.writeRgba(
+    writeRgba(
       this.materialData,
       dst,
       (channel.data[src] ?? 0) / 255,
@@ -567,58 +567,14 @@ export class FarSummaryGpuAtlas {
     const channel = payload?.coverage;
     if (!channel?.available) return false;
     const src = srcPixel * 2;
-    this.writeCoverage(
+    writeCoverage(
+      this.coverageData,
+      this.packing,
       atlasPixel,
       (channel.data[src] ?? 0) / 255,
       (channel.data[src + 1] ?? 0) / 255,
     );
     return true;
-  }
-
-  private writeHeight(pixel: number, avgHeight: number, minHeight: number, maxHeight: number): void {
-    const dst = pixel * this.packing.heightComponents;
-    if (this.heightData instanceof Uint16Array) {
-      this.heightData[dst] = THREE.DataUtils.toHalfFloat(clampHalfFloatHeight(avgHeight));
-      return;
-    }
-    this.heightData[dst] = finiteOrZero(avgHeight);
-    if (!this.packing.storesHeightRange) return;
-    this.heightData[dst + 1] = finiteOrZero(minHeight);
-    this.heightData[dst + 2] = finiteOrZero(maxHeight);
-    this.heightData[dst + 3] = 1;
-  }
-
-  private writeRgba(data: AtlasData, dst: number, r: number, g: number, b: number, a: number): void {
-    if (data instanceof Float32Array) {
-      data[dst] = clamp01(r);
-      data[dst + 1] = clamp01(g);
-      data[dst + 2] = clamp01(b);
-      data[dst + 3] = clamp01(a);
-      return;
-    }
-    data[dst] = packUnorm8(r);
-    data[dst + 1] = packUnorm8(g);
-    data[dst + 2] = packUnorm8(b);
-    data[dst + 3] = packUnorm8(a);
-  }
-
-  private writeCoverage(pixel: number, canopy: number, water: number): void {
-    const dst = pixel * this.packing.coverageComponents;
-    if (this.coverageData instanceof Float32Array) {
-      this.coverageData[dst] = clamp01(canopy);
-      this.coverageData[dst + 1] = clamp01(water);
-      if (this.packing.coverageComponents >= RGBA_COMPONENTS) {
-        this.coverageData[dst + 2] = 1;
-        this.coverageData[dst + 3] = 1;
-      }
-      return;
-    }
-    this.coverageData[dst] = packUnorm8(canopy);
-    this.coverageData[dst + 1] = packUnorm8(water);
-    if (this.packing.coverageComponents >= RGBA_COMPONENTS) {
-      this.coverageData[dst + 2] = 255;
-      this.coverageData[dst + 3] = 255;
-    }
   }
 
   private emptyRingView(ringIndex: number, ring?: { startM: number; endM: number; cellM: number }): FarSummaryGpuAtlasRingView {
@@ -634,141 +590,6 @@ export class FarSummaryGpuAtlas {
       valid: 0,
     };
   }
-}
-
-export function mergeDirtyRects(rects: AtlasDirtyRect[]): AtlasDirtyRect[] {
-  const merged = rects
-    .map(normalizeRect)
-    .filter((rect): rect is AtlasDirtyRect => rect !== null);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (let i = 0; i < merged.length && !changed; i++) {
-      for (let j = i + 1; j < merged.length; j++) {
-        if (!rectsOverlapOrTouch(merged[i]!, merged[j]!)) continue;
-        merged[i] = unionRect(merged[i]!, merged[j]!);
-        merged.splice(j, 1);
-        changed = true;
-        break;
-      }
-    }
-  }
-  return merged;
-}
-
-export function dirtyArea(rects: AtlasDirtyRect[]): number {
-  return mergeDirtyRects(rects).reduce((total, rect) => total + rect.width * rect.height, 0);
-}
-
-export function resolveFullUploadReason(
-  plan: AtlasDirtyUploadPlan,
-  atlasPixels: number,
-  config: ResolvedFarSummaryGpuAtlasUploadOptions,
-  partialRangesSupported = true,
-): FarSummaryGpuAtlasFullUploadReason | null {
-  if (plan.fullUpload) return "explicit";
-  if (!config.dirtyRectUploads) return "disabled";
-  if (!partialRangesSupported) return "partial_ranges_unsupported";
-  if (plan.rects.length > config.maxDirtyRectsPerTexture) return "too_many_rects";
-  if (atlasPixels <= 0) return "invalid_atlas";
-  if (plan.dirtyPixels / atlasPixels > config.fullUploadThresholdPct) return "threshold";
-  return null;
-}
-
-export function shouldUseFullUpload(
-  plan: AtlasDirtyUploadPlan,
-  atlasPixels: number,
-  config: ResolvedFarSummaryGpuAtlasUploadOptions,
-): boolean {
-  return resolveFullUploadReason(plan, atlasPixels, config) !== null;
-}
-
-export function diffAtlasTilePlacements(
-  previous: ReadonlyMap<string, PlannedAtlasTileSnapshot>,
-  next: ReadonlyMap<string, PlannedAtlasTileSnapshot>,
-  forceBlitAll = false,
-): AtlasPlacementDiff {
-  const clearRects: AtlasDirtyRect[] = [];
-  const blitKeys: string[] = [];
-
-  for (const [key, oldPlacement] of previous) {
-    const nextPlacement = next.get(key);
-    if (!nextPlacement) {
-      clearRects.push(snapshotRect(oldPlacement));
-      continue;
-    }
-    if (sameAtlasSlot(oldPlacement, nextPlacement) && oldPlacement.copyCells === nextPlacement.copyCells) continue;
-    clearRects.push(snapshotRect(oldPlacement));
-  }
-
-  for (const [key, nextPlacement] of next) {
-    const oldPlacement = previous.get(key);
-    if (
-      forceBlitAll
-      || !oldPlacement
-      || oldPlacement.revision !== nextPlacement.revision
-      || !sameAtlasSlot(oldPlacement, nextPlacement)
-      || oldPlacement.copyCells !== nextPlacement.copyCells
-    ) {
-      blitKeys.push(key);
-    }
-  }
-
-  return { clearRects, blitKeys };
-}
-
-function createHeightAtlasTexture(
-  data: HeightAtlasData,
-  width: number,
-  height: number,
-  packing: FarSummaryAtlasPackingSpec,
-  name: string,
-): THREE.DataTexture {
-  const format = packing.format === "debug_rgba32f" ? THREE.RGBAFormat : THREE.RedFormat;
-  const type = packing.heightFormat === "r16f" ? THREE.HalfFloatType : THREE.FloatType;
-  return createAtlasTexture(data, width, height, format, type, name);
-}
-
-function createPackedAtlasTexture(
-  data: AtlasData,
-  width: number,
-  height: number,
-  packing: FarSummaryAtlasPackingSpec,
-  name: string,
-): THREE.DataTexture {
-  const type = packing.format === "debug_rgba32f" ? THREE.FloatType : THREE.UnsignedByteType;
-  return createAtlasTexture(data, width, height, THREE.RGBAFormat, type, name);
-}
-
-function createCoverageAtlasTexture(
-  data: AtlasData,
-  width: number,
-  height: number,
-  packing: FarSummaryAtlasPackingSpec,
-  name: string,
-): THREE.DataTexture {
-  const format = packing.format === "debug_rgba32f" ? THREE.RGBAFormat : THREE.RGFormat;
-  const type = packing.format === "debug_rgba32f" ? THREE.FloatType : THREE.UnsignedByteType;
-  return createAtlasTexture(data, width, height, format, type, name);
-}
-
-function createAtlasTexture(
-  data: HeightAtlasData | AtlasData,
-  width: number,
-  height: number,
-  format: THREE.PixelFormat,
-  type: THREE.TextureDataType,
-  name: string,
-): THREE.DataTexture {
-  const texture = new THREE.DataTexture(data, width, height, format, type);
-  texture.name = name;
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.generateMipmaps = false;
-  texture.needsUpdate = true;
-  return texture;
 }
 
 function farTilePlacementKey(tile: FarSummaryTile): string {
@@ -790,60 +611,6 @@ function snapshotPlannedTile(tile: PlannedAtlasTile): PlannedAtlasTileSnapshot {
 
 function plannedTileRect(tile: PlannedAtlasTile): AtlasDirtyRect {
   return { x: tile.atlasX, y: tile.atlasY, width: tile.copyCells, height: tile.copyCells };
-}
-
-function snapshotRect(tile: PlannedAtlasTileSnapshot): AtlasDirtyRect {
-  return { x: tile.atlasX, y: tile.atlasY, width: tile.copyCells, height: tile.copyCells };
-}
-
-function sameAtlasSlot(a: PlannedAtlasTileSnapshot, b: PlannedAtlasTileSnapshot): boolean {
-  return a.ringIndex === b.ringIndex
-    && a.atlasTileX === b.atlasTileX
-    && a.atlasTileZ === b.atlasTileZ
-    && a.atlasX === b.atlasX
-    && a.atlasY === b.atlasY;
-}
-
-function normalizeRect(rect: AtlasDirtyRect): AtlasDirtyRect | null {
-  const x = Math.floor(rect.x);
-  const y = Math.floor(rect.y);
-  const width = Math.floor(rect.width);
-  const height = Math.floor(rect.height);
-  if (width <= 0 || height <= 0) return null;
-  return { x, y, width, height };
-}
-
-function rectsOverlapOrTouch(a: AtlasDirtyRect, b: AtlasDirtyRect): boolean {
-  return a.x <= b.x + b.width
-    && b.x <= a.x + a.width
-    && a.y <= b.y + b.height
-    && b.y <= a.y + a.height;
-}
-
-function unionRect(a: AtlasDirtyRect, b: AtlasDirtyRect): AtlasDirtyRect {
-  const x = Math.min(a.x, b.x);
-  const y = Math.min(a.y, b.y);
-  const maxX = Math.max(a.x + a.width, b.x + b.width);
-  const maxY = Math.max(a.y + a.height, b.y + b.height);
-  return { x, y, width: maxX - x, height: maxY - y };
-}
-
-function clipRect(rect: AtlasDirtyRect, width: number, height: number): AtlasDirtyRect | null {
-  const normalized = normalizeRect(rect);
-  if (!normalized) return null;
-  const x = Math.max(0, Math.min(width, normalized.x));
-  const y = Math.max(0, Math.min(height, normalized.y));
-  const maxX = Math.max(0, Math.min(width, normalized.x + normalized.width));
-  const maxY = Math.max(0, Math.min(height, normalized.y + normalized.height));
-  if (maxX <= x || maxY <= y) return null;
-  return { x, y, width: maxX - x, height: maxY - y };
-}
-
-function clearRectData(data: HeightAtlasData | AtlasData, rect: AtlasDirtyRect, atlasWidth: number, componentCount: number): void {
-  for (let row = 0; row < rect.height; row++) {
-    const start = ((rect.y + row) * atlasWidth + rect.x) * componentCount;
-    data.fill(0, start, start + rect.width * componentCount);
-  }
 }
 
 function textureUpdateRangesAvailable(texture: THREE.DataTexture): boolean {
@@ -870,30 +637,4 @@ function buildRingSignature(ringIndex: number, tiles: FarSummaryTile[], minTileX
     .sort()
     .join("|");
   return `${ringIndex}:${minTileX},${minTileZ}:${tileSig}`;
-}
-
-function finiteOrZero(value: number): number {
-  return Number.isFinite(value) ? value : 0;
-}
-
-function clampHalfFloatHeight(value: number): number {
-  return Math.min(HALF_FLOAT_MAX, Math.max(-HALF_FLOAT_MAX, finiteOrZero(value)));
-}
-
-function encodeNormalChannel(value: number): number {
-  return clamp01(value * NORMAL_ENCODE_SCALE + NORMAL_ENCODE_BIAS);
-}
-
-function deriveSummaryNormal(tile: FarSummaryTile, x: number, z: number): THREE.Vector3 {
-  const left = sampleTileHeight(tile, x - 1, z);
-  const right = sampleTileHeight(tile, x + 1, z);
-  const down = sampleTileHeight(tile, x, z - 1);
-  const up = sampleTileHeight(tile, x, z + 1);
-  return new THREE.Vector3(left - right, 2, down - up).normalize();
-}
-
-function sampleTileHeight(tile: FarSummaryTile, x: number, z: number): number {
-  const cx = Math.max(0, Math.min(tile.resolution - 1, x));
-  const cz = Math.max(0, Math.min(tile.resolution - 1, z));
-  return tile.avgHeight[cz * tile.resolution + cx] ?? 0;
 }

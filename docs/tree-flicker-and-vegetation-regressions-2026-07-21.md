@@ -136,6 +136,176 @@ between levels. Evidence:
 Implication: the durable fix is to make GPU-ring LOD selection stable (hysteresis /
 per-tree previous-LOD state), not to toggle the crossfade or tune shading.
 
+## Remaining unsafe GPU frees are inside three.js (not app code)
+
+With `?gpuDestroyTrace=1` (now logging only frees that bypass `disposeAfterGpuIdle`), the
+app-side unsafe frees are gone. What remains:
+
+- `WebGPUTextureUtils.copyTextureToBuffer` — three.js's own readback staging buffer, freed
+  during `readRenderTargetPixelsAsync` from `bakeTreeFoliageAtlas` /
+  `readTreeImpostorAtlasPixels`. The 500× `renderContext_1` errors follow immediately.
+- `RenderObjects.get` → `RenderObject.dispose` — three.js evicting render objects **during**
+  `_renderObjects`.
+
+Neither is patchable from app code. The app-level lever is that the impostor/foliage bake
+runs **concurrently with the render loop** at startup (`bakeImpostors` is awaited inside
+`runRuntimeSystemsStartup` while frames are already being submitted). Sequencing the bake
+so it does not overlap live frames — or draining the queue around the readback — is the
+real fix. Not attempted.
+
+## BISECT HALTED (2026-07-22) — the flicker probe cannot discriminate good from bad
+
+The bisect in `664f7ce82`(clean) → `4e32f47ac`(blinking) was run to its midpoint and then
+**stopped, because the measurement it depends on was shown to be invalid**. Three probe runs,
+same worktree, same server (5181), same pose, same build tooling, back to back:
+
+| Commit | Date | Premise | hard-flips >60 | churn/frame-pair | What f00 actually shows |
+|---|---|---|---|---|---|
+| `664f7ce82` | 07-14 | **clean** | **17.0%** | 1.93% | dense in-canopy foliage |
+| `36313d32e` | 07-14 | (midpoint) | **17.2%** | 1.98% | dense in-canopy foliage |
+| `4e32f47ac` | 07-15 | **blinking** | **1.9%** | 0.16% | **open grassland, distant treeline** |
+
+Two independent defects in the method, either one fatal:
+
+**1. The metric reads ~17% at the commit we call clean.** `664f7ce82` and the midpoint are
+statistically identical (17.0 vs 17.2), and their heatmaps are indistinguishable. A bisect
+needs good ≠ bad on the metric; here good ≈ bad ≈ every other in-canopy reading ever taken
+(main 15.1%, 07-17 12.4%, midpoint 17.2%, clean 17.0%). The number is flat across the entire
+history including known-good commits, so **it was never measuring the blinking.** Almost
+certainly it is dominated by the per-frame alpha-test/dither stipple of dense near foliage,
+which is present at every commit — clearly visible as stipple texture in every in-canopy f00.
+
+This retroactively weakens the "each disproven by measurement" verdicts in *Ruled out* below:
+prepass 15.3-vs-15.1 and crossfade 1.3-vs-1.4 were null results from an instrument that also
+reads null between clean and blinking. Those hypotheses are **un-ruled-out**, not disproven.
+
+**2. The world moves inside the bracket.** The doc already warned the world moved after the
+07-21 merges; it also moves between 07-14 and 07-15. At `4e32f47ac` the pose (256, 34, 263)
+is open field, so its 1.9% means "almost no trees in frame", not "less blinking". The bracket
+straddles `feat(clod-poc): advance GPU vegetation authority`, `fix(erosion): feed canonical
+wetness into tree ecology`, and the vegetation-exclusion commits — all of which change *where
+trees are placed*. A fixed world pose is not comparable across this range, and any per-commit
+percentage is confounded by tree coverage in frame.
+
+### Second instrument also failed: the `trees.*` LOD counters
+
+The proposed replacement — per-LOD tree population from `__drusnielClod.stats.counters`
+(`trees.near/mid/far/impostor`) — was built and abandoned the same session. Two hard blockers,
+both worth knowing before anyone rebuilds it:
+
+- **They are 250ms debug mirrors, not per-frame values.** `clod_frame_loop.ts` writes them only
+  when `mirrorDue` (`DEBUG_COUNTER_MIRROR_INTERVAL_MS = 250`). Frame-to-frame LOD churn — the
+  blinking itself — is not observable through them at all. Only steady-state distribution is.
+- **They freeze after a teleport.** The mirror block is guarded by `if (currentTreeStats)`, and
+  `stats.getTreeStats()` returns null after `setPose`, so the counters keep their last written
+  values indefinitely. Measured: 25 camera positions spanning 320m all returned byte-identical
+  counters, with `camera_to_vegetation_trees_center_m` pinned at 99.3m throughout. Any reading
+  taken after a `setPose` is stale, not current.
+
+So the automated options are: pixel luma (flat across clean/bad), and these counters (stale after
+the only pose mechanism the harness has). **Visual A/B by a human is currently the only working
+discriminator for this bug** — which is what the bisect checkpoints table was built from, and why
+it is the only thing that has produced a real verdict so far.
+
+### Main-line topology (resolved 2026-07-22)
+
+The 11 tree-touching commits are **not** all on main's first-parent line. The continuous-morphology
+trio (`f7ec7555b`, `18be683d0`, `f1175d0a0`) plus `e37518d2d`, `c8506738b`, `c088edf75` live on a
+side branch that enters main as **one merge**:
+
+```
+febecb3ca  (merge, 07-15)
+  parent1  bad2190f5  "performance improvements"   <- main immediately before
+  parent2  caf10ca16  "test(clod-poc): cover vegetation authority height masks"  <- branch tip
+```
+
+(Verified with `git cat-file -p febecb3ca`; note `git log --format=%h/%p` gave mangled output here
+— see [[rtk-git-output-unreliable]]. Read the raw object when topology matters.)
+
+This makes the whole morphology + vegetation-authority branch testable in **one glance** at
+`bad2190f5`, which splits the range 34 / 17 first-parent commits:
+
+- `bad2190f5` **clean** → the bug arrives with merge `febecb3ca`; the standout suspect is confirmed
+  and the search moves inside that branch.
+- `bad2190f5` **blinking** → the bug predates the morphology work entirely; it is exonerated, and
+  the culprit is among the 34 lightning/spell/docs commits in `664f7ce82..bad2190f5`.
+
+### Visual bisect chain (the only verdicts that count)
+
+All by direct visual inspection at `?oceanRim=0&webgpuSelection=1&materialTiers=1`, served from
+the bisect worktree on port 5181.
+
+| Commit | Date | Verdict | What it means |
+|---|---|---|---|
+| `664f7ce82` | 07-14 | clean | bracket floor |
+| `bad2190f5` | 07-15 | **clean** | main immediately before the merge — **the 34 pre-merge lightning/spell/docs commits are exonerated** |
+| `febecb3ca` | 07-15 | **blinking** | the merge — **the bug is on the merged branch** |
+| `18be683d0` | 07-15 | **BROKEN — skip** | tree ring shader does not compile; no trees at all (see below) |
+| `c8506738b` | 07-15 | **BROKEN — skip** | no trees; broken stretch spans at least branch index 66→80 |
+| `4e32f47ac` | 07-15 | **blinking** + "near LOD only" | bracket ceiling |
+
+`bad2190f5` clean + `febecb3ca` blinking pins the bug to the merged branch (`bad2190f5..caf10ca16`,
+95 commits, 15 of which touch tree/vegetation paths).
+
+**Many branch commits are broken WIP and cannot be voted on.** At `18be683d0` the composed tree ring
+shader fails with `unresolved call target 'write_tree_record'` → no trees render at all. Both the
+definition and the calls are in `tree_ring.compute.wgsl`, so a WGSL *transform* in the
+`wgsl_modules.ts` pipeline (`applyTreeRingSpeciesWgslExpansion` /
+`applyTreeRingWgslLayoutConstants` / `tree_ring_wgsl_transforms.js`) drops the definition during
+composition. Grepping the source file for `fn write_tree_record` is **not** a sufficient screen —
+it is present there and still unresolved after composition.
+
+Use `tools/clod-poc/tools/screen-tree-buildable.ts` to skip these without spending a human glance:
+it boots the page and reports BROKEN/BUILDABLE from console WGSL errors plus tree-mesh presence.
+That signal is binary and safe to automate, unlike the flicker metrics.
+
+### The stride-mismatch theory does not explain this transition
+
+Checked directly across the clean→bad boundary:
+
+- `TREE_INSTANCE_VEC4S = 6u` in `tree_ring.compute.wgsl` **already at `bad2190f5` (clean)**. The
+  6-vec4 record predates the branch; the morphology work did **not** expand it. The claim above in
+  *Ring instance buffer stride mismatch* that it did is wrong.
+- `tree_material_parity.ts` and `tree_ring_lod_crossfade_material.ts` are **byte-identical** between
+  `bad2190f5` (clean) and `caf10ca16` (bad branch tip) — both read `cellStore.element(instanceIndex)`.
+
+So the readers did not change across the boundary that introduces the bug. The stride fix in
+`071afd64c` may still be a correct robustness change, but it cannot be the cause of this
+regression. What *does* change on the branch is the CPU instancing layout: `f1175d0a0` adds
+`tree_system_instance_attribute_layout.ts` (new) and rewrites `tree_system_instance_attributes.ts`
+(115 lines), alongside 68 changed tree files totalling ~2.4k insertions.
+
+Incidental: `Draw with a vertex count of 0 is unusual` appears in the console at `bad2190f5`, which
+is **clean**. That warning is therefore not sufficient to cause the blinking — the doc previously
+listed it as part of the ring-teardown signature. Do not treat it as a marker for this bug.
+
+### What a valid discriminator needs
+
+- **Coverage-invariant**: measure LOD churn per *tree*, not per screen pixel — e.g. sample the
+  per-frame LOD histogram / ring counters via `window.__drusnielClod.stats` across N frames and
+  score how many trees change LOD bucket between frames. Oscillation shows up directly and does
+  not care how much canopy fills the viewport.
+- **Per-commit pose**: if a pixel metric is kept, the pose must be re-derived at each commit
+  (query the scene for a dense tree cluster, then aim at it) instead of reusing (256, 34, 263).
+- **Validated on the endpoints first**: whatever replaces it, run it on `664f7ce82` and a
+  confirmed-blinking commit and require a clear separation *before* spending it on midpoints.
+  That check is what this session did, and it is what the previous ~15 probe runs skipped.
+
+The 11 candidate commits (`git log 664f7ce82..4e32f47ac -- 'tools/clod-poc/src/trees/*'
+'tools/clod-poc/src/gpu/*tree*'`) are unchanged and still the right search space; the
+continuous-morphology trio (`f7ec7555b`, `18be683d0`, `f1175d0a0`) is still the standout
+suspect. Nothing about the *bracket* is disproven — only the instrument used to walk it.
+
+Worktree state: `F:/drusniel-cache/tmp/bisect-wt` left detached at **`bad2190f5`** (pre-merge
+main), dev server running on port 5181, awaiting a visual verdict. Probe outputs in
+`tools/clod-poc/shots/bisect-{664f7ce82-control-good,36313d32e,4e32f47ac-control-bad}/`.
+
+Confirmed by the user on 2026-07-22: `4e32f47ac` reproduces **both** the blinking and "near LOD
+for trees only", at `?oceanRim=0&webgpuSelection=1&materialTiers=1`. Note those flags differ from
+what the pixel probe ran (`?oceanRim=0&customProps=1` — no `webgpuSelection`, no `materialTiers`),
+a third confound on top of the two above: **the probe was not measuring the configuration that
+reproduces.**
+
 ## Ruled out (do not re-try)
 
 - **Depth prepass** — `treePrepass=0` at the in-canopy pose: 15.3% vs 15.1% baseline. No
@@ -148,6 +318,8 @@ per-tree previous-LOD state), not to toggle the crossfade or tune shading.
 
 ## Measurement pitfalls (cost real time — read this)
 
+- **The probe's hard-flip % does not track the bug.** It reads ~17% at a known-clean commit.
+  See *BISECT HALTED* above before using it to accept or reject anything.
 - The probe **must** use `customProps=1` or `setPose` is absent and it silently measures
   the default far camera (~1–3%, useless).
 - **The world moved.** After the 07-21 PR merges, pose (256, 34, 263) is open dunes with a

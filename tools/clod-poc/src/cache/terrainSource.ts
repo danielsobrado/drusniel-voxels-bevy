@@ -40,7 +40,9 @@ const textEncoder = new TextEncoder();
 // every parent/root mesh along channels; v10-cached parents lack the preserved trench.
 // v12: gravel-bar bed elevation and its deterministic visual field participate in terrain
 // identity before the authority is allowed to affect startup or streamed terrain.
-export const TERRAIN_SOURCE_VERSION = "world-modes-v12-gravel-bed-authority";
+// v13: an imported finite-world heightmap replaces the analytic field; its identity
+// (dimensions, world mapping, vertical scale, and a raster digest) participates in the key.
+export const TERRAIN_SOURCE_VERSION = "world-modes-v13-heightmap-source";
 
 async function hashJson(value: unknown): Promise<string> {
   const json = JSON.stringify(value);
@@ -140,6 +142,8 @@ export interface TerrainSourceInputs {
   featureStampHash?: string | null;
   featureStampRevision?: number;
   voxelOverlay?: VoxelOverlaySource | null;
+  /** Identity of an installed imported heightmap (dims + mapping + raster digest); null when none. */
+  heightmapSourceHash?: string | null;
 }
 
 export function normalizeTerrainSourceInputs(
@@ -184,6 +188,7 @@ export function normalizeTerrainSourceInputs(
     featureStampHash: input.featureStampHash ?? null,
     featureStampRevision: input.featureStampRevision ?? 0,
     voxelOverlay: normalizeVoxelOverlaySource(input.voxelOverlay),
+    heightmapSourceHash: input.heightmapSourceHash ?? null,
   };
 }
 
@@ -245,6 +250,7 @@ export async function computeTerrainSourceHash(input: TerrainSourceInputs): Prom
     stagedImportHash: source.stagedImportHash,
     voxelSnapshotHash: source.voxelSnapshotHash,
     voxelOverlay: source.voxelOverlay,
+    heightmapSourceHash: source.heightmapSourceHash,
     longViewScene: source.longViewScene,
   });
 }

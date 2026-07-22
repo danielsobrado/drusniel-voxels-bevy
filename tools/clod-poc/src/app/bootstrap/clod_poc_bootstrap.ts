@@ -1,5 +1,4 @@
 import phase0ConfigText from "../../../config/infinite_streaming_phase0.yaml?raw";
-import naadfConfigText from "../../../config/naadf_poc.yaml?raw";
 import vegetationLodYaml from "../../../config/vegetation_lod.yaml?raw";
 import canopyShellYaml from "../../../config/canopy_shell.yaml?raw";
 import { installGlobalErrorHooks } from "../../core/diagnostics.js";
@@ -24,37 +23,12 @@ import {
   applyCanopyShellQueryOverrides,
   parseCanopyShellConfig,
 } from "../../canopy/canopy_config.js";
-import { initFarSummaryIntegration } from "../../far-summary/integration.js";
-import {
-  applyFarSummaryOceanFallback,
-  createFarSummaryCanopySource,
-  sampleFarSummaryHydrology,
-} from "../../far-summary/unified-sources.js";
-import type { FarTerrainSampler } from "../../far-summary/summary-tile-builder.js";
 import { timeFarSummarySubphase } from "../frame_loop/far_summary_subphase_timing.js";
-import type { FarSummaryIntegration } from "../../far-summary/integration.js";
 import { clearSaveInvalidationTargets, registerSaveInvalidationTarget } from "../../save/save_far_summary_bridge.js";
 import { attachSaveRuntimeCounters, hasActiveSaveRuntime, markSaveRuntimeLoadedRegionsInvalidated } from "../../save/save_runtime.js";
-import { initNaadfIntegration, type NaadfIntegration } from "../../naadf/integration.js";
-import { InfiniteFarShell, createFarShellMetrics, createDefaultLongViewConfig, longViewConfigToFarSummaryConfig } from "../../long-view/index.js";
-import type { FarShellMetrics } from "../../long-view/index.js";
-import { loadLongViewMaterialsConfig, parseQueryOverrides } from "../../config/longViewMaterialsConfig.js";
-import { configToUniformData } from "../../farTerrain/farTerrainUniforms.js";
-import { applyOwnershipToFarShellRange, resolveStreamingOwnership } from "../../streaming/streaming_ownership.js";
-import { assertLegacyFarShellExclusive, buildFarOwnershipSummary } from "../far_ownership.js";
-import { farClipmapRendererAllowed } from "../../terrain/far_clipmap/far_clipmap_config.js";
 import { FloatingOriginController } from "../../precision/floating_origin.js";
-import { createBakedMacroTintTexture } from "../../gpu/terrain_node_baked_macro_tint.js";
-import { createProceduralTerrainTextures } from "../../textures/terrainTextureArrays.js";
-import { createBiomeTextureStreamingManager } from "../../textures/biome_texture_streaming_manager.js";
 import * as THREE from "three";
 import { booleanQueryParam, positiveNumberQueryParam } from "./bootstrap_query_params.js";
-import {
-  applyLongViewScenePreset,
-  farSummaryCanopyEnabled,
-  isLongViewCapableScene,
-  isStreamingLongViewScene,
-} from "./bootstrap_long_view.js";
 import {
   materialChurnConfigForQuery,
   materialChurnDiagnostics,
@@ -62,8 +36,10 @@ import {
 import { findValidatedContinentRiverCrossingRoute } from "../../water/continent_river_route.js";
 import { applyContinentDefaults } from "./continent_defaults.js";
 import { getRendererGpuDevice } from "../../rendering/webgpu_device_bridge.js";
-
-const MAX_TERRAIN_TEXTURE_WINDOW_CACHE = 8;
+import { runBootstrapBiomeTextureStartup } from "./bootstrap_biome_texture_startup.js";
+import { runBootstrapFarOwnershipStartup } from "./bootstrap_far_ownership_startup.js";
+import { runBootstrapFarSummaryStartup } from "./bootstrap_far_summary_startup.js";
+import { runBootstrapFarShellStartup } from "./bootstrap_far_shell_startup.js";
 
 export async function bootstrapClodPoc() {
   const searchParams = new URLSearchParams(location.search);
@@ -214,245 +190,66 @@ export async function bootstrapClodPoc() {
     colorByLodController: postRenderer.uiRefs.colorByLodController,
   });
 
-  let terrainTextureWindowSwaps = 0;
-  const terrainTextureWindowCache = new Map<string, {
-    config: typeof world.proceduralTextureConfig;
-    terrain: NonNullable<typeof world.proceduralTerrain>;
-    macroTint: typeof world.bakedMacroTint;
-  }>();
-  const biomeTextureStreaming = world.proceduralTerrain
-    ? createBiomeTextureStreamingManager({
-        baseConfig: world.proceduralTextureConfig,
-        sampleBiome: (x, z) => world.worldSource.sampleBiome(x, z),
-        deferWindowSwaps: true,
-        onActiveWindowChanged: (nextConfig, activeBiomeMaterials) => {
-          const signature = activeBiomeMaterials.join("|");
-          let cached = terrainTextureWindowCache.get(signature);
-          if (!cached) {
-            const nextTerrain = createProceduralTerrainTextures(nextConfig);
-            const bakeRes = Math.min(512, nextTerrain.noise.resolution);
-            const nextMacroTint = createBakedMacroTintTexture(
-              nextTerrain.noise.noiseA,
-              nextTerrain.noise.noiseB,
-              bakeRes,
-            );
-            cached = { config: nextConfig, terrain: nextTerrain, macroTint: nextMacroTint };
-            terrainTextureWindowCache.set(signature, cached);
-            while (terrainTextureWindowCache.size > MAX_TERRAIN_TEXTURE_WINDOW_CACHE) {
-              const firstKey = terrainTextureWindowCache.keys().next().value as string | undefined;
-              if (!firstKey) break;
-              terrainTextureWindowCache.delete(firstKey);
-            }
-          }
-          world.proceduralTextureConfig = cached.config;
-          world.proceduralTerrain = cached.terrain;
-          world.bakedMacroTint = cached.macroTint;
-          terrainTextureWindowSwaps++;
-          terrainView.materialController.setProceduralTerrain(cached.terrain, cached.config, cached.macroTint);
-          terrainView.applyTerrainTextures();
-          if (postRenderer.longViewHooks?.stats) {
-            postRenderer.longViewHooks.stats.counters.terrainTextureWindowSwaps = terrainTextureWindowSwaps;
-            postRenderer.longViewHooks.stats.counters.terrainTextureActiveBiomes = activeBiomeMaterials.length;
-            postRenderer.longViewHooks.stats.counters.terrainTextureWindowCacheSize = terrainTextureWindowCache.size;
-          }
-        },
-      })
-    : null;
-
-  if (postRenderer.state.terrainMaterialSource === "procedural") {
-    const initialWorldCamera = floatingOrigin.getWorldCamera(renderer.camera);
-    biomeTextureStreaming?.update({ x: initialWorldCamera.position.x, z: initialWorldCamera.position.z, frameIndex: 0 });
-  }
-
-  let farSummaryIntegration: FarSummaryIntegration | undefined;
-  let naadfIntegration: NaadfIntegration | undefined;
+  const { biomeTextureStreaming } = runBootstrapBiomeTextureStartup({
+    world,
+    terrainMaterialSource: postRenderer.state.terrainMaterialSource,
+    floatingOrigin,
+    camera: renderer.camera,
+    materialController: terrainView.materialController,
+    applyTerrainTextures: terrainView.applyTerrainTextures,
+    longViewHooks: postRenderer.longViewHooks,
+  });
 
   const queryScene = queries.queryScene;
-  const isNaadfCapable = queries.queryNaadfScene;
-  const streamingOwnership = resolveStreamingOwnership({
-    streaming: queries.phase0Streaming,
-    targetVisibleM: queries.phase0TargetVisibleM,
-    targetFutureVisibleM: queries.phase0Config.phase0.target_future_visible_m,
+  const { streamingOwnership, farClipmapReplaceActive } = runBootstrapFarOwnershipStartup({
+    searchParams,
+    queryScene,
+    phase0Streaming: queries.phase0Streaming,
+    phase0TargetVisibleM: queries.phase0TargetVisibleM,
+    phase0Config: queries.phase0Config,
     pageSizeM: world.cfg.page.chunks_per_page * world.cfg.page.chunk_size,
-    streamingScene: isStreamingLongViewScene(queryScene),
-  });
-
-  // farClipmapMode=replace hands the whole far band to the GPU clipmap, which then becomes the
-  // sole far-terrain owner: the player-centred InfiniteFarShell is kept out of the scene so the two
-  // do not z-fight or disagree on height across the mid-far band.
-  const farClipmapReplaceActive = searchParams.get("farClipmap") === "1" && farClipmapRendererAllowed(searchParams);
-  const farRendererActivity = {
-    legacyFarShell: world.worldMode.farOwner === "legacy_far_shell",
-    infiniteFarShell: isLongViewCapableScene(queryScene) && !farClipmapReplaceActive,
-    farClipmap: farClipmapReplaceActive,
-  };
-  assertLegacyFarShellExclusive(farRendererActivity);
-  window.__drusnielFarOwnership = buildFarOwnershipSummary({
     farOwner: world.worldMode.farOwner,
-    streamingScene: streamingOwnership.streamingScene,
-    activity: farRendererActivity,
-    clodRadiusM: streamingOwnership.clodRadiusM,
-    farInnerM: streamingOwnership.farShellInnerM,
-    farOuterM: streamingOwnership.farShellOuterM,
   });
 
-  if (isNaadfCapable) {
-    naadfIntegration = initNaadfIntegration({
-      yamlText: naadfConfigText,
-      sceneName: queryScene,
-      threeScene: renderer.scene,
-      forceEnable: queries.queryNaadfScene,
-    }) ?? undefined;
-  }
+  const {
+    naadfIntegration,
+    farSummaryIntegration,
+    useNaadfFarSummary,
+    naadfHeightSamplingMode,
+    lvConfig,
+    farShellMetrics,
+  } = runBootstrapFarSummaryStartup({
+    searchParams,
+    queryScene,
+    queryNaadfScene: queries.queryNaadfScene,
+    streamingOwnership,
+    scene: renderer.scene,
+    camera: renderer.camera,
+    rendererWebGpuDevice: renderer.rendererWebGpuDevice,
+    worldSource: world.worldSource,
+    hydrologySystem: world.hydrologySystem,
+    farCarveImprint: world.farCarveImprint,
+    getCanopyConfig: terrainView.getCanopyConfig,
+  });
 
-  const useNaadfFarSummary = Boolean(
-    naadfIntegration?.config.farShell.useNaadfSummary
-    && (queryScene?.startsWith("infinite-naadf-") ?? false),
-  );
-  const naadfHeightSamplingMode = useNaadfFarSummary
-    ? naadfIntegration?.config.farShell.heightSamplingMode
-    : undefined;
-
-  let infiniteFarShell: InfiniteFarShell | undefined;
-  let farShellMetrics: FarShellMetrics | undefined;
-
-  if (isLongViewCapableScene(queryScene)) {
-    const lvConfig = createDefaultLongViewConfig();
-    applyLongViewScenePreset(lvConfig, queryScene, naadfIntegration);
-    applyOwnershipToFarShellRange(lvConfig.farShell, streamingOwnership);
-
-    farShellMetrics = createFarShellMetrics();
-    farShellMetrics.farShellEnabled = true;
-    farShellMetrics.farShellInnerM = lvConfig.farShell.startMeters;
-    farShellMetrics.farShellOuterM = lvConfig.farShell.endMeters;
-    farShellMetrics.farShellGridRes = lvConfig.farShell.radialSegments;
-
-    if (!useNaadfFarSummary) {
-      const seaLevel = world.worldSource.metadata.seaLevel;
-      const farSummaryConfig = longViewConfigToFarSummaryConfig(lvConfig);
-      const farSummaryTerrainSampler: FarTerrainSampler = {
-        sampleHeight: (x: number, z: number) => world.worldSource.sampleHeight(x, z),
-        sampleMaterial: (x: number, z: number) => world.worldSource.sampleMaterial(x, z),
-        sampleCanopyCoverage: (x, z) => naadfIntegration?.getCanopySampler().sampleCanopyCoverage(x, z) ?? 0,
-        sampleWaterCoverageForHeight: (_x, _z, height) => height < seaLevel ? 1 : 0,
-      };
-      // Traced worlds: bake the hydrology carve into far-summary heights (CPU builds via
-      // the height grid, GPU-committed tiles via the commit imprint) so far terrain shows
-      // the same channels the near authority carves.
-      if (world.farCarveImprint) farSummaryTerrainSampler.carveHeightImprint = world.farCarveImprint;
-      if (searchParams.get("farSummaryLayout") === "2") {
-        const hydrologySystem = world.hydrologySystem;
-        const graphHydrologyEnabled = searchParams.get("continentHydrology") !== "0"
-          && searchParams.get("continent_hydrology") !== "0";
-        const sampleWater = hydrologySystem && graphHydrologyEnabled
-          ? (x: number, z: number, cellSizeM = 1, terrainHeight?: number) => applyFarSummaryOceanFallback(
-            sampleFarSummaryHydrology(hydrologySystem, x, z, cellSizeM),
-            Number.isFinite(terrainHeight) ? terrainHeight! : farSummaryTerrainSampler.sampleHeight(x, z),
-            seaLevel,
-          )
-          : undefined;
-        farSummaryTerrainSampler.sampleWaterSummary = sampleWater;
-        if (farSummaryCanopyEnabled(searchParams)) {
-          farSummaryTerrainSampler.sampleCanopySummary = createFarSummaryCanopySource({
-            getConfig: terrainView.getCanopyConfig,
-            sampleHeight: farSummaryTerrainSampler.sampleHeight,
-            sampleMaterial: farSummaryTerrainSampler.sampleMaterial,
-          });
-        }
-      }
-      farSummaryIntegration = initFarSummaryIntegration({
-        terrainSampler: farSummaryTerrainSampler,
-        terrainFieldConfig: world.worldSource.metadata.terrain,
-        sharedDevice: renderer.rendererWebGpuDevice,
-        scene: renderer.scene,
-        camera: renderer.camera,
-        farShellMetrics,
-        config: farSummaryConfig,
-      });
-    }
-
-    const heightProvider = useNaadfFarSummary && naadfIntegration
-      ? naadfIntegration.getHeightProvider()
-      : farSummaryIntegration?.getHeightProvider();
-    if (farSummaryIntegration) {
-      (window as any).__drusnielFarSummary = farSummaryIntegration;
-    } else if (naadfIntegration) {
-      (window as any).__drusnielFarSummary = naadfIntegration;
-    }
-    const farShellCpuHeightsEnabled = searchParams.get("farShellCpuHeights") !== "0";
-    const lighting = terrainView.currentLighting();
-
-    const materialConfig = loadLongViewMaterialsConfig(undefined, parseQueryOverrides(searchParams));
-    const parityConfig = materialConfig.enabled ? configToUniformData(materialConfig) : undefined;
-    const useParity = materialConfig.enabled && parityConfig !== undefined;
-    const farSummaryGpuAtlas = naadfHeightSamplingMode === "gpu"
-      ? naadfIntegration?.getFarSummaryGpuAtlasView()
-      : undefined;
-
-    if (naadfHeightSamplingMode === "gpu" && !useParity) throw new Error("NAADF GPU height mode requires the WebGPU parity far terrain material");
-    if (naadfHeightSamplingMode === "gpu" && !farSummaryGpuAtlas) throw new Error("NAADF GPU height mode requires a far-summary GPU atlas");
-
-    // Traced-carve worlds must displace far-shell vertices from the (imprinted) CPU
-    // summary tiles: the GPU render atlas evaluates the base WGSL field, which cannot
-    // run the traced polyline carve, so GPU displacement would show uncarved channels.
-    const effectiveHeightSamplingMode = world.farCarveImprint
-      ? "cpu"
-      : naadfHeightSamplingMode === "gpu" ? "gpu" : naadfHeightSamplingMode;
-    if (farShellCpuHeightsEnabled && !heightProvider && effectiveHeightSamplingMode !== "gpu") {
-      throw new Error("long-view scene requires NAADF or far-summary height provider");
-    }
-
-    infiniteFarShell = new InfiniteFarShell({
-      innerMeters: lvConfig.farShell.startMeters,
-      outerMeters: lvConfig.farShell.endMeters,
-      radialSegments: lvConfig.farShell.radialSegments,
-      angularSegments: lvConfig.farShell.angularSegments,
-      heightBiasMeters: lvConfig.farShell.heightBiasMeters,
-      nearBlendMeters: lvConfig.farShell.nearBlendMeters,
-      farFadeMeters: lvConfig.farShell.farFadeMeters,
-      macroBlendStartMeters: lvConfig.farShell.macroBlendStartMeters,
-      macroBlendEndMeters: lvConfig.farShell.macroBlendEndMeters,
-      rebaseSnapMeters: lvConfig.farShell.rebaseSnapMeters,
-      lighting: {
-        sunDirection: lighting.sunDirection,
-        sunColor: lighting.sunColor,
-        skyLight: lighting.skyLight,
-        groundLight: lighting.groundLight,
-      },
-      useParityMaterial: useParity,
-      parityConfig,
-      seaLevelMeters: world.worldSource.metadata.seaLevel,
-      heightSamplingMode: effectiveHeightSamplingMode,
-      farSummaryGpuAtlas: effectiveHeightSamplingMode === "gpu" ? farSummaryGpuAtlas : undefined,
-      debugShowMissingFallback: lvConfig.debug.showMissingSummaryFallback,
-      metrics: farShellMetrics,
-    });
-
-    (window as any).__drusnielInfiniteFarShell = infiniteFarShell;
-
-    // In replace mode the shell mesh is hidden and its per-frame update is skipped, so a
-    // height provider would only queue an initial sliced rebuild that never steps —
-    // leaving farShellRebuildPending stuck at 1 and blocking the convergence gate.
-    if (farShellCpuHeightsEnabled && !farClipmapReplaceActive) infiniteFarShell.setHeightProvider(heightProvider);
-    // Keep farSummaryIntegration alive (it feeds the clipmap source via __drusnielFarSummary), but in
-    // replace mode do not add the shell mesh — the far clipmap owns the far band on its own.
-    if (!farClipmapReplaceActive) {
-      renderer.scene.add(infiniteFarShell.mesh);
-    } else {
-      infiniteFarShell.mesh.visible = false;
-    }
-    terrainView.farShellController.setEnabled(false);
-
-    terrainView.shadowProxyController?.setOnSunShadowsChanged((enabled) => {
-      infiniteFarShell?.setReceiveSunShadows(enabled);
-    });
-    if (terrainView.shadowProxyDebugState?.sunShadowsEnabled) infiniteFarShell.setReceiveSunShadows(true);
-
-    if (queryScene === "infinite-stream-slow-builds" && farSummaryIntegration) {
-      farSummaryIntegration.setForceSlowBuilds(true);
-      farSummaryIntegration.setBuildDelayMs(100);
-    }
-  }
+  const { infiniteFarShell } = runBootstrapFarShellStartup({
+    searchParams,
+    queryScene,
+    farClipmapReplaceActive,
+    lvConfig,
+    farShellMetrics,
+    useNaadfFarSummary,
+    naadfHeightSamplingMode,
+    naadfIntegration,
+    farSummaryIntegration,
+    scene: renderer.scene,
+    worldSource: world.worldSource,
+    farCarveImprint: world.farCarveImprint,
+    currentLighting: terrainView.currentLighting,
+    farShellController: terrainView.farShellController,
+    shadowProxyController: terrainView.shadowProxyController,
+    shadowProxyDebugState: terrainView.shadowProxyDebugState,
+  });
 
   clearSaveInvalidationTargets();
   if (farSummaryIntegration) {
@@ -618,10 +415,4 @@ export async function bootstrapClodPoc() {
     treeConfig: runtimeTreeConfig,
     understoryConfig: world.understoryConfig,
   });
-}
-
-declare global {
-  interface Window {
-    __drusnielFarOwnership?: ReturnType<typeof buildFarOwnershipSummary>;
-  }
 }

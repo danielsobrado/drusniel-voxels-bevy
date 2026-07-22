@@ -1,3 +1,4 @@
+import { disposeAfterGpuIdle } from "../rendering/deferred_gpu_dispose.js";
 import { DIG_EDIT_BYTES, FIELD_PARAM_WORDS, packDigEdits, packFieldParams } from "./gpu_mesh_buffers.js";
 import { hydrologyAtlasGpuParams, hydrologyAtlasGpuTexture } from "./hydrology_atlas_gpu.js";
 import { getTerrainFieldCoreConfig, resolveDigEdits, type ResolvedDigEdit } from "./terrain_field_core.js";
@@ -230,7 +231,9 @@ export class UnderstoryGpuRingCompute {
     this.writeFieldParams(edits.length);
     this.bindGroup = this.createBindGroup();
     this.slotPrefilterCache.clear();
-    previous.destroy();
+    // Runs from dispatch() on the frame loop: the previous buffer is still referenced by
+    // submits already on the queue, so free it only once the GPU has drained.
+    disposeAfterGpuIdle(() => previous.destroy());
     this.failedReason = null;
   }
 

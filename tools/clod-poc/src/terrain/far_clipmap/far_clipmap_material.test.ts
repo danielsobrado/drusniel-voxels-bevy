@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type * as THREE from "three";
-import farClipmapMaterialSource from "./far_clipmap_material.ts?raw";
+import farClipmapMaterialSource from "./far_clipmap_material_backends.ts?raw";
 import {
   createFarClipmapMaterial,
   setFarClipmapMaterialDebugMode,

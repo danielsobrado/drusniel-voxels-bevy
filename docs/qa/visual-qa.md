@@ -47,3 +47,62 @@ rtk npm --prefix tools/clod-poc run qa -- --summary tests/qa-sample-summary.json
 That runner consumes web-captured summary JSON with precomputed screenshot
 metrics. Browser capture and Playwright automation are tracked in
 `docs/plans/qa-regression-harness-continuation-status.md`.
+
+## Validate the discriminator before you trust it
+
+A metric that does not separate a known-good build from a known-bad one is not
+evidence, however precise it looks. Before using any new visual or perf signal to
+accept a fix, reject a hypothesis, or drive a bisect:
+
+1. Run it on a **known-good** build and a **known-bad** build.
+2. Require a clear separation between them.
+3. Only then spend it on unknowns.
+
+Skipping step 1 is expensive. In the 2026-07-21/22 tree-flicker investigation, a
+per-pixel flicker probe was run ~15 times and used to rule out several hypotheses
+before anyone checked it against a known-good commit — where it read **17.0%**,
+against 17.2% at the suspect commit. It had never been measuring the bug, and every
+"disproven by measurement" verdict built on it had to be withdrawn. Full write-up:
+[`../tree-flicker-and-vegetation-regressions-2026-07-21.md`](../tree-flicker-and-vegetation-regressions-2026-07-21.md).
+
+### Confounds that invalidate a browser measurement
+
+- **Different flags, different code path.** A probe URL that omits the flags the bug
+  needs measures a configuration that cannot reproduce it. Match the repro URL
+  exactly — e.g. `webgpuSelection=1&materialTiers=1` selects the WebGPU path, and a
+  probe running without them exercises something else.
+- **`customProps=1` is required** for `setPose` / automation hooks. Without it the
+  probe silently measures the default far camera.
+- **The world layout moves between commits.** Vegetation/erosion/authority changes
+  relocate trees, so a fixed world pose is in-canopy at one commit and open field at
+  the next. A low reading can mean "nothing in frame", not "no defect". Sanity-check
+  the captured frame, or re-derive the pose per commit.
+- **Counters may be throttled mirrors.** `trees.*` and friends are written on a
+  250ms `DEBUG_COUNTER_MIRROR_INTERVAL_MS` tick, so they cannot express per-frame
+  churn.
+- **Counters may be stale rather than current.** The `trees.*` mirror is guarded by
+  `if (currentTreeStats)`, and `getTreeStats()` returns null after `setPose`, so the
+  values freeze at their last write. Verify a counter *responds* to the input you are
+  varying before you believe a reading.
+- **Coverage-invariance.** Prefer a signal normalised per-object over per-screen-pixel
+  when the amount of content on screen can vary between the builds you compare.
+
+### Screen out broken builds before spending human review
+
+Some commits do not render the subject at all — e.g. a composed WGSL module failing
+with `unresolved call target`, which produces an empty scene rather than a symptom.
+These are **skips, not verdicts**, and voting on them corrupts a bisect.
+
+```powershell
+npm --prefix tools/clod-poc run dev -- --host 127.0.0.1 --port 5181 --strictPort
+$env:CLOD_POC_BASE_URL="http://127.0.0.1:5181/"; npx tsx tools/screen-tree-buildable.ts
+```
+
+`tools/clod-poc/tools/screen-tree-buildable.ts` boots the page and reports
+BROKEN/BUILDABLE from console WGSL errors plus tree-mesh presence. Binary,
+unambiguous signals like this are safe to automate; subjective ones like "is it
+flickering" currently are not.
+
+Note that grepping the **source** file is not a sufficient screen: a function can be
+defined and called in the same `.wgsl` file and still be unresolved after the
+`wgsl_modules.ts` transforms compose it. Check the composed result in the browser.

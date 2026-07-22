@@ -1,5 +1,6 @@
 import { DEFAULT_TERRAIN_FIELD_CONFIG, type TerrainFieldConfig } from "../terrain/terrain.js";
 import { applyIslandShape } from "../world_source/island_shape.js";
+import { sampleHeightmapHeight } from "../terrain/heightmap_source.js";
 import type { ResolvedDigEdit } from "./terrain_field_core_types.js";
 import { DIG_INFLUENCE_MARGIN, brushSdfCore, brushWeight } from "./terrain_field_core_dig.js";
 
@@ -179,6 +180,11 @@ function softenHeightCap(height: number, minHeight: number, maxHeight: number): 
 export const _fieldConfig = { value: DEFAULT_TERRAIN_FIELD_CONFIG as TerrainFieldConfig };
 
 export function surfaceHeightCore(x: number, z: number, config: TerrainFieldConfig = _fieldConfig.value): number {
+  // An installed heightmap fully replaces the analytic shape (finite-world authority). Shared
+  // with baseSurfaceHeight() via heightmap_source.ts so both fields return the identical value.
+  const heightmapHeight = sampleHeightmapHeight(x, z);
+  if (heightmapHeight !== null) return heightmapHeight;
+
   const cfg = TERRAIN_CONFIG;
   const field = config;
   const seed = field.seed;

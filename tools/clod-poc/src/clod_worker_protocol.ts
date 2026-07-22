@@ -7,6 +7,7 @@ import type {
 } from "./clod/quadtree.js";
 import type { TerrainFieldConfig, VoxelEditSnapshot, VoxelEditTransaction } from "./terrain/terrain.js";
 import type { StartupHeightfieldRaster } from "./terrain/startup_heightfield_raster.js";
+import type { HeightmapSource } from "./terrain/heightmap_source.js";
 import type { BorderCoastOceanConfig } from "./terrain/border_coast_config.js";
 import type { ClodPageNode, PageFootprint, PageMesh } from "./types.js";
 import type { TerrainSourceInputs } from "./cache/terrainSource.js";
@@ -68,6 +69,8 @@ export type ClodWorkerRequest =
       cacheDisabled?: boolean;
       digRevision?: number;
       terrainSource: TerrainSourceInputs;
+      /** Imported finite-world heightmap raster; Float32Array clones structurally. */
+      heightmap?: HeightmapSource | null;
     }
   | {
       type: "dig";

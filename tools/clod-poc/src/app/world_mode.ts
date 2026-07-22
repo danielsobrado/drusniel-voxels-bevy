@@ -51,6 +51,8 @@ export interface ResolveWorldModeInput {
   borderCoastConfigEnabled: boolean;
   /** terrainFieldConfig.islandShape.oceanRim */
   oceanRim: boolean;
+  /** An imported heightmap is installed: it owns the coast, so the finite border coast is off. */
+  heightmapEnabled?: boolean;
   /** terrainFieldConfig.islandShape.worldRadiusM */
   worldRadiusM: number;
   /** isLongViewCapableScene(scene): these scenes own the far band with the InfiniteFarShell. */
@@ -65,7 +67,7 @@ export function resolveWorldMode(input: ResolveWorldModeInput): WorldModeConfig 
     || isRpgDensityScene(input.scene);
   const isInfiniteIslands = input.scene === INFINITE_ISLANDS_SCENE || input.islandShapeEnabled;
   const mode: WorldMode = isContinent ? "continent" : isInfiniteIslands ? "infinite_islands" : "finite";
-  const borderCoastEnabled = mode === "finite" && input.borderCoastConfigEnabled;
+  const borderCoastEnabled = mode === "finite" && input.borderCoastConfigEnabled && !input.heightmapEnabled;
   return {
     mode,
     configuredWorldPages: input.configuredWorldPages,

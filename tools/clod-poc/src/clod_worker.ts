@@ -31,6 +31,7 @@ import {
   setTerrainSurfaceOverride,
 } from "./terrain/terrain.js";
 import { setTerrainFieldCoreConfig } from "./gpu/terrain_field_core.js";
+import { setHeightmapSource } from "./terrain/heightmap_source.js";
 import {
   collectBuildResultTransferables,
   collectNodeTransferables,
@@ -310,6 +311,7 @@ async function handleBuild(request: Extract<ClodWorkerRequest, { type: "build" }
   cfg = request.cfg;
   setTerrainFieldConfig(request.terrainFieldConfig ?? null);
   setTerrainFieldCoreConfig(request.terrainFieldConfig ?? null);
+  setHeightmapSource(request.heightmap ?? null);
   replaceVoxelEdits(request.voxelEdits);
   setVoxelOverlaySource(request.terrainSource.voxelOverlay);
   hydrologyTerrain = request.hydrologyTerrain ?? null;
