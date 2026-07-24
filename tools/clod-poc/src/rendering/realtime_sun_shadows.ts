@@ -120,6 +120,21 @@ export function getRealtimeSunShadowCascadeCameras(): THREE.Camera[] {
   return handle ? getCascadeCamerasFromHandle(handle) : [];
 }
 
+/** True when a realtime sun-shadow light is live (i.e. not disabled by `sunShadows=0`/ablation). */
+export function realtimeSunShadowsInstalled(): boolean {
+  if (typeof window === "undefined") return false;
+  return Boolean((window as unknown as { [SUN_SHADOW_HANDLE_KEY]?: SunShadowDebugHandle })[SUN_SHADOW_HANDLE_KEY]);
+}
+
+/** Live on/off for the realtime sun shadows (GUI toggle). */
+export function setRealtimeSunShadowsEnabled(enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  const handle = (window as unknown as { [SUN_SHADOW_HANDLE_KEY]?: SunShadowDebugHandle })[SUN_SHADOW_HANDLE_KEY];
+  if (!handle) return;
+  handle.sun.castShadow = enabled;
+  handle.refresh();
+}
+
 function getCascadeCamerasFromHandle(handle: SunShadowDebugHandle): THREE.Camera[] {
   const csm = handle.csm as unknown as { lights?: Array<{ shadow?: { camera?: THREE.Camera } }> } | null | undefined;
   const cameras = csm?.lights?.map((light) => light.shadow?.camera).filter((camera): camera is THREE.Camera => !!camera) ?? [];

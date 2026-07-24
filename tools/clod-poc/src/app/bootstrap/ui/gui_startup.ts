@@ -3,6 +3,7 @@ import { createClodPocGui } from "../../../ui/gui/gui_root.js";
 import { createSceneGui } from "../../../ui/gui/scene_gui.js";
 import { createCustomPropsGui } from "../../../ui/gui/custom_props_gui.js";
 import { createSunLightGui } from "../../../ui/gui/sun_light_gui.js";
+import { realtimeSunShadowsInstalled, setRealtimeSunShadowsEnabled } from "../../../rendering/realtime_sun_shadows.js";
 import { shadowProxyDebugStateToConfig } from "../../../shadows/shadowProxyDebug.js";
 import { createClodShadowOverlayController } from "../../../clod_shadow_overlay_controller.js";
 import { installBiomeVisualMaterialRouting } from "../../../environment/biome_visual_material_routing.js";
@@ -221,6 +222,12 @@ export function runGuiStartup(
     });
   }
   createSunLightGui(guiResult.gui);
+  if (realtimeSunShadowsInstalled()) {
+    const sunShadowGuiState = { sunShadows: true };
+    guiResult.gui.add(sunShadowGuiState, "sunShadows")
+      .name("sun shadows")
+      .onChange((on: boolean) => setRealtimeSunShadowsEnabled(on));
+  }
   session.clodShadowStatsController = guiResult.clodShadowStatsController;
   clodShadowOverlayController.update();
   guiResult.clodShadowStatsController?.updateDisplay();

@@ -242,7 +242,14 @@ the bisect worktree on port 5181.
 | `febecb3ca` | 07-15 | **blinking** | the merge — **the bug is on the merged branch** |
 | `18be683d0` | 07-15 | **BROKEN — skip** | tree ring shader does not compile; no trees at all (see below) |
 | `c8506738b` | 07-15 | **BROKEN — skip** | no trees; broken stretch spans at least branch index 66→80 |
+| `f1175d0a0` | 07-15 | **blinking** + "near LOD only" | **first renderable commit after the broken stretch** (branch idx 84) — bug is intrinsic to the rebuilt ring; culprit pinned |
 | `4e32f47ac` | 07-15 | **blinking** + "near LOD only" | bracket ceiling |
+
+**Bisect conclusion:** the tree ring goes clean (pre-branch) → broken WIP (idx 66–82, renders no
+trees) → renderable-and-blinking (`f1175d0a0`, idx 84). There is no renderable commit between the
+clean baseline and `f1175d0a0` to split further, so the blinking is a property of how the
+continuous-morphology work rebuilt the ring — the record-stride change documented below. Culprit
+identified; the remaining work is code-level, not more bisecting.
 
 `bad2190f5` clean + `febecb3ca` blinking pins the bug to the merged branch (`bad2190f5..caf10ca16`,
 95 commits, 15 of which touch tree/vegetation paths).
@@ -259,21 +266,55 @@ Use `tools/clod-poc/tools/screen-tree-buildable.ts` to skip these without spendi
 it boots the page and reports BROKEN/BUILDABLE from console WGSL errors plus tree-mesh presence.
 That signal is binary and safe to automate, unlike the flicker metrics.
 
-### The stride-mismatch theory does not explain this transition
+### ROOT CAUSE CONFIRMED — the stride mismatch is real (a mid-session self-correction)
 
-Checked directly across the clean→bad boundary:
+An earlier draft of this section claimed the stride theory was *disproved*. **That was wrong**, and
+the error came from trusting a mislabeled `for`-loop over `git show` (see [[rtk-git-output-unreliable]]):
+it reported `TREE_INSTANCE_VEC4S = 6u` "at `bad2190f5`" when that constant does not exist there at all.
+Re-checked one commit at a time with no loop:
 
-- `TREE_INSTANCE_VEC4S = 6u` in `tree_ring.compute.wgsl` **already at `bad2190f5` (clean)**. The
-  6-vec4 record predates the branch; the morphology work did **not** expand it. The claim above in
-  *Ring instance buffer stride mismatch* that it did is wrong.
-- `tree_material_parity.ts` and `tree_ring_lod_crossfade_material.ts` are **byte-identical** between
-  `bad2190f5` (clean) and `caf10ca16` (bad branch tip) — both read `cellStore.element(instanceIndex)`.
+| | `bad2190f5` (CLEAN) | `f1175d0a0` (BLINKING) |
+|---|---|---|
+| `out_cell` layout | `array<vec4<f32>>`, **1 vec4 per tree** | same buffer, **6 vec4 per tree** |
+| write index | `out_index = group*max_per_group + slot` | `out_index = (group*max_per_group + slot) * TREE_INSTANCE_VEC4S` (`= 6u`) |
+| `write_tree_record` | **does not exist** | writes `[0]position_scale [1]rotation_normal_y [2]identity [3..5]morphology0..2` |
+| the two TS readers | `records.element(instanceIndex)` — **correct at stride 1** | *unchanged* → now reads vec4 `#instanceIndex` of a **6-wide** record → wrong |
 
-So the readers did not change across the boundary that introduces the bug. The stride fix in
-`071afd64c` may still be a correct robustness change, but it cannot be the cause of this
-regression. What *does* change on the branch is the CPU instancing layout: `f1175d0a0` adds
-`tree_system_instance_attribute_layout.ts` (new) and rewrites `tree_system_instance_attributes.ts`
-(115 lines), alongside 68 changed tree files totalling ~2.4k insertions.
+The continuous-morphology work **grew the per-tree ring record from 1 vec4 to 6** and updated the
+compute writer, but `tree_material_parity.ts` (forest-lighting UV) and
+`tree_ring_lod_crossfade_material.ts` (LOD distance + dither) kept indexing at stride 1. Because
+`append_tree` assigns each tree's slot with `atomicAdd` — nondeterministic every dispatch — the
+mis-strided reads returned *different* neighbouring records each frame. That is the mechanism for
+both symptoms: per-frame forest-lighting flashes (lighting UV from a moving record) and per-frame
+LOD/dither flips ("only near LOD", "light coming and going"). This is exactly what the original
+*Ring instance buffer stride mismatch* section higher up describes; that section was right and the
+"disproved" rebuttal was the mistake.
+
+The byte-identical readers across the boundary are **not** exoneration — they are the bug: they
+*should* have gained the `* stride` factor when the record widened, and did not.
+
+### Status of the fix on current main (07-23)
+
+The stride fix (`071afd64c`) **is present and correct for every reader found**:
+
+- `tree_ring_placement.ts` exports `TREE_RING_INSTANCE_VEC4S = 6`.
+- `tree_material_parity.ts:193` and `tree_ring_lod_crossfade_material.ts:134` now read
+  `records.element(instanceIndex.mul(TREE_RING_INSTANCE_VEC4S))`, and both derive everything
+  (world XZ, placement cell, dither noise, LOD distance) from field 0 only — so the dither is now
+  deterministic per tree, not per-dispatch. The shader writes with `* TREE_INSTANCE_VEC4S = 6u` to
+  match.
+
+So the historically-confirmed root cause is already repaired on main. **If main still blinks at the
+repro pose, it is a residual/second cause, not this one** — and the search space is the 07-15→07-23
+range, not the original `664f7ce82..4e32f47ac` bracket. Next actions, in order:
+
+1. Re-confirm (human eyes, no working automated discriminator) whether main *still* blinks at
+   `?oceanRim=0&webgpuSelection=1&materialTiers=1`. If it is clean, the effort is done.
+2. If it still blinks, audit the remaining render-side record consumers for stride/offset
+   correctness — `tree_node_material.ts`, `tree_ring_far_node_material.ts`,
+   `tree_ring_impostor_node_material.ts`, `tree_crown_proxy_node_material.ts` — since fields
+   `[1]rotation` / `[2]identity` / `[3..5]morphology` are read there, not just field 0.
+3. Only then reopen the crossfade-dither / GPU-ring-hysteresis line, which is a separate concern.
 
 Incidental: `Draw with a vertex count of 0 is unusual` appears in the console at `bad2190f5`, which
 is **clean**. That warning is therefore not sufficient to cause the blinking — the doc previously
@@ -305,6 +346,255 @@ for trees only", at `?oceanRim=0&webgpuSelection=1&materialTiers=1`. Note those 
 what the pixel probe ran (`?oceanRim=0&customProps=1` — no `webgpuSelection`, no `materialTiers`),
 a third confound on top of the two above: **the probe was not measuring the configuration that
 reproduces.**
+
+## 2026-07-23 — main STILL blinks after the stride fix; symptom re-described as a moving ground shadow
+
+Two new facts from this session change the shape of the problem.
+
+**1. The stride fix is on main and correct, yet main still blinks.** `d5922717e` (main HEAD) has
+`071afd64c`; both storage readers use `* TREE_RING_INSTANCE_VEC4S` and derive everything from field 0.
+Screened BUILDABLE. User confirmed by eye: **still blinking, still only one tree LOD.** So the ring
+stride bug — real, and the whole story at `f1175d0a0` — is **not** the only cause.
+
+**2. The user re-described the blink**, and it does not match tree-record garbage:
+
+> "the light changes position, also impacts the ground light … the blinking is really texture shadow …
+> only 1 LOD of the trees is still visible"
+
+So the visible blink is a **moving texture/shadow that also lands on the ground**, distinct from the
+"only 1 LOD" collapse. These are being treated as **two separate bugs** now, not one.
+
+### Why this is likely a *different, later* regression than the bisected one
+
+- `src/forest_lighting/` is **byte-unchanged across the bisect boundary** `bad2190f5 → f1175d0a0`
+  (the diff earlier reported "unchanged" against `src/trees/forest_lighting/`, a **path that does not
+  exist** — the real path is `src/forest_lighting/`; re-checked, genuinely unchanged there too). So at
+  `f1175d0a0` the moving-shadow could only come through the ring-stride corruption of the forest-UV
+  that *trees* sample (`tree_material_parity.ts`) — a tree-only effect.
+- But `forest_lighting_texture.ts` was **reworked +218 lines AFTER the bracket**, on main's own line:
+  `8af5b2fbd` (07-19, "expose canonical forest light GPU texture"), `5a9d817cf` + `db86cdb1a` (07-20,
+  "canonical canopy ecology" / "P0 canopy ecology authority"). This added a **GPU texture path** for
+  the forest lighting field, which packs `ambientOcclusion / shadowProxy / fogDensity / sunShaftMask`
+  — i.e. exactly the ground shadow the user now describes.
+
+Working hypothesis: the ground-shadow blink on main is a **forest-lighting GPU-texture instability
+introduced 07-19/07-20**, separate from (and later than) the 07-15 tree-stride blink that was already
+fixed. Not yet proven — do not treat the three commits above as the cause until measured.
+
+### This symptom finally admits a valid discriminator
+
+The canopy flicker probe failed because dense foliage alpha-test stipple dominates it. A **moving
+shadow on static ground** does not have that problem: pick a ground-only ROI (no canopy) at a frozen
+pose and measure per-pixel luma variance across frames. Validate it on `bad2190f5` (clean ground) vs
+`d5922717e` (blinking ground) first — if it separates, it is the first automated discriminator this
+investigation has had, and it can bisect the 07-15→07-23 range. Ground is static geometry, so any
+frozen-pose per-frame change there is real signal, and it is coverage-stable.
+
+### Ruled out this session (checked, not assumed)
+
+- **`diag polish` flips are NOT the per-frame ground flicker.** The HUD line
+  `diag polish: candidates=41,703 flips=7,117 …` looks like a live oscillation counter but
+  `polishDiagonals` (`src/diagonalPolish.ts`) runs only at **page build time** in
+  `clod/quadtree.ts`, and `world.polishLine` is a **static build summary** (`info_panel_startup.ts`).
+  `flips` is the cumulative count from building all pages, not a per-frame number. (Note there *is*
+  a latent non-idempotency in `polishDiagonals`: `chooseBestQuadDiagonal(..., "ac", …)` hardcodes
+  the current diagonal as `"ac"`, so a rebuilt page could flip a quad back — worth fixing if pages
+  rebuild in place, but it is not the frozen-pose flicker.)
+
+### Live HUD readout at the repro pose (main, 07-23)
+
+`forest light: canopy=1.00 ao=0.62 shadow=0.00 fog=0.00 tex=1`. The forest **AO** term is active
+(0.62), shadow-proxy is 0. So the ground darkening the user sees is the forest-lighting **AO**
+texture — which is exactly what `forest_lighting_texture.ts` (+218 lines, GPU-texture path,
+`8af5b2fbd`) now produces. Standing prime suspect for the moving ground shadow.
+
+### 2026-07-23 cont. — the ground flicker is per-frame / FPS-coupled → terrain LOD-transition, not lighting
+
+More user-driven isolation, each result empirical:
+
+- **Forest lighting OFF → no change.** The forest-AO texture suspect is **wrong**. Ruled out.
+- **Water OFF → flicker got *faster*.** Removing water's cost raised FPS and the flicker sped up →
+  the flicker is **per-frame and FPS-coupled** (it flips state every rendered frame). That rules out
+  timers, build-time work, and 250ms-throttled effects, and points at per-frame render state.
+
+Leading hypothesis: **terrain CLOD LOD-transition crossfade is stuck active.**
+`terrain_frame_phase.ts:275` calls `view.mat.setFade(fade, …, fade > 0.001 && fade < 0.999)` — the
+terrain material's screen-door **fade dither** (`terrain_node_material.ts:615`,
+`interleavedGradientNoise(screenCoordinate)` → `discard`) turns on whenever a view's `fade` is
+strictly between 0 and 1, i.e. mid-transition. If CLOD streaming never settles at a frozen pose
+(perpetual transitions / root thrash — see the `live_clod_stream_transition_active_roots`,
+`root_switches_total` counters), two overlapping tessellations of the same ground are drawn every
+frame with complementary dither. Their normals differ, so the lighting/"texture shadow" appears to
+jump between them each frame — exactly "the light changes position on the ground", and FPS-coupled.
+It also explains **"only 1 LOD"**: if the transition can't complete, the far/other LOD never commits.
+
+This is a **terrain streaming** bug, unrelated to the tree-ring stride bug that was correctly fixed.
+The two symptoms the user chased were never one bug.
+
+### Terrain LOD-transition ALSO ruled out (user, 07-23)
+
+`force max level = 3` + `freeze selection = ON` → **no change, still flickering.** With the terrain
+pinned as static geometry, the transition dither cannot be running, yet the ground shading still
+flips per frame. So the flicker is a **per-frame lighting / screen-space input to static terrain**,
+not the mesh or its LOD transitions. (Console also floods with `Buffer used in submit while
+destroyed` against `renderContext_1` every frame — per-frame GPU resource churn, consistent with a
+screen-space pass rebuilding a resource each frame.)
+
+### 2026-07-23 cont2 — post-process ruled out; user reports SUN moves with the MOUSE
+
+`gtao=0`, `froxels=0`, `godRays=off`, `bounce=0` each tested alone → **none stopped the flicker.**
+Screen-space post-process is fully ruled out. (Disabling all at once → WebGPU device-lost,
+`Instance dropped in popErrorScope`; the all-off combo trips a resource crash, not a clean test.)
+
+Then the decisive user observation:
+
+> "when I am in player mode and I move the mouse the sun moves as well — that is the issue."
+
+So the **sun / lighting direction is coupled to the camera view** in player mode. Every symptom
+follows from this: mouse-look updates the camera every frame → the sun swings → shadows / the
+sun-light visibility atlas move across the static ground → per-frame, FPS-coupled "texture shadow
+that changes position", plus "only 1 LOD" as an unrelated second bug.
+
+**Verified world-fixed (so the coupling is indirect, not a direct assignment):**
+- `environment.ts:223` builds `sunDirection` from `sunAzimuthDeg`/`sunElevationDeg` (constants;
+  no runtime writes found).
+- `realtime_sun_shadows.ts` `updateSunPose` uses camera **position** only (translation is fine;
+  keeps direction constant).
+- `setupCsmSunShadows` passes camera but `void camera` — CSM takes direction from the `sun` light,
+  frusta follow camera normally.
+
+Candidate indirect couplings still to check: (a) the **sun-light visibility atlas** bins `sunVec`
+(`light_update.ts` `toSunBin`) and rebuilds tiles when the bin flips — if `sunVec` jitters per frame
+the ground AO/shadow atlas rebuilds every frame; (b) a **view-relative lighting term** in a terrain
+material (lighting computed in view space and not transformed back to world); (c) **player-mode camera
+input** writing an environment/sky value. The `sunVec` passed into `light_update` comes from
+`currentLighting().sunDirection` (world-fixed), so if the atlas still flips, suspect (b)/(c).
+
+**Decisive narrowing test needed:** does the flicker happen in **Orbit** mode, or **only Player**
+mode? Orbit and Player use different camera/input paths; "only Player" localizes the bug to
+player-mode camera/lighting handling. Also worth: set a fixed sun via `&sunElevationDeg=55&sunAzimuthDeg=128`
+and see whether mouse-look still swings the lighting (isolates render-time coupling from the sun
+angle source).
+
+### God rays move with the mouse = expected parallax (NOT the flicker)
+
+User: "I move the mouse and the god rays are in a different place." God rays radiate from the sun's
+**projected screen position** (`postprocess.ts:616` `projectSunToScreen(sunDir, camera)`), so looking
+around moves their origin — normal. Consistent with `godRays=off` not stopping the flicker. This is
+almost certainly what "the sun moves with the mouse" was too: fixed-world sun, screen parallax. So
+the earlier "camera-coupled sun direction" framing is likely **not** a bug — downgrade that lead.
+
+### Concrete live bug to chase next: per-frame `renderContext_1` buffer-destroy churn
+
+The console shows 500+/frame `[Buffer (unlabeled)] used in submit while destroyed` against
+`renderContext_1`, plus `Draw with a vertex count of 0`. A GPU buffer is freed while the render's
+command buffer still references it, every frame. Two known sources:
+- `gpu_timestamp_recorder.ts` frees timestamp readback buffers per frame (diagnostic; not a render
+  input — noise, not flicker).
+- three.js `RenderObjects.get → RenderObject.dispose` evicting render objects **during** the render
+  pass (doc's CONFIRMED section) — this **can** flicker: objects destroyed + rebuilt mid-frame,
+  matching the zero-vertex draws.
+
+**Next step handed to user:** reproduce with `?…&gpuDestroyTrace=1` (see
+`src/rendering/gpu_buffer_destroy_trace.ts`) and read one `[gpu-destroy] UNSAFE …` stack — it names
+the exact buffer + call site being freed mid-submit. That is the single most decisive remaining
+diagnostic and directly answers "what about these errors?".
+
+### 2026-07-23 cont3 — the reports separate into TWO distinct problems
+
+After extended user-driven isolation it is clear there are (at least) two different things, and
+conflating them is why nothing converged. TAA/jitter also ruled out (`&taa=0` / `&jitter=0` — user
+had tested before, no change).
+
+**Problem B (now diagnosed): player camera "stuck, then unsticks" + god-ray source follows mouse.**
+User: "the camera is stuck and then moving the mouse moves exactly the source of god rays for a
+while." Mechanism, confirmed in code:
+- `player_input_controller.ts:230-235` — in `"playing"` mode, `updateFrame` sets camera **position**
+  from `player.update()` and **rotation** from mouse yaw/pitch. Rotation is *not* gated.
+- `player_controller.ts:381-387` — `player.update()` **blocks translation** when
+  `movementReadiness(aheadX, z) === "blocked"` (colliders ahead not ready). Wired at
+  `renderer_startup.ts:319-320` via `movementReadinessAt` (`cell_readiness.ts`).
+- Result: position frozen (can't walk), rotation live (can look). Looking around sweeps the sun's
+  projected screen position → the god-ray source slides over a world that isn't translating. When
+  colliders stream in, movement "unsticks" and the world moves again.
+
+This is a **movement-readiness gate**, not a lighting bug.
+
+**Root cause (traced end-to-end 2026-07-23):** movement is frontier-gated on two fail-closed,
+streaming-dependent conditions, and *either* freezes translation:
+1. `player_controller.ts:381-387` blocks when `movementReadinessAt(...) === "blocked"`.
+2. `cell_readiness.ts:109`: `"blocked"` iff `!movementCollisionReady || !waterQueryReady`.
+   - `movementCollisionReady` — a collider page covers the cell, OR `appColumnCertified` (heightfield
+     fallback: true unless a voxel-overlay/cave is resident or the column was edited).
+   - `waterQueryReady` — `waterAuthority.readyAt(x,z)` = `sample(x,z).state !== "unknown"`
+     (`water_authority.ts:304`). The hydrology source returns `unknown` when `!hydrologySampleReady`
+     — i.e. **outside the startup grid `[0, worldCells]` wherever the hydrology tile atlas has not
+     built the tile yet** (`water_authority.ts:148-156, 237`).
+
+So walking faster than hydrology tiles / colliders stream in trips the gate → position frozen,
+rotation live → god-ray source sweeps a static world → "unsticks" when the tile/collider lands. This
+is exactly the user's water clue: disabling water nulls the authority (`player_startup.ts:52`), so
+`waterQueryReady` defaults `true` and that half of the gate vanishes.
+
+**Fix candidates (pick after confirming which condition trips at the stuck pose):**
+- (b, most promising) `movementReadinessAt` blocks movement on `!waterQueryReady` **even when the
+  ground is collision-ready**. Requiring water *classification* to translate across known-solid
+  terrain is likely over-strict — water residency matters for swim/drown state, not for whether you
+  may step onto a collider-ready cell. Consider gating movement on `movementCollisionReady` only and
+  handling unknown-water as a separate swim/hazard check.
+- (a) Predictive/priority streaming of hydrology tiles + colliders in the player's heading so the
+  frontier stays ahead of movement.
+- (c) Widen/pre-warm the hydrology tile atlas around the player before enabling movement.
+
+**Confirm-first:** at the stuck pose, log which of `movementCollisionReady` / `waterQueryReady` is
+false (add a temporary counter, or read `waterAuthority.sample(px,pz).state` and
+`colliderStatusAt(px,pz)`). The user's water toggle already implicates `waterQueryReady`; verify
+before changing the gate.
+
+**Problem A (still open): per-frame ground shading "flicker."** Confirmed per-frame, FPS-coupled
+(water toggle changed its rate). Ruled out: forest AO, terrain LOD transition, all screen-space
+postfx (gtao/froxels/godRays/bounce), TAA/jitter, diag polish. The `renderContext_1`
+buffer-destroy logs are three.js-internal (no app `[gpu-destroy] UNSAFE` stacks under gpuDestroyTrace).
+No automated discriminator survived validation, so this needs **direct frame-diff observation**
+(two consecutive frozen-pose frames, diff the ground ROI) or a short screen recording — remote
+toggle-diagnosis has hit diminishing returns. Do **not** resume by toggling more effects.
+
+### (earlier) suspect: a screen-space / temporal post-process pass — RULED OUT above
+
+Remaining things that are per-frame, FPS-coupled, land on static ground, and interact with water
+(also screen-space): **GTAO** (screen-space AO, darkens ground — classic temporal flicker if its
+history is broken), **froxel volumetrics** ("light changes position"), **screen-space colour bounce**,
+**god rays**, **volumetric clouds**. All default **ON** (`environment_query_overrides.ts` resets them
+to false only in perf mode; normal state has them on). Each has a URL flag:
+`gtao/ao`, `froxels/volumetrics`, `bounce`, `godRays`, `clouds`, `bounce`, `aerial`, `fog`.
+
+**Decisive test — kill all screen-space postfx at once:**
+
+```text
+http://127.0.0.1:5181/?oceanRim=0&webgpuSelection=1&materialTiers=1&gtao=0&froxels=0&bounce=0&godRays=off&clouds=0&aerial=0
+```
+
+- Flicker **stops** → it is a post-process pass; re-enable one at a time (start `gtao=0` alone) to
+  pinpoint. GTAO is the top prior for a moving ground "texture shadow".
+- Flicker **continues** → not post-process; pivot to the sun **shadow map** and the per-frame
+  `renderContext_1` buffer-destroy churn (a render resource recreated every frame).
+
+NB: the automated counter-delta probe (`probe-counter-deltas.ts`) could not launch WebGPU headless on
+this box (`No Chromium launch recipe produced a stable WebGPU device`); it was removed. To run browser
+probes here, pass `CLOD_POC_CDP_URL` pointing at a native Chrome with WebGPU. The user's own live
+toggles have been the working instrument this whole session — keep using them.
+
+### Next steps (revised)
+
+1. Confirm the terrain/prop material actually samples the forest-lighting texture (mechanism for
+   "impacts ground light"); the quick grep for it in `src/terrain` / `src/rendering` came back empty,
+   so the ground coupling may be via prop/understory materials or a global — locate it.
+2. Build the ground-ROI frozen-pose variance probe; validate on `bad2190f5` vs `d5922717e`.
+3. If it separates, bisect `f1175d0a0..d5922717e` (main line) for the moving-ground-shadow, prime
+   suspects `8af5b2fbd` / `5a9d817cf` / `db86cdb1a`.
+4. Treat **"only 1 LOD visible"** as its own track: on main `treeLodCrossfadeHalfBandM()` has **no**
+   hard `TREE_LOD_CROSSFADE_MAX_BAND_M` cap (the 07-21 guard was not carried through the refactor), so
+   crossfade dither can be active — but that is a tree-pixel effect, not the ground shadow.
 
 ## Ruled out (do not re-try)
 
