@@ -43,6 +43,18 @@ describe("tree LOD selection", () => {
     expect(selectTreeLod(250, null, settings).lod).toBe("impostor");
   });
 
+  it("keeps the shipping config's four LOD bands distinct, ascending, and all reachable", () => {
+    const d = treeLodDistances(DEFAULT_TREE_SETTINGS);
+    expect(d.near).toBeLessThan(d.mid);
+    expect(d.mid).toBeLessThan(d.far);
+    expect(d.far).toBeLessThan(d.impostor);
+    const reached = new Set<string>();
+    for (let distance = 0; distance <= d.impostor + 20; distance += 2) {
+      reached.add(selectTreeLod(distance, null, DEFAULT_TREE_SETTINGS, { allowCrossfade: false }).lod);
+    }
+    expect([...reached].sort()).toEqual(["far", "impostor", "mid", "near"]);
+  });
+
   it("uses hysteresis to keep the previous LOD near thresholds", () => {
     expect(selectTreeLod(54, "near", settings).lod).toBe("near");
     expect(selectTreeLod(61, "near", settings).lod).toBe("mid");

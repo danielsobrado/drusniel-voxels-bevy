@@ -10,9 +10,12 @@ import { markAsRealtimeSunShadowCaster } from "../rendering/realtime_sun_shadows
 import type { TreeLod, TreeSpeciesId } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import { TREE_RING_SHADOW_CASCADE_COUNT, treeRingShadowCasterGroupCount } from "./tree_ring_shadow_casters.js";
+import { TREE_RING_INSTANCE_VEC4S } from "./tree_ring_placement.js";
 
 export type TreeGpuRingMesh = THREE.Mesh<THREE.InstancedBufferGeometry, THREE.Material>;
-export const TREE_GPU_RING_INSTANCE_VEC4S = 6;
+/** Alias of the record stride (tree_ring_placement.ts) — buffer sizing must match the vec4s
+ *  the compute writer and material readers use per record. */
+export const TREE_GPU_RING_INSTANCE_VEC4S = TREE_RING_INSTANCE_VEC4S;
 
 export type IndirectInstancedBufferGeometry = THREE.InstancedBufferGeometry & {
   setIndirect?(attribute: THREE.BufferAttribute, offset: number): void;

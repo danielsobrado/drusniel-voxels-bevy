@@ -21,6 +21,7 @@ import {
 } from "./tree_ring_compute.js";
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { composeTreeRingShader } from "./wgsl_modules.js";
+import { TREE_RING_INSTANCE_VEC4S } from "../trees/tree_ring_placement.js";
 
 function withGpuReadbacks(search: string, run: () => void): void {
   const root = globalThis as typeof globalThis & { window?: { location?: { search?: string } } };
@@ -262,6 +263,20 @@ describe("tree GPU ring shader source", () => {
     expect(treeRingShader).toContain("out_cell[base + 5u] = record.morphology2");
     expect(treeRingShader).toContain("out_shadow_cell[base + 5u] = record.morphology2");
     expect(treeRingShader).toContain("MORPH_FOLIAGE_CARD_CHANNEL: u32 = 0x1109u");
+  });
+
+  it("regenerates the composed record stride from the TS field schema", () => {
+    const composed = composeTreeRingShader();
+    const strideMatch = composed.match(/const TREE_INSTANCE_VEC4S: u32 = (\d+)u;/);
+    expect(strideMatch).not.toBeNull();
+    expect(Number(strideMatch?.[1])).toBe(TREE_RING_INSTANCE_VEC4S);
+    // write_tree_record must write exactly one vec4 per record field at contiguous offsets and
+    // no more: a stride/field-count mismatch here is the record-stride blink class of bug.
+    for (let field = 0; field < TREE_RING_INSTANCE_VEC4S; field++) {
+      const slot = field === 0 ? "out_cell[base]" : `out_cell[base + ${field}u]`;
+      expect(composed).toContain(`${slot} =`);
+    }
+    expect(composed).not.toContain(`out_cell[base + ${TREE_RING_INSTANCE_VEC4S}u] =`);
   });
 
   it("samples competition from world positions with the same species channel as the CPU oracle", () => {

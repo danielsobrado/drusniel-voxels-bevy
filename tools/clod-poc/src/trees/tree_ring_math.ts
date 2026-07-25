@@ -1,6 +1,7 @@
 import { terrainWeights, WATER_LEVEL } from "../terrain/terrain.js";
 import { DEFAULT_TREE_SETTINGS, type TreeLod, type TreeSettings } from "./tree_config.js";
 import { treeLodCrossfadeHalfBandM } from "./tree_lod_transition.js";
+import { treeLodDistances } from "./tree_lod.js";
 import { treeMaterialDensityVector } from "./tree_material_bias.js";
 import { clamp, clamp01, smoothstep } from "./tree_noise.js";
 import { treePcg2d01 } from "../vegetation/gpu_authority/pcg2d.js";
@@ -141,12 +142,15 @@ export function treeParentClumpMask(worldX: number, worldZ: number, params: Tree
 }
 
 export function treeRingLodParams(settings: TreeSettings = DEFAULT_TREE_SETTINGS): TreeRingLodParams {
+  // near/mid/far/radius come from the single LOD-threshold source (tree_lod.ts) so the GPU
+  // ring cannot select a different LOD than the CPU path for the same distance.
+  const distances = treeLodDistances(settings);
   const crossfadeActive = settings.lod.crossfadeEnabled && settings.lod.ditherEnabled;
   return {
-    near: settings.distanceM * settings.lod.nearFraction,
-    mid: settings.distanceM * settings.lod.midFraction,
-    far: settings.distanceM * settings.lod.farFraction,
-    radius: settings.lod.impostorEndM,
+    near: distances.near,
+    mid: distances.mid,
+    far: distances.far,
+    radius: distances.impostor,
     band: crossfadeActive ? treeLodCrossfadeHalfBandM(settings) : 0,
   };
 }

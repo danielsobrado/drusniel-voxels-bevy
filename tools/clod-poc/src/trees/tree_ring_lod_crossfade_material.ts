@@ -6,10 +6,8 @@ import {
   float,
   floor,
   fract,
-  instanceIndex,
   max,
   sin,
-  storage,
   uniform,
   vec2,
 } from "three/tsl";
@@ -18,10 +16,8 @@ import type { TreeLod, TreeSettings } from "./tree_config.js";
 import { treeLodCrossfadeHalfBandM } from "./tree_lod_transition.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import type { TreeRingInstanceBuffers } from "./tree_node_material.js";
-import {
-  TREE_RING_CELL_SIZE_M,
-  TREE_RING_INSTANCE_VEC4S,
-} from "./tree_ring_placement.js";
+import { TREE_RING_CELL_SIZE_M } from "./tree_ring_placement.js";
+import { treeRingRecordField, treeRingRecords } from "./tree_ring_record_access.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -126,12 +122,8 @@ function createTreeRingCrossfadeKeepNode(
   // of one returned a neighbouring record's fields as this tree's cell, and the compute
   // reassigns slots via atomicAdd every dispatch, so both the LOD distance and the dither
   // noise were recomputed from data that moved each frame — the per-frame blink.
-  const records: TslNode = storage(
-    buffers.cell,
-    "vec4",
-    buffers.capacity * TREE_RING_INSTANCE_VEC4S,
-  ).toReadOnly();
-  const positionScale: TslNode = records.element(instanceIndex.mul(TREE_RING_INSTANCE_VEC4S));
+  const records: TslNode = treeRingRecords(buffers.cell, buffers.capacity);
+  const positionScale: TslNode = treeRingRecordField(records, "positionScale");
   const worldXZ: TslNode = positionScale.xz;
   // Recover the placement cell so the dither hash stays stable per tree: the compute
   // derives world position as (cell + jitter) * cellSize with jitter in [0,1).

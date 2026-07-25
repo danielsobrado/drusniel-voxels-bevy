@@ -19,6 +19,7 @@ import vegetationTerrainSampling from "../vegetation/gpu_authority/terrain_sampl
 import { TREE_SPECIES } from "../trees/tree_config.js";
 import { TREE_CROWN_PROXY_INDEX_COUNT } from "../trees/tree_crown_proxy_contract.js";
 import { TREE_RING_SHADOW_CASCADE_COUNT } from "../trees/tree_ring_shadow_casters.js";
+import { TREE_RING_INSTANCE_VEC4S } from "../trees/tree_ring_placement.js";
 import { treeRingSpeciesLayout } from "./tree_ring_species_layout.js";
 import { applyTreeRingSpeciesWgslExpansion } from "./tree_ring_species_wgsl_expansion.js";
 import { applyTreeRingWgslLayoutConstants } from "./tree_ring_wgsl_layout.js";
@@ -46,6 +47,15 @@ export function withPlacementExcludedHeight(source: string): string {
   return source.replace(
     /const PLACEMENT_EXCLUDED_HEIGHT_THRESHOLD_M: f32 = -?\d+(?:\.\d+)?;/,
     `const PLACEMENT_EXCLUDED_HEIGHT_THRESHOLD_M: f32 = ${VEGETATION_AUTHORITY_EXCLUDED_HEIGHT_THRESHOLD_M}.0;`,
+  );
+}
+
+/** Overwrite the WGSL per-record stride from the TS source of truth so the compute writer's
+ *  record width cannot drift from the material readers' stride (tree_ring_placement.ts). */
+export function withTreeInstanceStride(source: string): string {
+  return source.replace(
+    /const TREE_INSTANCE_VEC4S: u32 = \d+u;/,
+    `const TREE_INSTANCE_VEC4S: u32 = ${TREE_RING_INSTANCE_VEC4S}u;`,
   );
 }
 
@@ -94,7 +104,7 @@ export function composeTreeRingShader(workgroupSize = 64): string {
     "TREE_WORKGROUP_SIZE",
     workgroupSize,
   );
-  return composeShader("tree ring shader", [vegetationAuthorityPcg, vegetationAuthorityHash, treeBindings, terrainCommon, vegetationTerrainSampling, placementHeight, treeEntry]);
+  return composeShader("tree ring shader", [vegetationAuthorityPcg, vegetationAuthorityHash, treeBindings, terrainCommon, vegetationTerrainSampling, placementHeight, withTreeInstanceStride(treeEntry)]);
 }
 
 export function composeUnderstoryRingShader(workgroupSize = 64): string {

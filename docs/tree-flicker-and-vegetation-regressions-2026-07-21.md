@@ -732,3 +732,97 @@ npm --prefix F:/drusniel-cache/tmp/bisect-wt/tools/clod-poc run dev -- --host 12
 4. Then #6 (digging perf) and #7 (meadows), both regressed after 07-07 / 07-14.
 5. Only revisit crossfade dithering if someone implements a temporally stable version
    (that is what the constant's comment is guarding).
+
+## 2026-07-24 — TASK C hardening landed + TASK B movement gate instrumented (both uncommitted on main)
+
+Continuation after main HEAD advanced to `11b540dce` (a concurrent session committed the prior
+session's sun-shadows toggle + this doc). Problem 1 (tree stride/blink) stays settled. Problem 2
+(CSM / ground flicker) remains UNCONFIRMED — teed up for a human A/B (`sunShadows=0` / `csmfade=0`
+/ `csmcasc=1`, all real flags in `realtime_sun_shadows.ts`; reload between each), plus the decisive
+**still-vs-moving** question: CSM crawl is camera-motion-coupled, but Problem A was described as
+frozen-pose / FPS-coupled — if the ground flickers while standing perfectly still, CSM crawl is the
+wrong lead and texel-snap must not be built yet. `debugColorByLod` is NOT a URL flag (vegetation GUI
+/ config only).
+
+### TASK C — tree record schema single-source-of-truth (done; full suite 4895 green; uncommitted)
+The three hand-maintained `= 6` stride constants can no longer diverge:
+- `tree_ring_placement.ts` defines ordered `TREE_RING_RECORD_FIELDS`; `TREE_RING_INSTANCE_VEC4S` is
+  `.length`; added `treeRingRecordFieldIndex()`.
+- New `tree_ring_record_access.ts` (`treeRingRecords`, `treeRingRecordField`); the 3 storage readers
+  (`tree_material_parity.ts`, `tree_ring_lod_crossfade_material.ts`, `morphology/node_deformation.ts`)
+  read by field name — no raw `.mul(stride)` in any reader (byte-identical TSL graph).
+- `TREE_GPU_RING_INSTANCE_VEC4S` is now an alias of the record stride.
+- `withTreeInstanceStride` in `wgsl_modules.ts` regenerates the WGSL `TREE_INSTANCE_VEC4S` from TS at
+  composition — applied on the `composeShader` **argument**, NOT the `treeEntry` definition, because
+  `scripts/wire-tree-ring-wgsl-expansion.mjs` keys its `alreadyApplied` list on that definition
+  (wrapping it there fails `wire-tree-parity.integration.test.mjs`; hit and fixed).
+- Tests: `tree_ring_record_layout.test.ts` (field→offset map + alias) + composed-WGSL sentinel in
+  `tree_ring_compute.test.ts` (stride == TS; `write_tree_record` writes exactly N contiguous fields).
+- Deliberately did NOT build a named-offset codegen framework or GPU-execution sentinel.
+
+### TASK B — movement-readiness gate instrumented (uncommitted; `?movementTrace=1`; TEMPORARY)
+`movementReadinessAt` (`player/cell_readiness.ts`) has TWO `attachMovementReadiness` callers
+(`renderer_startup.ts:320`, `ui/player_startup.ts:54`); last attach wins, so a wrap-site trace can
+miss — that is almost certainly why the prior `[movement-block]` trace didn't fire. Instrument the
+shared function. THREE flag-gated, throttled traces (all `?movementTrace=1`):
+- `[movement-gate] blocked` in `cell_readiness.ts` — `movementCollisionReady`, `waterQueryReady`
+  (false ⇔ look-ahead water unknown), collider covered/replacementPending/revision, fallbackKind, cell.
+- `[water-freeze] blocked_unknown` in `player_controller.ts:327` — `waterState`, grounded, cell. The
+  swim system freezes ALL velocity at the CURRENT cell when `sample.state === "unknown"`
+  (`swim_locomotion.ts:64` `resolveSwimContact`). This is a SEPARATE freeze the look-ahead gate does
+  not cover — the prior `[movement-block]` trace (gate-only) would MISS it. Likely the true "position
+  frozen, rotation live".
+- `[movement-recover] <reason>` in `player_controller.ts` `recoverToLastSafe` — fall-through events
+  (fell-to-Y / safe-Y / drop); `player_recovery_missing_collider` = the fall-through symptom.
+
+KEY FINDING: unknown water (outside the built hydrology grid, `water_authority.ts:237`) freezes movement
+via TWO independent paths — the `movementReadinessAt` water half AND the swimContact `blocked_unknown`
+freeze — and BOTH vanish when water is disabled, so the earlier water-toggle CANNOT distinguish gate vs
+swim-freeze. Handoff fix candidate (b) "gate movement on `movementCollisionReady` only" is therefore
+INCOMPLETE: removing the gate's water half still leaves the swimContact freeze (player steps one cell
+and freezes anyway). A real fix must also change `blocked_unknown` on collision-ready ground (e.g. treat
+unknown-water-over-collider as walkable) OR fix hydrology streaming lag — a design call, made only after
+the trace confirms which path trips. Strip traces after reading; do not change the gate blind.
+
+REPRODUCED (2026-07-24, automated headless harness `player/unknown_water_movement.test.ts`, 2 tests
+green — no WebGPU): walking the real `PlayerController` across the built-hydrology boundary on
+collision-ready floor freezes via BOTH paths independently — (A) the `movementReadinessAt` look-ahead
+gate halts the player just shy of the boundary (`swimMode` "dry"); (B) with the gate forced ready, swim
+contact freezes at the current cell (`swimMode` "blocked_unknown", crosses then stops). Confirms the
+two-path finding and that fixing only the gate leaves path B. This test is the regression gate for the
+fix (flip to "crosses freely" once walkable-on-collision-ready lands).
+
+FIX LANDED (2026-07-24, design call = predictive streaming, NOT walkable — fail-closed "unknown != dry"
+preserved): `water/hydrology_prefetch_lead.ts` `leadHydrologyPrefetchCenter` biases the hydrology tile
+prefetch center ahead of the camera heading (capped at radius/2 so the current cell stays covered),
+wired at `water_controller.ts` update (was camera-centered `prefetchTiles`). Tiles build async on the
+worker, so requesting ahead-of-travel gives them time to land before the player arrives. Unit-tested
+(`hydrology_prefetch_lead.test.ts`, 7). The reproduction test is UNCHANGED and still green — the freeze
+on genuinely-unknown water is intended and preserved; the fix prevents water being unknown *ahead* of
+the player, it does not weaken the gate.
+
+VALIDATION (headless, as far as it goes): lead math (`hydrology_prefetch_lead.test.ts`, 7) + a
+tile-cache integration test (`hydrology_predictive_prefetch.test.ts`) proving leading streams the
+about-to-enter tile that camera-centering leaves unknown, while keeping the current cell covered. The
+new headless-reproduction methodology (reproduce the mechanism in vitest when the browser can't; state
+which link each test covers) is documented in `docs/qa/visual-qa.md`. CEILING: the tile worker cannot run
+in node, so "player crosses the streamed frontier without freezing" under real movement stays
+browser-only — confirm with `?movementTrace=1` (no `[water-freeze]` / `[movement-gate]` while walking).
+This is a MITIGATION: extreme speed or a saturated worker (8 inflight) could still momentarily outrun it;
+levers = lead-seconds / inflight cap / radius. Remove the temp traces once confirmed.
+
+### 2026-07-24 cont — CPU/GPU tree LOD threshold parity (Issue #8 guardrail)
+
+Found a second duplicated-constant risk of the TASK C class: `treeRingLodParams` (GPU ring,
+`tree_ring_math.ts`) recomputed near/mid/far LOD thresholds independently of `treeLodDistances`
+(CPU selection, `tree_lod.ts`) — byte-identical formulas in two files, so the GPU ring could
+silently select a different LOD than the CPU path for the same distance (the "only one LOD" class).
+FIXED: `treeRingLodParams` now derives from `treeLodDistances` (single source, no import cycle,
+byte-equivalent). Guarded by `tree_lod_cpu_gpu_parity.test.ts` (GPU thresholds == CPU thresholds +
+composed-WGSL `tree_lod_ring` ladder matches the CPU `lodForDistance` ladder) and a shipping-config
+band-reachability test in `tree_lod.test.ts`. CEILING: this locks LOD-selection thresholds CPU==GPU
+and band reachability headlessly; it does NOT prove all LODs render in a frame — that stays visual
+(Issue #8). Tree shadow flicker itself has no headless discriminator (see BISECT HALTED) — visual only.
+
+Pending: in-browser confirm of the movement fix (`?movementTrace=1`); human A/B for Problem 2
+(+still-vs-moving) and the "only one LOD" render check; then strip the temp traces.

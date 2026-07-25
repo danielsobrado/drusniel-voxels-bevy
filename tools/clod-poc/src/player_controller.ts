@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type { CapsuleCollisionConfig, TerrainColliderSet } from "./terrain/terrain_collider.js";
 import type { PropColliderSet } from "./props/prop_collider.js";
 import type { ConstructionColliderSet } from "./construction/construction_collider.js";
-import type { WaterAuthority } from "./water/water_authority.js";
+import type { WaterAuthority, WaterSample } from "./water/water_authority.js";
 import { emitAudio } from "./audio/index.js";
 import { gameplayDiagnostics } from "./player/gameplay_diagnostics.js";
 import { defaultSwimConfig, type SwimConfig } from "./player/swim_config.js";
@@ -327,6 +327,7 @@ export class PlayerController {
     if (blockedByUnknownWater) {
       this.velocity.set(0, 0, 0);
       gameplayDiagnostics.add("water_query_blocked_steps");
+      traceWaterFreeze(this.position, this.grounded, waterSample);
     } else if (swimming && waterSample) {
       const result = applySwimForces({
         velocity: this.velocity,
@@ -481,6 +482,7 @@ export class PlayerController {
   }
 
   private recoverToLastSafe(reason: "player_recovery_non_finite" | "player_recovery_kill_plane" | "player_recovery_missing_collider" | "player_recovery_backstop_depth"): void {
+    traceMovementRecovery(reason, this.position, this.lastSafePosition, this.grounded);
     this.position.copy(this.lastSafePosition);
     this.velocity.set(0, 0, 0);
     this.grounded = false;
@@ -488,4 +490,42 @@ export class PlayerController {
     this.swimContact = { ...DRY_SWIM_CONTACT };
     gameplayDiagnostics.add(reason);
   }
+}
+
+// --- TEMP movement diagnostics: enable with ?movementTrace=1. Remove after diagnosis. ---
+let playerTraceEnabled: boolean | null = null;
+function playerTraceOn(): boolean {
+  if (playerTraceEnabled === null) {
+    playerTraceEnabled = typeof window !== "undefined"
+      && new URLSearchParams(window.location.search).has("movementTrace");
+  }
+  return playerTraceEnabled;
+}
+let playerRecoveryTraceAt = 0;
+function traceMovementRecovery(reason: string, from: THREE.Vector3, to: THREE.Vector3, grounded: boolean): void {
+  if (!playerTraceOn()) return;
+  const now = performance.now();
+  if (now - playerRecoveryTraceAt < 100) return;
+  playerRecoveryTraceAt = now;
+  console.warn(`[movement-recover] ${reason}`, {
+    fell_to_y: Number(from.y.toFixed(2)),
+    safe_y: Number(to.y.toFixed(2)),
+    drop_m: Number((to.y - from.y).toFixed(2)),
+    at: [Number(from.x.toFixed(1)), Number(from.z.toFixed(1))],
+    grounded,
+  });
+}
+let waterFreezeTraceAt = 0;
+function traceWaterFreeze(at: THREE.Vector3, grounded: boolean, sample: WaterSample | null): void {
+  if (!playerTraceOn()) return;
+  const now = performance.now();
+  if (now - waterFreezeTraceAt < 250) return;
+  waterFreezeTraceAt = now;
+  // The current cell's water is "unknown" (hydrology tile not built), so swim contact freezes
+  // all velocity here — a freeze the movementReadiness look-ahead gate does NOT account for.
+  console.warn(`[water-freeze] blocked_unknown @ (${at.x.toFixed(1)}, ${at.z.toFixed(1)})`, {
+    waterState: sample?.state ?? "none",
+    grounded,
+    waterRevision: sample?.sourceRevision,
+  });
 }

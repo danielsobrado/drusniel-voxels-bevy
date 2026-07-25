@@ -106,8 +106,11 @@ export function constructionTargetReady(feeds: CellReadinessFeeds, x: number, z:
 /** Probe shape consumed by the player controller's frontier barrier. */
 export function movementReadinessAt(feeds: CellReadinessFeeds, x: number, z: number): MovementReadiness {
   const readiness = cellReadinessAt(feeds, x, z);
-  if (!readiness.movementCollisionReady || !readiness.waterQueryReady) return "blocked";
-  return readiness.fallbackKind === "heightfield_certified" ? "certified" : "ready";
+  const verdict: MovementReadiness = (!readiness.movementCollisionReady || !readiness.waterQueryReady)
+    ? "blocked"
+    : readiness.fallbackKind === "heightfield_certified" ? "certified" : "ready";
+  traceMovementGate(feeds, x, z, readiness, verdict);
+  return verdict;
 }
 
 /** Spawn/teleport gate: authoritative target plus collision- and water-ready capsule footprint. */
@@ -184,4 +187,37 @@ export function createAppCellReadinessFeeds(deps: {
     waterQueryReadyAt: deps.waterQueryReadyAt,
     constructionReadyAt,
   };
+}
+
+// --- TEMP movement-gate diagnostics: enable with ?movementTrace=1. Remove after diagnosis. ---
+let movementTraceEnabled: boolean | null = null;
+let movementGateTraceAt = 0;
+function movementTraceOn(): boolean {
+  if (movementTraceEnabled === null) {
+    movementTraceEnabled = typeof window !== "undefined"
+      && new URLSearchParams(window.location.search).has("movementTrace");
+  }
+  return movementTraceEnabled;
+}
+function traceMovementGate(
+  feeds: CellReadinessFeeds,
+  x: number,
+  z: number,
+  readiness: CellReadiness,
+  verdict: MovementReadiness,
+): void {
+  if (verdict !== "blocked" || !movementTraceOn()) return;
+  const now = performance.now();
+  if (now - movementGateTraceAt < 250) return;
+  movementGateTraceAt = now;
+  const collider = feeds.colliderStatusAt(x, z);
+  // waterQueryReady === false ⇔ the water authority returned state "unknown" at (x, z).
+  console.warn(`[movement-gate] blocked @ (${x.toFixed(1)}, ${z.toFixed(1)})`, {
+    movementCollisionReady: readiness.movementCollisionReady,
+    waterQueryReady: readiness.waterQueryReady,
+    colliderCovered: collider.covered,
+    colliderReplacementPending: collider.replacementPending,
+    colliderRevision: collider.revision,
+    fallbackKind: readiness.fallbackKind,
+  });
 }

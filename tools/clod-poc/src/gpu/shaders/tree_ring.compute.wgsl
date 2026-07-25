@@ -16,6 +16,7 @@ const TREE_HYDRO_WATER_CLEARANCE: f32 = 1.5;
 const TREE_RIPARIAN_INNER_END_M: f32 = 8.0;
 const TREE_RIPARIAN_OUTER_START_M: f32 = 9.0;
 const TREE_RIPARIAN_OUTER_END_M: f32 = 32.0;
+// Regenerated from TREE_RING_INSTANCE_VEC4S (tree_ring_placement.ts) at shader composition.
 const TREE_INSTANCE_VEC4S: u32 = 6u;
 const VEGETATION_SCHEMA_VERSION: u32 = 1u;
 const VEGETATION_TREE_CATEGORY: u32 = 1u;

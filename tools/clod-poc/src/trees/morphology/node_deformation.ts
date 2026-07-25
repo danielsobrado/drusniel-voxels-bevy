@@ -4,7 +4,6 @@ import {
   clamp,
   cos,
   float,
-  instanceIndex,
   max,
   mix,
   normalGeometry,
@@ -12,13 +11,12 @@ import {
   positionGeometry,
   sin,
   smoothstep,
-  storage,
   uint,
   vec2,
   vec3,
 } from "three/tsl";
 import type { TreeRingInstanceBuffers } from "../tree_node_material.js";
-import { TREE_RING_INSTANCE_VEC4S } from "../tree_ring_placement.js";
+import { treeRingRecordField, treeRingRecords } from "../tree_ring_record_access.js";
 import { TREE_SPECIES, type TreeSettings } from "../tree_config_types.js";
 import { targetTreeHeight } from "../tree_geometry_types.js";
 
@@ -43,19 +41,14 @@ export interface TreeMorphologyDeformationNodes {
 }
 
 export function treeMorphologyRecordNodes(buffers: TreeRingInstanceBuffers): TreeMorphologyRecordNodes {
-  const records: TreeMorphologyNode = storage(
-    buffers.cell,
-    "vec4",
-    buffers.capacity * TREE_RING_INSTANCE_VEC4S,
-  ).toReadOnly();
-  const base: TreeMorphologyNode = instanceIndex.mul(TREE_RING_INSTANCE_VEC4S);
+  const records: TreeMorphologyNode = treeRingRecords(buffers.cell, buffers.capacity);
   return {
-    positionScale: records.element(base),
-    rotationNormalY: records.element(base.add(1)),
-    identityBits: records.element(base.add(2)),
-    morphology0: records.element(base.add(3)),
-    morphology1: records.element(base.add(4)),
-    morphology2: records.element(base.add(5)),
+    positionScale: treeRingRecordField(records, "positionScale"),
+    rotationNormalY: treeRingRecordField(records, "rotationNormalY"),
+    identityBits: treeRingRecordField(records, "identity"),
+    morphology0: treeRingRecordField(records, "morphology0"),
+    morphology1: treeRingRecordField(records, "morphology1"),
+    morphology2: treeRingRecordField(records, "morphology2"),
   };
 }
 

@@ -8,7 +8,6 @@ import {
   float,
   floor,
   fract,
-  instanceIndex,
   max,
   mix,
   normalWorld,
@@ -16,7 +15,6 @@ import {
   positionWorld,
   screenCoordinate,
   smoothstep,
-  storage,
   texture,
   uniform,
   uv,
@@ -34,7 +32,7 @@ import type { TreeLod, TreeSettings } from "./tree_config.js";
 import type { TreeMaterialHandle } from "./tree_material.js";
 import { decorateTreeNodeForestLighting } from "./tree_node_forest_lighting.js";
 import type { TreeRingInstanceBuffers } from "./tree_node_material.js";
-import { TREE_RING_INSTANCE_VEC4S } from "./tree_ring_placement.js";
+import { treeRingRecordField, treeRingRecords } from "./tree_ring_record_access.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type TslNode = any;
@@ -185,12 +183,8 @@ function createRingForestLighting(
   // tree's cell, and because the compute assigns slots with atomicAdd that garbage moved
   // every dispatch — so each tree sampled the forest lighting at a different UV each
   // frame, which is the "light jumping / darker-lighter" flicker.
-  const records: TslNode = storage(
-    buffers.cell,
-    "vec4",
-    buffers.capacity * TREE_RING_INSTANCE_VEC4S,
-  ).toReadOnly();
-  const positionScale: TslNode = records.element(instanceIndex.mul(TREE_RING_INSTANCE_VEC4S));
+  const records: TslNode = treeRingRecords(buffers.cell, buffers.capacity);
+  const positionScale: TslNode = treeRingRecordField(records, "positionScale");
   const worldXZ: TslNode = positionScale.xz;
   const forestUv: TslNode = clamp(worldXZ.div(worldSize), vec2(0), vec2(1));
   const packed: TslNode = texture(neutralPackedTexture, forestUv);

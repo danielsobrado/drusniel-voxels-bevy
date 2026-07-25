@@ -106,3 +106,36 @@ flickering" currently are not.
 Note that grepping the **source** file is not a sufficient screen: a function can be
 defined and called in the same `.wgsl` file and still be unresolved after the
 `wgsl_modules.ts` transforms compose it. Check the composed result in the browser.
+
+## Reproduce the mechanism headless when the browser can't validate
+
+Headless WebGPU is not reliable on every box (the 2026-07 investigation hit
+`No Chromium launch recipe produced a stable WebGPU device`), and some bugs are not visual
+at all — they live in CPU logic a screenshot cannot separate from its cause. For those,
+reproduce the **mechanism** as a deterministic `vitest` integration test instead of chasing
+it through the renderer.
+
+Movement/gameplay logic (player controller, cell readiness, water authority, colliders, swim
+contact) is pure CPU. `player/unknown_water_movement.test.ts` is the worked example: it walks
+the real `PlayerController` across a hydrology-built boundary — dry inside the startup grid,
+`"unknown"` beyond (exactly `water_authority.ts`'s `hydrologySampleReady` behavior) — on
+collision-ready floor, and reproduces the "stuck at the frontier" freeze through **both** of
+its independent paths (the `movementReadinessAt` look-ahead gate and the swim-contact
+`blocked_unknown` freeze), with no GPU. That pinned the diagnosis when the browser trace
+could not.
+
+### State which link each test covers, and where the ceiling is
+
+A headless mechanism test proves a *link*, not the whole chain. Say the ceiling out loud so a
+green test is not mistaken for full validation. For the unknown-water movement freeze:
+
+- `player/unknown_water_movement.test.ts` — *unknown water freezes movement* (fail-closed, intended).
+- `water/hydrology_prefetch_lead.test.ts` — *the prefetch center leads the heading* (the fix's math).
+- `water/hydrology_predictive_prefetch.test.ts` — *leading streams tiles ahead that camera-centering
+  does not reach* (real `HydrologyTileCache` + a mock worker).
+- **Browser-only:** whether the async tile worker keeps up under real movement so the frontier is
+  never `"unknown"` — timing headless cannot model. Confirm that last mile in-browser (here,
+  `?movementTrace=1` showing no `[water-freeze]` / `[movement-gate]` while walking).
+
+Binary CPU reproductions like these are safe to trust and cheap to keep as regression gates; only
+the GPU/worker-timing tail needs a human at the browser.

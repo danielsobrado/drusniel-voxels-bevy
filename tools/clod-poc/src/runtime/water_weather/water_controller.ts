@@ -19,6 +19,7 @@ import { defaultWaterDebugState } from "../../water/waterDebug.js";
 import { createWaterShaderMaterial } from "../../water/waterMaterial.js";
 import { resolveWaterQualityTier } from "../../water/water_quality_overrides.js";
 import { createHydrologyTileRemoteBuilder } from "../../water/hydrology_tile_worker_client.js";
+import { leadHydrologyPrefetchCenter } from "../../water/hydrology_prefetch_lead.js";
 import {
   WaterHydrologyAtlasRuntime,
   waterAtlasLevelCellSizes,
@@ -118,6 +119,8 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     ? createHydrologyTileRemoteBuilder()
     : null;
   let hydrologyPrefetchRadiusM = 0;
+  let prevPrefetchCamX: number | null = null;
+  let prevPrefetchCamZ = 0;
   if (hydrologyRemote && deps.hydrologySystem) {
     const fakeBodies = deps.hydrologySystem.unifiedStartupActive()
       ? { ...deps.waterConfig.fakeBodies, carveTerrain: false }
@@ -337,7 +340,18 @@ export async function createWaterController(deps: WaterControllerDeps): Promise<
     updateSunDirection(direction) { clipmap.updateSunDirection(direction); },
     update(deltaSeconds, cameraPosition) {
       if (hydrologyPrefetchRadiusM > 0) {
-        deps.hydrologySystem?.prefetchTiles(cameraPosition.x, cameraPosition.z, hydrologyPrefetchRadiusM);
+        // Lead the prefetch ahead of travel so async tile builds finish before movement
+        // reaches them; otherwise a fast walker outruns streaming into "unknown" water.
+        const prefetchCenter = prevPrefetchCamX === null
+          ? { x: cameraPosition.x, z: cameraPosition.z }
+          : leadHydrologyPrefetchCenter(
+              cameraPosition.x, cameraPosition.z,
+              prevPrefetchCamX, prevPrefetchCamZ,
+              deltaSeconds, hydrologyPrefetchRadiusM,
+            );
+        deps.hydrologySystem?.prefetchTiles(prefetchCenter.x, prefetchCenter.z, hydrologyPrefetchRadiusM);
+        prevPrefetchCamX = cameraPosition.x;
+        prevPrefetchCamZ = cameraPosition.z;
       }
       waterAtlas?.update(cameraPosition.x, cameraPosition.z);
       clipmap.update(deltaSeconds, cameraPosition);
