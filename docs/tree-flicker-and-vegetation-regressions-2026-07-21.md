@@ -824,5 +824,41 @@ band-reachability test in `tree_lod.test.ts`. CEILING: this locks LOD-selection 
 and band reachability headlessly; it does NOT prove all LODs render in a frame — that stays visual
 (Issue #8). Tree shadow flicker itself has no headless discriminator (see BISECT HALTED) — visual only.
 
-Pending: in-browser confirm of the movement fix (`?movementTrace=1`); human A/B for Problem 2
-(+still-vs-moving) and the "only one LOD" render check; then strip the temp traces.
+### 2026-07-25 — startup buffer-destroy flood + "shadow max LOD → black screen" fixed
+
+**IMPORTANT diagnostic caveat:** the console shows `WebGPU: too many warnings, no more warnings will
+be reported to the console for this GPUDevice` after ~500 errors at startup. **After that cap, "no
+errors in console" proves nothing** — later failures (e.g. the shadow-LOD black screen) cannot report.
+Fix the startup flood first or you are debugging blind.
+
+**Startup flood (FIXED).** App-side frees were already deferred via `disposeAfterGpuIdle`; what
+remained is inside three.js (readback staging buffers in `copyTextureToBuffer`, render-object eviction
+during `_renderObjects`) and is only avoidable by not overlapping a bake with a live submit — the
+doc's own "not attempted" lever. New `rendering/gpu_bake_gate.ts`: `runExclusiveGpuBake()` wraps
+`bakeTreeImpostorAtlases` + `bakeTreeFoliageAtlas`, and `clod_frame_loop.ts` skips frames while
+`gpuBakeInProgress()`. Hold is bounded (20s) so a hung bake cannot freeze the view; released in a
+`finally` so a throwing bake cannot wedge it. Unit-tested (`gpu_bake_gate.test.ts`, 6).
+
+**"Shadow max LOD" → black screen (FIXED).** `planTreeSystemSettingsUpdate` set `clearGpuRing` on ANY
+`shadowsMaxLod` change, tearing down and rebuilding the whole GPU ring — the exact destroy-in-flight
+path this doc blames for black frames. But the cap is enforced by a **per-frame uniform**
+(`params.settings_e.z` via `withTreeShadowLodGate`), not by the mesh/buffer set, so moving between real
+LODs — or down to "none" (which also zeroes caster capacity) — needs no new resources. Only leaving
+"none" does, since the shadow ring buffers are not created at zero capacity. Now only that case
+rebuilds (`shadowBuffersMissing`). Tested in `tree_system_settings_plan_shadow.test.ts`.
+
+**LOD ("only nearest") — code double-checked, NOT yet root-caused.** Verified CORRECT and ruled out:
+LOD thresholds (near 26.04 / mid 100.8 / far 260.4 / radius 760 m), ring extent (grid 448 x 3.4 m =
+±761.6 m, so every band is reachable), group indexing (WGSL `species*TREE_LOD_COUNT+lod` ≡ TS), the
+index-count cache (properly invalidated after the impostor bake), and the crossfade keep/dither logic.
+LEADING SUSPECT: uniform per-group capacity. `treeGpuRingGroupCapacity = floor(gpu.maxVisible/24)` =
+5,333 for EVERY group, but candidate cells per band per species are ~59 near / ~545 mid / ~2,940 far /
+~24,000 impostor — the impostor group is ~4.5x oversubscribed before acceptance masking and
+`append_tree` hard-drops past capacity, while near never saturates. Distant LODs get silently clipped.
+NOT changed yet: confirm first by toggling **"show GPU counts"** (a pure policy flag, explicitly
+excluded from `treeGpuRingResourcesChanged`, so unlike shadow max LOD it does NOT tear the ring down)
+and reading the per-LOD counts in the HUD.
+
+Pending: in-browser confirm of the flood + shadow fixes and the movement fix (`?movementTrace=1`);
+per-LOD counts to confirm/deny the capacity hypothesis; human A/B for Problem 2 (+still-vs-moving);
+then strip the temp traces.

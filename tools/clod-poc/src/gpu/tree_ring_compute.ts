@@ -1,4 +1,4 @@
-import { shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
+import { parseGpuReadbackMode, shouldRequestGpuReadback } from "../diagnostics/gpu_readback_policy.js";
 import { TREE_LODS, TREE_SPECIES, type TreeLod, type TreeSettings, type TreeSpeciesId } from "../trees/tree_config.js";
 import { treeMaterialDensityVector, treeSpeciesMaterialVector } from "../trees/tree_material_bias.js";
 import { treeRingAcceptParams, treeRingLodParams } from "../trees/tree_ring_math.js";
@@ -185,7 +185,13 @@ export function treeGpuRingRequestsDebugReadback(settings: TreeSettings, frame: 
     kind: "tree_gpu_counts",
     frame,
     intervalFrames: READBACK_INTERVAL_FRAMES,
-    requested: settings.gpu.readbackVisibleLists || settings.gpu.debugValidateAgainstCpu,
+    // `?gpuReadbacks=debug` requests the tree counters too. Without this the counters can
+    // only be turned on through the `readbackVisibleLists` GUI toggle, which is a GPU
+    // resource change: it tears the ring down and rebuilds it, blacking out the view — so
+    // the only way to read the counters was to break the thing being measured.
+    requested: settings.gpu.readbackVisibleLists
+      || settings.gpu.debugValidateAgainstCpu
+      || parseGpuReadbackMode() === "debug",
   });
 }
 

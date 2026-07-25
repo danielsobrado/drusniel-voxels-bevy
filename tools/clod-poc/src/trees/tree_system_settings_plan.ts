@@ -47,8 +47,15 @@ export function planTreeSystemSettingsUpdate(
     patch.render.depthPrepass !== current.render.depthPrepass ||
     patch.render.farCheapMaterial !== current.render.farCheapMaterial
   );
-  const shadowPolicyChanged = patch.lod?.shadowsMaxLod !== undefined &&
-    patch.lod.shadowsMaxLod !== current.lod.shadowsMaxLod;
+  // The max shadow LOD is enforced per frame by a packed uniform (settings_e.z, read by the
+  // shader's shadow LOD gate), so moving between real LODs — or down to "none", which also
+  // zeroes the shadow caster capacity — needs no new GPU resources. Only leaving "none"
+  // does: the shadow ring buffers are not created while the capacity is zero. Rebuilding on
+  // every change destroyed buffers the in-flight frame still referenced, which blacked out
+  // the view with no console error once the device hit its warning cap.
+  const shadowBuffersMissing = patch.lod?.shadowsMaxLod !== undefined &&
+    current.lod.shadowsMaxLod === "none" &&
+    patch.lod.shadowsMaxLod !== "none";
   // Only rebuild the ring when a gpu setting that actually owns GPU resources changes.
   // Pure policy/diagnostic flags (fallbackToCpu, debugShowGpuCounts, debugValidateAgainstCpu)
   // must not tear it down: destroying the compute buffers mid-frame, while the previous
@@ -58,7 +65,7 @@ export function planTreeSystemSettingsUpdate(
   const clearGpuRing = needsGeometry ||
     gpuResourcesChanged ||
     gpuRenderChanged ||
-    shadowPolicyChanged ||
+    shadowBuffersMissing ||
     ecologyChanged ||
     speciesChanged ||
     windChanged ||

@@ -199,7 +199,10 @@ describe("tree GPU ring compute helpers", () => {
     withGpuReadbacks("?gpuReadbacks=debug", () => {
       expect(treeGpuRingRequestsDebugReadback(readbackOnly, 0)).toBe(true);
       expect(treeGpuRingRequestsDebugReadback(readbackOnly, 1)).toBe(false);
-      expect(treeGpuRingRequestsDebugReadback(noReadback, 0)).toBe(false);
+      // `?gpuReadbacks=debug` is sufficient on its own: enabling the counters through
+      // settings instead tears the GPU ring down and blacks out the view, so the URL must
+      // be able to request them without a settings change.
+      expect(treeGpuRingRequestsDebugReadback(noReadback, 0)).toBe(true);
       expect(treeGpuRingRequestsDebugReadback(validateOnly, 0)).toBe(true);
     });
   });
