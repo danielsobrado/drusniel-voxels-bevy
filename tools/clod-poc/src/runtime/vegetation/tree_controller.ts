@@ -14,6 +14,7 @@ import { TreeSystem, type FallingTree, type TreeSettings, type TreeStats } from 
 import type { TreeDepthPrepassMaxLod } from "../../trees/tree_depth_prepass_runtime.js";
 import type { TreeTerrainOcclusionSampler } from "../../trees/tree_terrain_occlusion.js";
 import { assertPageMeshSignaturesUnchanged, pageMeshSignatures } from "../../stones/stone_validation.js";
+import { prewarmTreeGpuRingPipelines, treeGpuRingWorkgroupSize } from "../../gpu/tree_ring_compute.js";
 
 export interface TreeControllerUiState {
   treesEnabled: boolean;
@@ -174,6 +175,12 @@ export function createTreeController(deps: TreeControllerDeps): TreeController {
       },
     };
   };
+
+  // Start the ~9s tree_cull compile now rather than on the first frame that updates trees;
+  // the ring is otherwise stuck on CPU-fallback patches (near/mid only) until it finishes.
+  if (deps.gpuDevice && deps.webgpu) {
+    prewarmTreeGpuRingPipelines(deps.gpuDevice, treeGpuRingWorkgroupSize(deps.treeConfig));
+  }
 
   const signaturesBefore = pageMeshSignatures(deps.nodes);
   const system = new TreeSystem({

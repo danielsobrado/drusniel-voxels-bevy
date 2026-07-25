@@ -862,3 +862,122 @@ and reading the per-LOD counts in the HUD.
 Pending: in-browser confirm of the flood + shadow fixes and the movement fix (`?movementTrace=1`);
 per-LOD counts to confirm/deny the capacity hypothesis; human A/B for Problem 2 (+still-vs-moving);
 then strip the temp traces.
+
+### 2026-07-25 cont — "only one LOD" RESOLVED: it was a measurement window, not acceptance
+
+**The premise was wrong, and the evidence says so plainly.** The handoff framed this as a CPU/GPU
+acceptance divergence ("find which term zeroes on GPU"). It is not. Measured with the ring actually
+live, all four LODs render:
+
+| Counter | measured at ready+3s (old probes) | measured after ring settles |
+|---|---|---|
+| `trees.near` | 1 | **56** |
+| `trees.mid` | 21 | **942** |
+| `trees.far` | 0 | **2846** |
+| `trees.impostor` | 0 | **264** |
+| `trees.candidates` | 0 | **200704** |
+| `trees.visible` | 0 | **4108** |
+| `trees.patches` | 2 | **0** |
+| `trees.shadowCasters` | 0 | **5269** |
+
+`trees.patches` is the discriminator: `tree_system_stats.ts` only increments it on the **non-ring**
+branch (`if (input.gpuRing) { ... } else { for (const patch of input.patches) ... }`). `patches=2`
+therefore proved the ring was not the reporting path; `patches=0` proves it is.
+
+**Chain of evidence (each step measured, not inferred):**
+
+1. Every `trees.*` GPU counter is gated on `input.gpuRing` = `treeReportsGpuRingStats(...)`. A `0`
+   means "no ring reporting", not "zero trees". All reject buckets reading `0` *too*
+   (`treeReject.*`, `treeGpuClustersTotal`) was the tell — real acceptance rejection would make
+   those large.
+2. `treeGpuStatus` (via `?perfProbe=1` → `window.__drusnielPerf.lastSample`) read **`ring`**, while
+   `patches=2` proved `reportsGpuRingStats=false`. A temporary trace on the predicate gave the
+   deciding input: `hasDraw=true hasCompute=false ringStatsStatus=initializing`, stable forever.
+3. Lifecycle trace: `clear gen=0->1` once, `start gen=1` once, **no resolve** — so it was not a
+   stale-generation discard and not a compile rejection (that path logs `[trees-gpu-ring]`).
+4. Per-pipeline timing: shader `compilationInfo messages=0 problems=0`;
+   `clear_counters` and `build_indirect_args` OK after **1401 ms**; `tree_cull` OK after
+   **9244 ms**. Not a deadlock — a slow compile of the one heavy entry point.
+5. Ring init did not even *begin* until **~70 s** into startup; the ring became the reporting path
+   at **62 s** in a clean run.
+
+So for the first ~60–80 s the scene shows only the CPU fallback patches (2 patches, 22 trees,
+near+mid only) — which is exactly the reported symptom. Every probe to date sampled inside that
+window: `probe-tree-lod-counts.ts` waits for tree meshes then +3 s, far too early.
+
+**Two traps worth keeping.** `gpuStatus` is set to `"ring"` **unconditionally** at the end of
+`updateTreeGpuRingTrees` even when `compute` is still null and nothing has dispatched — it reports
+intent, not liveness, and it is what made two sessions read the system wrong. And "no
+`[trees-gpu-ring]` errors" proves nothing here: the ring was never failing, just not ready.
+
+**New tooling** (`tools/clod-poc/tools/`):
+- `probe-tree-lod-counts-settled.ts` — waits for `trees.patches === 0 && trees.candidates > 0`
+  before reading. **Use this instead of `probe-tree-lod-counts.ts`.**
+- `probe-tree-gpu-status.ts` — `treeGpuStatus` + `[trees-gpu-ring]` logs + console errors.
+- `probe-tree-cull-pipeline.ts` — times each compute pipeline's compile.
+
+#### Startup latency — measured, decomposed, and the tree-owned part fixed
+
+NB the doc's earlier `rendering/gpu_bake_gate.ts` / `runExclusiveGpuBake` suspect **does not exist
+in this tree** — that entry describes work that never landed here. Measured instead with
+`tools/probe-tree-ring-startup-timeline.ts`, the ~70 s decomposes as:
+
+| Segment | Cost | Owner |
+|---|---|---|
+| navigate → scene exists | ~28 s | world build (`build_world_ms` **19976**, `hydrology_ms` **4421**, `procedural_textures_ms` **2720**) |
+| scene → first frame | ~22 s | renderer/startup |
+| first frame → ring live | **~12 s** | **the tree ring** |
+
+Only the last segment is tree-owned, and it was almost entirely the 9.2 s `tree_cull` compile,
+which the ring requested only on the *first frame that updates trees* — long after the GPU device
+existed.
+
+FIXED: the shader module, bind group layout and the three pipelines depend only on the device and
+`settings.gpu.workgroupSize` (never on the ring's buffers/settings), and `destroy()` frees only
+buffers and textures — so they are now memoised per device+workgroup size
+(`treeGpuRingPipelineSet` in `gpu/tree_ring_compute.ts`) and prewarmed from `createTreeController`
+via `prewarmTreeGpuRingPipelines`. Failed compiles are deliberately **not** cached so the ring can
+recover. A ring rebuild (settings/key change) is now also free instead of re-paying 9 s.
+
+Measured, 2 samples per side (same host, same URL; normalise to **first frame** — absolute times
+move ±5 s with world-build load):
+
+| Run | first frame → ring live | ring live on |
+|---|---|---|
+| baseline 1 | 12.0 s | frame 5 |
+| baseline 2 | 11.4 s | frame 5 |
+| prewarmed 1 | **2.8 s** | **frame 2** |
+| prewarmed 2 | **8.2 s** | **frame 2** |
+
+Frame number is the clean discriminator (5,5 → 2,2). Wall-clock is noisier on the prewarmed side
+because what remains is simply "when does frame 2 happen" — early startup frames themselves cost
+0.5–8 s — not tree work. Guarded by `gpu/tree_ring_pipeline_cache.test.ts` (4 tests: compile-once,
+per-workgroup-size, per-device, failure-not-cached).
+
+**Still open, NOT tree-owned:** the ~50 s before the first frame (world build ~28 s + renderer
+~22 s). That is a separate startup workstream. Cutting `tree_cull`'s own compile cost is also still
+available if wanted — it inlines `surfaceHeightField` up to ~21× via `tree_height_normal` ×4 plus
+`terrain_ridge_filter`'s ≤16-sample loop — but with the compile off the critical path it no longer
+delays anything visible.
+
+#### Acceptance parity gap found and fixed (the real divergence)
+
+Separately, and genuinely: WGSL `tree_accept_mask` multiplies in **three terms the CPU
+`treeAcceptMask` did not implement** — `forest_cover`, `shoreline_mask`, `competition_mask` — so the
+CPU oracle systematically **over-accepted**. Both CPU callers want GPU parity
+(`tree_ring_validation_counts.ts`, the oracle behind `gpu.debugValidateAgainstCpu`, and
+`tree_ring_lighting_proxies.ts`), and the gap is far larger than the validator's 2 % tolerance, so
+`debugValidateAgainstCpu` could not have been trusted. The CPU fallback patch generator does **not**
+use this function, so no fallback behaviour changed.
+
+FIXED in `tree_ring_math.ts`: ported `treeForestCoverMask`, `treeShorelineDensityMask` and
+`treeLocalCompetitionMask` (plus `treeRingHash`, the sin/fract mirror of WGSL `tree_hash`) and
+multiplied them into `treeAcceptMask`. Guarded by `tree_accept_cpu_gpu_parity.test.ts` (6 tests),
+which pins the shader's multiplicative term list **and its arity**, so a new GPU-only factor fails
+the test instead of silently reopening the gap.
+
+CEILING: deterministic terms only. WGSL also applies `tree_hydrology_bank_density_mask` and
+hard-rejects via `tree_hydrology_reject_tree`, both reading the hydrology texture; the CPU oracle
+has no hydrology sampler, so those stay GPU-only. Per-cell decisions are also not comparable —
+WGSL `tree_hash` is sin/fract while the CPU validation hash is pcg2d — so only aggregate counts
+(what the validator actually compares) line up.

@@ -242,6 +242,70 @@ export function treeGpuRingKey(settings: TreeSettings, worldCells: number): stri
   ].join("|");
 }
 
+interface TreeGpuRingPipelineSet {
+  layout: GPUBindGroupLayout;
+  pipelines: Record<PipelineName, GPUComputePipeline>;
+}
+
+// The shader module, bind group layout and the three pipelines depend only on the device and the
+// workgroup size -- never on the ring's buffers or settings -- and `destroy()` frees only buffers
+// and textures, so one set can be shared by every ring instance on a device. Memoising them makes
+// a ring rebuild (settings change, key change) free instead of re-paying the compile.
+const TREE_GPU_RING_PIPELINE_CACHE = new WeakMap<GPUDevice, Map<number, Promise<TreeGpuRingPipelineSet>>>();
+
+function treeGpuRingPipelineSet(device: GPUDevice, workgroupSize: number): Promise<TreeGpuRingPipelineSet> {
+  let byWorkgroupSize = TREE_GPU_RING_PIPELINE_CACHE.get(device);
+  if (!byWorkgroupSize) {
+    byWorkgroupSize = new Map();
+    TREE_GPU_RING_PIPELINE_CACHE.set(device, byWorkgroupSize);
+  }
+  const cached = byWorkgroupSize.get(workgroupSize);
+  if (cached) return cached;
+  const cache = byWorkgroupSize;
+  // A failed compile must not be cached, or the ring can never recover from a transient error.
+  const created = createTreeGpuRingPipelineSet(device, workgroupSize).catch((error: unknown) => {
+    cache.delete(workgroupSize);
+    throw error;
+  });
+  cache.set(workgroupSize, created);
+  return created;
+}
+
+async function createTreeGpuRingPipelineSet(device: GPUDevice, workgroupSize: number): Promise<TreeGpuRingPipelineSet> {
+  const module = device.createShaderModule({ label: "tree ring compute shader", code: composeTreeRingShader(workgroupSize) });
+  const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
+  const layout = device.createBindGroupLayout({
+  label: "tree ring compute layout",
+  entries: [
+  { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+  storage(1), storage(2), storage(3), storage(4), storage(5), storage(6), storage(7, "read-only-storage"),
+  { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+  { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+  { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: { type: "non-filtering" } },
+  storage(11, "read-only-storage"),
+  storage(12, "read-only-storage"),
+  { binding: 13, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+  { binding: 14, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+  { binding: 15, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "sint" } },
+  { binding: 16, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+  ],
+  });
+  const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
+  const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `tree ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
+  const [clearCounters, cull, buildIndirectArgs] = await Promise.all([makePipeline("clear_counters"), makePipeline("tree_cull"), makePipeline("build_indirect_args")]);
+  return { layout, pipelines: { clear_counters: clearCounters, tree_cull: cull, build_indirect_args: buildIndirectArgs } };
+}
+
+// `tree_cull` takes ~9s to compile (the other two entry points take ~1.4s), and the ring only
+// asks for it on the first frame that updates trees -- so the ring stays on the CPU fallback,
+// showing near/mid patches only, for ~12s after the first frame. Kicking the compile off as soon
+// as the device exists hides it under world build/first-frame latency.
+export function prewarmTreeGpuRingPipelines(device: GPUDevice, workgroupSize: number): void {
+  void treeGpuRingPipelineSet(device, workgroupSize).catch(() => {
+    // Surfaced by the ring's own failure path when it actually needs the pipelines.
+  });
+}
+
 export function treeGpuRingComputeUnsupportedReason(device: GPUDevice): string | null {
   const maxStorageBuffers = device.limits.maxStorageBuffersPerShaderStage;
   if (maxStorageBuffers >= TREE_GPU_RING_STORAGE_BINDINGS) return null;
@@ -430,28 +494,8 @@ export class TreeGpuRingCompute {
   }
 
   static async create(device: GPUDevice, edits: readonly ResolvedDigEdit[], outputBuffers: TreeGpuRingOutputBuffers, settings: TreeSettings, hydroData: TreeHydrologyData | null = null): Promise<TreeGpuRingCompute> {
-    const module = device.createShaderModule({ label: "tree ring compute shader", code: composeTreeRingShader(treeGpuRingWorkgroupSize(settings)) });
-    const storage = (binding: number, type: GPUBufferBindingType = "storage"): GPUBindGroupLayoutEntry => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
-    const layout = device.createBindGroupLayout({
-    label: "tree ring compute layout",
-    entries: [
-    { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-    storage(1), storage(2), storage(3), storage(4), storage(5), storage(6), storage(7, "read-only-storage"),
-    { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-    { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
-    { binding: 10, visibility: GPUShaderStage.COMPUTE, sampler: { type: "non-filtering" } },
-    storage(11, "read-only-storage"),
-    storage(12, "read-only-storage"),
-    { binding: 13, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
-    { binding: 14, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
-    { binding: 15, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "sint" } },
-    { binding: 16, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
-    ],
-    });
-    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
-    const makePipeline = (entryPoint: PipelineName) => device.createComputePipelineAsync({ label: `tree ring ${entryPoint}`, layout: pipelineLayout, compute: { module, entryPoint } });
-    const [clearCounters, cull, buildIndirectArgs] = await Promise.all([makePipeline("clear_counters"), makePipeline("tree_cull"), makePipeline("build_indirect_args")]);
-    return new TreeGpuRingCompute(device, layout, { clear_counters: clearCounters, tree_cull: cull, build_indirect_args: buildIndirectArgs }, edits, outputBuffers, { ...settings }, hydroData ?? defaultTreeHydrologyData);
+    const { layout, pipelines } = await treeGpuRingPipelineSet(device, treeGpuRingWorkgroupSize(settings));
+    return new TreeGpuRingCompute(device, layout, pipelines, edits, outputBuffers, { ...settings }, hydroData ?? defaultTreeHydrologyData);
   }
 
   dispatch(params: TreeGpuRingDispatchParams): boolean {

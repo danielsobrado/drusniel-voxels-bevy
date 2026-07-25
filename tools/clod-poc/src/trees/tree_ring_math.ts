@@ -6,6 +6,11 @@ import { treeMaterialDensityVector } from "./tree_material_bias.js";
 import { clamp, clamp01, smoothstep } from "./tree_noise.js";
 import { treePcg2d01 } from "../vegetation/gpu_authority/pcg2d.js";
 
+// Mirrors TREE_GPU_RING_CELL (gpu/tree_ring_compute.ts), packed into WGSL `settings_a.x` and
+// used there as the local-competition cell size. Duplicated rather than imported to avoid an
+// import cycle; tree_accept_cpu_gpu_parity.test.ts asserts the two stay equal.
+export const TREE_RING_COMPETITION_CELL_M = 3.4;
+
 export interface TreeRingAcceptParams {
   seed: number;
   minHeightM: number;
@@ -128,7 +133,60 @@ export function treeAcceptMask(
   const upperHeight = 1 - smoothstep(params.highlandHeightM, params.highlandHeightM + params.heightFadeM, height);
   const slopeMask = smoothstep(params.slopeFadeStartY, params.slopeFadeEndY, normalY);
   const clumpMask = treeParentClumpMask(worldX, worldZ, params);
-  return clamp01(params.baseDensity * lowerHeight * upperHeight * slopeMask * materialMask * clumpMask);
+  const forestCover = treeForestCoverMask(worldX, worldZ, params);
+  const shorelineMask = treeShorelineDensityMask(height, normalY, params);
+  const competitionMask = treeLocalCompetitionMask(worldX, worldZ, params);
+  return clamp01(
+    params.baseDensity * lowerHeight * upperHeight * slopeMask * materialMask * clumpMask
+      * forestCover * shorelineMask * competitionMask,
+  );
+}
+
+// The three masks below mirror `tree_forest_cover_mask` / `tree_shoreline_density_mask` /
+// `tree_local_competition_mask` in tree_ring.compute.wgsl. They are multiplied into the WGSL
+// `tree_accept_mask` result, so omitting them here made the CPU oracle systematically
+// over-accept relative to the GPU ring. Guarded by tree_accept_cpu_gpu_parity.test.ts.
+export function treeForestCoverMask(worldX: number, worldZ: number, params: TreeRingAcceptParams): number {
+  const broad = treePcg2d(Math.floor(worldX / 176), Math.floor(worldZ / 176), params.seed + 17011)[0];
+  const mid = treePcg2d(Math.floor(worldX / 64), Math.floor(worldZ / 64), params.seed + 19031)[1];
+  const clearing = smoothstep(0.62, 0.92, broad) * smoothstep(0.44, 0.86, mid);
+  return clamp(1 - clearing * 0.78, 0.18, 1);
+}
+
+export function treeShorelineDensityMask(height: number, normalY: number, params: TreeRingAcceptParams): number {
+  const waterMargin = height - WATER_LEVEL;
+  const dryBank = smoothstep(params.waterClearanceM, params.waterClearanceM + 7, waterMargin);
+  const lowlandMoisture = 1 - clamp01(waterMargin / 36);
+  const bankHealth = smoothstep(params.slopeFadeStartY, params.slopeFadeEndY, normalY);
+  const riparianBoost = 0.92 + (1.18 - 0.92) * (lowlandMoisture * bankHealth);
+  return clamp(dryBank * riparianBoost, 0, 1.18);
+}
+
+export function treeLocalCompetitionMask(worldX: number, worldZ: number, params: TreeRingAcceptParams): number {
+  // WGSL passes `floor(wpos / cell_size)` as the competition cell.
+  const cellX = Math.floor(worldX / TREE_RING_COMPETITION_CELL_M);
+  const cellZ = Math.floor(worldZ / TREE_RING_COMPETITION_CELL_M);
+  const current = treeRingHash(cellX, cellZ, 7103, params) + treeParentClumpMask(worldX, worldZ, params) * 0.08;
+  let strongerNeighbors = 0;
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dz === 0) continue;
+      const score = treeRingHash(cellX + dx, cellZ + dz, 7103, params)
+        + treeRingHash(cellX + dx, cellZ + dz, 7201, params) * 0.08;
+      if (score > current + 0.18) strongerNeighbors++;
+    }
+  }
+  const pressure = clamp01(strongerNeighbors / 8);
+  return 1.05 + (0.72 - 1.05) * pressure;
+}
+
+// Mirrors WGSL `tree_hash`: a sin/fract hash, distinct from the pcg2d family used for clumping.
+function treeRingHash(cellX: number, cellZ: number, salt: number, params: TreeRingAcceptParams): number {
+  const seed = params.seed;
+  const x = cellX + seed + salt;
+  const z = cellZ + seed * 0.37 + salt * 1.17;
+  const value = Math.sin(x * 41.3 + z * 289.1) * 43758.5453;
+  return value - Math.floor(value);
 }
 
 export function treeParentClumpMask(worldX: number, worldZ: number, params: TreeRingAcceptParams): number {
