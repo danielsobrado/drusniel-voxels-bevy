@@ -276,6 +276,19 @@ declare global {
     __drusnielClod?: ClodHooks;
     __drusnielStartupTimings?: Record<string, number>;
     __drusnielWorldMode?: import("../app/world_mode.js").WorldModeConfig;
+    __drusnielAzgaarImport?: {
+      mapName: string;
+      warnings: string[];
+      atlas: { width: number; height: number };
+      physical: {
+        widthMeters: number;
+        heightMeters: number;
+        distanceScale: number;
+        distanceUnit: string;
+      };
+      burgCount: number;
+      riverCount: number;
+    };
     __drusnielWorldManifest?: WorldManifest;
     __drusnielFarOwnership?: import("../app/far_ownership.js").FarOwnershipSummary;
     __drusnielAcceptanceWorldCacheKey?: import("../cache/acceptanceWorldCacheKey.js").AcceptanceWorldCacheKey;

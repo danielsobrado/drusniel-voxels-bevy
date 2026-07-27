@@ -19,6 +19,7 @@ pub mod terrain_bridge;
 pub mod terrain_source_config;
 pub mod terrain_source_diagnostics;
 pub mod world_source;
+pub mod azgaar;
 
 #[cfg(test)]
 mod golden_fixture_tests;
@@ -80,4 +81,9 @@ pub use terrain_source_diagnostics::{
 pub use world_source::{
     ProceduralWorldSource, TerrainFieldConfig, WORLD_SOURCE_CONFIG_PATH, WorldSource,
     WorldSourceBounds, WorldSourceMetadata,
+};
+pub use azgaar::{
+    AZGAAR_MACRO_SOURCE_KIND, AzgaarImportConfig, AzgaarImportOptions, AzgaarImportedWorld,
+    AzgaarMacroWorldGenerator, AzgaarMacroWorldSource, AzgaarWorldSource, AzgaarWorldSourceOptions,
+    import_azgaar_full_json, is_azgaar_full_json,
 };

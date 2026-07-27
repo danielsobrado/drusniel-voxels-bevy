@@ -1,0 +1,102 @@
+.clod-minimap {
+  position: fixed;
+  z-index: 4;
+  top: 12px;
+  right: 12px;
+  width: 188px;
+  padding: 8px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 12px;
+  background: rgb(16 23 19 / 88%);
+  box-shadow: 0 6px 22px rgb(0 0 0 / 38%);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+.clod-minimap__frame {
+  position: relative;
+  aspect-ratio: 1;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 50%;
+  background: #0d120f;
+  --minimap-heading: 0rad;
+}
+
+.clod-minimap__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  transform: rotate(var(--minimap-heading, 0rad));
+}
+
+.clod-minimap__burgs {
+  position: absolute;
+  inset: 0;
+  transform: rotate(var(--minimap-heading, 0rad));
+  pointer-events: none;
+}
+
+.clod-minimap__burg {
+  position: absolute;
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  transform: translate(-50%, -50%) rotate(calc(-1 * var(--minimap-heading, 0rad)));
+}
+
+.clod-minimap__burg-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 70%);
+}
+
+.clod-minimap__burg-name {
+  color: #f3ecd4;
+  font-size: 9px;
+  line-height: 1;
+  text-shadow: 0 0 3px #000, 0 0 2px #000;
+  white-space: nowrap;
+}
+
+.clod-minimap__burg.is-capital .clod-minimap__burg-dot {
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 0 1px #14190f, 0 0 0 2px rgb(240 207 104 / 85%);
+}
+
+.clod-minimap__burg.is-capital .clod-minimap__burg-name {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.clod-minimap__burg.is-offscreen {
+  opacity: 0.72;
+}
+
+.clod-minimap__burg.is-offscreen .clod-minimap__burg-dot {
+  width: 4px;
+  height: 4px;
+}
+
+/* Fixed forward arrow: the map turns under it, this always points up. */
+.clod-minimap__needle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translate(-50%, -58%);
+  border-right: 5px solid transparent;
+  border-bottom: 11px solid #f0cf68;
+  border-left: 5px solid transparent;
+  filter: drop-shadow(0 0 2px rgb(0 0 0 / 75%));
+  pointer-events: none;
+}
+
+body[data-player-mode="playing"] .clod-minimap {
+  opacity: 1;
+}

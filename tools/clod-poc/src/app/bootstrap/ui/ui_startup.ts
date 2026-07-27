@@ -11,8 +11,15 @@ import { applyImportedStateSideEffects } from "./imported_state_startup.js";
 import { runFrameLoopStartup } from "./frame_loop_startup.js";
 import { bindBootstrapDisposal } from "../disposal_startup.js";
 import "../../../ui/hud_layout.css";
+import { createCircularMinimap } from "../../../ui/minimap.js";
 
 export type { UiStartupInput } from "../ui_startup_context.js";
+
+function minimapEnabled(searchParams: URLSearchParams): boolean {
+  const raw = searchParams.get("minimap");
+  if (raw === "0" || raw === "false" || raw === "off") return false;
+  return true;
+}
 
 export async function runUiStartup(input: UiStartupInput): Promise<void> {
   const ctx = createUiStartupContext(input);
@@ -28,6 +35,25 @@ export async function runUiStartup(input: UiStartupInput): Promise<void> {
   runPropEditUiStartup(ctx, gui.gui);
   runProjectArchiveStartup(ctx, infoPanel, terrainEdit);
   applyImportedStateSideEffects(ctx, infoPanel);
+
+  if (minimapEnabled(input.searchParams)) {
+    const cells = Number(input.searchParams.get("minimapCells") ?? 192);
+    const minimap = createCircularMinimap({
+      cells: Number.isFinite(cells) && cells > 0 ? cells : 192,
+      getPose: () => input.longView.hooks?.getPose?.() ?? window.__drusnielClod?.getPose?.() ?? null,
+    });
+    let raf = 0;
+    const tick = () => {
+      minimap.tick();
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    window.addEventListener("beforeunload", () => {
+      cancelAnimationFrame(raf);
+      minimap.dispose();
+    }, { once: true });
+  }
+
   runFrameLoopStartup(ctx, infoPanel, terrainEdit);
   bindBootstrapDisposal(ctx);
   if (input.stagedImport) completeProjectImportRecovery();

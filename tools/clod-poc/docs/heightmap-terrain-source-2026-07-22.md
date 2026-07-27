@@ -2,6 +2,8 @@
 
 Load an external grayscale heightmap (for example an [Azgaar Fantasy-Map-Generator](https://github.com/Azgaar/Fantasy-Map-Generator) export) and use it as the terrain of a **finite** world. The heightmap fully replaces the analytic low-frequency shape (continent / mountains / hills / valleys / island) with a bilinear sample of the raster plus a small procedural micro-relief, while the engine's water, hydrology, materials, props, and lighting continue to run on top.
 
+For **Full JSON** Azgaar exports (macro atlas + biomes + campaign), use [`azgaar-map-loader-2026-07-27.md`](./azgaar-map-loader-2026-07-27.md) (`?azgaar=/maps/...json`). That path converts the macro height atlas into this same `HeightmapSource`.
+
 Status: implemented and verified under WebGPU on 2026-07-22.
 
 ---

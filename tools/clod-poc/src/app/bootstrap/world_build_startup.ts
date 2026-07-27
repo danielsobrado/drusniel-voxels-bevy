@@ -31,6 +31,10 @@ import {
   setHeightmapSource,
   type HeightmapSource,
 } from "../../terrain/heightmap_source.js";
+import {
+  defaultAzgaarImportConfig,
+  loadAzgaarFullJsonUrl,
+} from "../../world_source/azgaar/index.js";
 import type { TerrainSummaryField } from "../../clod/terrain_summary.js";
 import { createBakedMacroTintTexture } from "../../gpu/terrain_node_baked_macro_tint.js";
 import { parseProceduralTextureConfig } from "../../textures/materialRecipes.js";
@@ -198,11 +202,15 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   const seaLevel = numberParam(searchParams, ["seaLevel", "sea_level"]) ?? 18;
   // Imported finite-world heightmap (e.g. an Azgaar Fantasy-Map-Generator grayscale export).
   // Vertical mapping defaults put luminance 0.2 (FMG sea level 20/100) at the engine sea level.
+  // Prefer `azgaar=` (Full JSON → macro atlas → HeightmapSource) when both are present.
+  const azgaarUrl = searchParams.get("azgaar") ?? searchParams.get("azgaarMap");
   const heightmapUrl = searchParams.get("heightmap");
   const heightmapBaseM = numberParam(searchParams, ["heightmapBaseM"]) ?? 0;
   const heightmapSpanM = numberParam(searchParams, ["heightmapSpanM"]) ?? 90;
   const heightmapDetailM = numberParam(searchParams, ["heightmapDetail"]) ?? 1.2;
   const heightmapFlipZ = booleanParam(searchParams, ["heightmapFlipZ"], false);
+  const azgaarAtlasLongEdge = numberParam(searchParams, ["azgaarAtlasLongEdge"]) ?? 1024;
+  const azgaarPhysicalWidthM = numberParam(searchParams, ["azgaarPhysicalWidthM"]);
   const isInfiniteIslands = sceneName === INFINITE_ISLANDS_SCENE;
   const isContinent = sceneName === CONTINENT_SCENE || sceneName === CAVE_TEST_SCENE;
   const isStreamedWorld = isInfiniteIslands || isContinent;
@@ -244,7 +252,36 @@ export async function runWorldBuildStartup(input: WorldBuildStartupInput): Promi
   // raster in the buildWorld request below. It fully replaces the analytic field and its coast,
   // so the finite border coast is disabled (heightmapEnabled -> borderCoast off).
   let heightmapSource: HeightmapSource | null = null;
-  if (heightmapUrl) {
+  if (azgaarUrl) {
+    const loaded = await measureAsync(startupTimings, "startup.azgaar_load_ms", () =>
+      loadAzgaarFullJsonUrl(azgaarUrl, {
+        worldCells,
+        config: defaultAzgaarImportConfig({
+          atlasLongEdge: azgaarAtlasLongEdge,
+          seaLevel,
+        }),
+        physicalWidthMeters: azgaarPhysicalWidthM ?? undefined,
+        heightmap: {
+          baseM: heightmapBaseM,
+          spanM: heightmapSpanM,
+          flipZ: heightmapFlipZ,
+          detailM: heightmapDetailM,
+          seed,
+        },
+      }));
+    heightmapSource = loaded.heightmap;
+    window.__drusnielAzgaarImport = {
+      mapName: loaded.imported.campaign.source.mapName,
+      warnings: loaded.imported.importWarnings,
+      atlas: {
+        width: loaded.imported.baseTerrain.atlas.width,
+        height: loaded.imported.baseTerrain.atlas.height,
+      },
+      physical: loaded.imported.baseTerrain.physical,
+      burgCount: loaded.imported.campaign.burgs.length,
+      riverCount: loaded.imported.campaign.rivers.length,
+    };
+  } else if (heightmapUrl) {
     heightmapSource = await measureAsync(startupTimings, "startup.heightmap_load_ms", () =>
       loadHeightmapSource(heightmapUrl, {
         worldCells,

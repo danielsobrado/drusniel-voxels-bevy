@@ -6516,6 +6516,7 @@ name = "voxel_builder"
 version = "0.1.0"
 dependencies = [
  "avian3d",
+ "base64 0.22.1",
  "bevy",
  "bevy-inspector-egui",
  "bevy-tnua",

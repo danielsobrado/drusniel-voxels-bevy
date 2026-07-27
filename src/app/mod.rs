@@ -33,6 +33,7 @@ use crate::terrain::TerrainToolsPlugin;
 use crate::ui::chat::ChatPlugin;
 use crate::ui::inventory::InventoryUiPlugin;
 use crate::ui::map::MapPlugin;
+use crate::ui::minimap::MinimapPlugin;
 use crate::ui::menu::PauseMenuPlugin;
 use crate::voxel::plugin::VoxelPlugin;
 use crate::world::environment::AtmospherePlugin;
@@ -221,6 +222,7 @@ pub fn run() {
             .add_plugins(InteractionPlugin)
             .add_plugins(PickaxePlugin)
             .add_plugins(MapPlugin)
+            .add_plugins(MinimapPlugin)
             .add_plugins(InventoryUiPlugin)
             .add_plugins(ChatPlugin)
             .add_plugins(PauseMenuPlugin)
@@ -235,6 +237,7 @@ pub fn run() {
             .add_plugins(InteractionPlugin)
             .add_plugins(PickaxePlugin)
             .add_plugins(MapPlugin)
+            .add_plugins(MinimapPlugin)
             .add_plugins(InventoryUiPlugin)
             .add_plugins(ChatPlugin)
             .add_plugins(PauseMenuPlugin)
