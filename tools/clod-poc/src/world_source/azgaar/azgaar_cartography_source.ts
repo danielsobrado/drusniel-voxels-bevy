@@ -4,6 +4,7 @@ const BINARY_ENCODING = 'base64-le-v1' as const;
 const MAX_VERTEX_COUNT = 2_000_000;
 const MAX_CELL_COUNT = 1_000_000;
 const MAX_VERTEX_REFERENCE_COUNT = 12_000_000;
+const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 type NumberFormatName = 'u8' | 'u32' | 'f32';
 type NumericArray = Uint8Array | Uint32Array | Float32Array;
@@ -122,6 +123,9 @@ function maximumBase64Length(decodedBytes: number): number {
 function base64ToBytes(value: unknown, label: string, maximumDecodedBytes: number): Uint8Array {
   if (typeof value !== 'string') {
     throw new Error(`Azgaar cartography ${label} must be a base64 string.`);
+  }
+  if (!BASE64_PATTERN.test(value)) {
+    throw new Error(`Azgaar cartography ${label} is not valid base64.`);
   }
   if (value.length > maximumBase64Length(maximumDecodedBytes)) {
     throw new Error(`Azgaar cartography ${label} exceeds its expected size.`);
