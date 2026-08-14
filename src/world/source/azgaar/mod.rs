@@ -84,7 +84,7 @@ impl AzgaarWorldSource {
                 height_scale: 1.0,
                 sea_level: options.terrain.sea_level,
             },
-        );
+        )?;
         let biome_by_tile = source
             .biomes
             .iter()
