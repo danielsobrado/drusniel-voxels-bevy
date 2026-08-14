@@ -5,6 +5,9 @@ export const MAX_NODE_LABELS = 64;
 
 interface LabelRecord {
   element: HTMLElement;
+  title: HTMLElement;
+  detail: HTMLElement;
+  error: HTMLElement;
   nodeId: string;
 }
 
@@ -70,15 +73,13 @@ export class NodeLabelOverlay {
       if (label.nodeId !== node.id) {
         label.nodeId = node.id;
         label.element.dataset.level = String(node.level);
+        label.title.textContent = node.id;
       }
       const x = (this.scratch.x * 0.5 + 0.5) * width;
       const y = (-this.scratch.y * 0.5 + 0.5) * height;
       label.element.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
-      label.element.innerHTML = `
-        <strong>${node.id}</strong>
-        <span>L${node.level} · ${shortFootprint(node)}</span>
-        <span>err ${node.errorWorld.toFixed(3)}w · ${errorPx.toFixed(2)}px</span>
-      `;
+      label.detail.textContent = `L${node.level} · ${shortFootprint(node)}`;
+      label.error.textContent = `err ${node.errorWorld.toFixed(3)}w · ${errorPx.toFixed(2)}px`;
     }
   }
 
@@ -86,8 +87,12 @@ export class NodeLabelOverlay {
     while (this.labels.length < count) {
       const element = document.createElement("div");
       element.className = "clod-node-label";
+      const title = document.createElement("strong");
+      const detail = document.createElement("span");
+      const error = document.createElement("span");
+      element.append(title, detail, error);
       this.root.appendChild(element);
-      this.labels.push({ element, nodeId: "" });
+      this.labels.push({ element, title, detail, error, nodeId: "" });
     }
     for (let i = count; i < this.labels.length; i++) {
       this.labels[i].element.hidden = true;
