@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { decodeMacroAtlas, type AzgaarMacroWorldSource } from "./azgaar_macro_world_source.js";
 import type { AzgaarBiomeDefinition } from "./azgaar_biome_catalog.js";
 
@@ -9,26 +8,49 @@ export interface AzgaarProceduralMetadata {
   seaLevel: number;
 }
 
+interface RiverSegment {
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+  width: number;
+}
+
+interface AzgaarTileDefinition {
+  id: number;
+  key: string;
+  label: string;
+  color: string;
+  icon: string;
+  terrainClass: AzgaarBiomeDefinition["terrainClass"];
+  supportsGrass: boolean;
+  supportsTrees: boolean;
+  azgaarSourceId: number;
+}
+
+export interface AzgaarMacroColumn {
+  height: number;
+  tileId: number;
+}
+
 const WATER_TILE_ID = 0;
 const LAND_HEIGHT = 20;
-// Fraction of the vertical exaggeration that also drives high-frequency
-// ruggedness. Keeps peaks jagged without turning them into unwalkable spikes.
 const MOUNTAIN_RUGGEDNESS = 0.25;
 
-function clamp(value, minimum, maximum) {
+function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-function lerp(left, right, amount) {
+function lerp(left: number, right: number, amount: number): number {
   return left + (right - left) * amount;
 }
 
-function smoothstep(value) {
+function smoothstep(value: number): number {
   const t = clamp(value, 0, 1);
   return t * t * (3 - 2 * t);
 }
 
-function hash2d(x, z, seed) {
+function hash2d(x: number, z: number, seed: number): number {
   let value = Math.imul(x | 0, 0x1f123bb5) ^ Math.imul(z | 0, 0x5f356495) ^ (seed | 0);
   value = Math.imul(value ^ (value >>> 15), 0x2c1b3c6d);
   value = Math.imul(value ^ (value >>> 12), 0x297a2d39);
@@ -36,7 +58,7 @@ function hash2d(x, z, seed) {
   return (value >>> 0) / 0xffffffff;
 }
 
-function valueNoise(x, z, seed) {
+function valueNoise(x: number, z: number, seed: number): number {
   const x0 = Math.floor(x);
   const z0 = Math.floor(z);
   const tx = smoothstep(x - x0);
@@ -46,7 +68,14 @@ function valueNoise(x, z, seed) {
   return lerp(north, south, tz) * 2 - 1;
 }
 
-function pointSegmentDistance(px, py, ax, ay, bx, by) {
+function pointSegmentDistance(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
   const dx = bx - ax;
   const dy = by - ay;
   const lengthSquared = dx * dx + dy * dy;
@@ -55,27 +84,41 @@ function pointSegmentDistance(px, py, ax, ay, bx, by) {
   return Math.hypot(px - (ax + dx * amount), py - (ay + dy * amount));
 }
 
-function landReliefFraction(rawHeight, terrain) {
+function landReliefFraction(
+  rawHeight: number,
+  terrain: AzgaarMacroWorldSource["terrain"],
+): number {
   const normalized = clamp((rawHeight - LAND_HEIGHT) / (100 - LAND_HEIGHT), 0, 1);
-  const exponent = terrain.reliefExponent ?? 1;
-  return exponent === 1 ? normalized : normalized ** exponent;
+  return terrain.reliefExponent === 1 ? normalized : normalized ** terrain.reliefExponent;
 }
 
-function convertHeight(rawHeight, terrain) {
+function convertHeight(
+  rawHeight: number,
+  terrain: AzgaarMacroWorldSource["terrain"],
+): number {
   if (rawHeight < LAND_HEIGHT) {
     return terrain.minHeight * clamp((LAND_HEIGHT - rawHeight) / LAND_HEIGHT, 0, 1) * 0.35;
   }
-  const exaggeration = terrain.verticalExaggeration ?? 1;
-  return landReliefFraction(rawHeight, terrain) * terrain.maxHeight * 0.85 * exaggeration;
+  return landReliefFraction(rawHeight, terrain)
+    * terrain.maxHeight
+    * 0.85
+    * terrain.verticalExaggeration;
 }
 
-function createRiverIndex(rivers, width, height) {
-  const buckets = new Map();
-  for (const river of rivers ?? []) {
+function createRiverIndex(
+  rivers: AzgaarMacroWorldSource["rivers"],
+  width: number,
+  height: number,
+): Map<string, RiverSegment[]> {
+  const buckets = new Map<string, RiverSegment[]>();
+  for (const river of rivers) {
     for (let index = 1; index < river.points.length; index += 1) {
-      const [ax, ay] = river.points[index - 1];
-      const [bx, by] = river.points[index];
-      const segment = { ax, ay, bx, by, width: river.widthAtlas };
+      const previous = river.points[index - 1];
+      const current = river.points[index];
+      if (!previous || !current) continue;
+      const [ax, ay] = previous;
+      const [bx, by] = current;
+      const segment: RiverSegment = { ax, ay, bx, by, width: river.widthAtlas };
       const margin = Math.max(0.5, river.widthAtlas);
       const minX = clamp(Math.floor(Math.min(ax, bx) - margin), 0, width - 1);
       const maxX = clamp(Math.floor(Math.max(ax, bx) + margin), 0, width - 1);
@@ -94,15 +137,15 @@ function createRiverIndex(rivers, width, height) {
   return buckets;
 }
 
-function validateBiomeDefinitions(definitions) {
-  if (!Array.isArray(definitions) || definitions.length < 13) {
+function validateBiomeDefinitions(definitions: readonly AzgaarBiomeDefinition[]): void {
+  if (definitions.length < 13) {
     throw new Error('Azgaar macro source must include its biome definitions.');
   }
-  const sourceIds = new Set();
-  const tileIds = new Set();
+  const sourceIds = new Set<number>();
+  const tileIds = new Set<number>();
   for (const definition of definitions) {
     if (
-      !Number.isInteger(definition?.sourceId)
+      !Number.isInteger(definition.sourceId)
       || definition.sourceId < 0
       || definition.sourceId > 255
       || sourceIds.has(definition.sourceId)
@@ -119,9 +162,7 @@ function validateBiomeDefinitions(definitions) {
       throw new Error('Azgaar macro source has invalid or duplicate biome terrain ids.');
     }
     if (
-      typeof definition.name !== 'string'
-      || definition.name.trim() === ''
-      || typeof definition.color !== 'string'
+      definition.name.trim() === ''
       || !/^#[0-9a-f]{6}$/i.test(definition.color)
     ) {
       throw new Error(`Azgaar macro source has invalid metadata for biome ${definition.sourceId}.`);
@@ -138,13 +179,24 @@ function validateBiomeDefinitions(definitions) {
 }
 
 export class AzgaarMacroWorldGenerator {
-  constructor(source, proceduralMetadata) {
+  readonly source: AzgaarMacroWorldSource;
+  readonly seed: number;
+  readonly version: number;
+  readonly heightScale: number;
+  readonly seaLevel: number;
+
+  private readonly heights: Uint8Array;
+  private readonly biomeAtlas: Uint8Array;
+  private readonly biomeBySourceId: Map<number, AzgaarBiomeDefinition>;
+  private readonly tileDefinitionById: Map<number, Readonly<AzgaarTileDefinition>>;
+  private readonly riverIndex: Map<string, RiverSegment[]>;
+
+  constructor(source: AzgaarMacroWorldSource, proceduralMetadata: AzgaarProceduralMetadata) {
     const decoded = decodeMacroAtlas(source);
     validateBiomeDefinitions(source.biomes);
     this.source = source;
     this.heights = decoded.heights;
     this.biomeAtlas = decoded.biomes;
-    this.features = decoded.features;
     this.biomeBySourceId = new Map(
       source.biomes.map((definition) => [definition.sourceId, definition]),
     );
@@ -178,7 +230,7 @@ export class AzgaarMacroWorldGenerator {
     );
   }
 
-  toMetadata() {
+  toMetadata(): Readonly<AzgaarProceduralMetadata> {
     return Object.freeze({
       seed: this.seed,
       version: this.version,
@@ -187,15 +239,17 @@ export class AzgaarMacroWorldGenerator {
     });
   }
 
-  toBaseTerrain() {
+  toBaseTerrain(): AzgaarMacroWorldSource {
     return structuredClone(this.source);
   }
 
-  getTileDefinition(tileId) {
+  getTileDefinition(tileId: number): Readonly<AzgaarTileDefinition> | null {
     return this.tileDefinitionById.get(tileId) ?? null;
   }
 
-  getSurfaceMaskConfig(maskConfig) {
+  getSurfaceMaskConfig<T extends object>(
+    maskConfig: T,
+  ): T & { waterTileId: number; grassTileIds: number[] } {
     return {
       ...maskConfig,
       waterTileId: WATER_TILE_ID,
@@ -205,7 +259,7 @@ export class AzgaarMacroWorldGenerator {
     };
   }
 
-  toAtlasPosition(cellX, cellZ) {
+  toAtlasPosition(cellX: number, cellZ: number): { x: number; y: number } {
     const { bounds, atlas } = this.source;
     return {
       x: (cellX - bounds.minCellX) / bounds.widthCells * atlas.width,
@@ -213,7 +267,7 @@ export class AzgaarMacroWorldGenerator {
     };
   }
 
-  isInside(cellX, cellZ) {
+  isInside(cellX: number, cellZ: number): boolean {
     const { bounds } = this.source;
     return cellX >= bounds.minCellX
       && cellZ >= bounds.minCellZ
@@ -221,14 +275,14 @@ export class AzgaarMacroWorldGenerator {
       && cellZ < bounds.minCellZ + bounds.heightCells;
   }
 
-  atlasIndex(x, y) {
+  atlasIndex(x: number, y: number): number {
     const { width, height } = this.source.atlas;
     const clampedX = clamp(x, 0, width - 1);
     const clampedY = clamp(y, 0, height - 1);
     return clampedY * width + clampedX;
   }
 
-  sampleRawHeight(cellX, cellZ) {
+  sampleRawHeight(cellX: number, cellZ: number): number {
     const { width, height } = this.source.atlas;
     const position = this.toAtlasPosition(cellX, cellZ);
     const fx = clamp(position.x - 0.5, 0, width - 1);
@@ -238,19 +292,19 @@ export class AzgaarMacroWorldGenerator {
     const x1 = Math.min(width - 1, x0 + 1);
     const y1 = Math.min(height - 1, y0 + 1);
     const north = lerp(
-      this.heights[this.atlasIndex(x0, y0)],
-      this.heights[this.atlasIndex(x1, y0)],
+      this.heights[this.atlasIndex(x0, y0)] ?? 0,
+      this.heights[this.atlasIndex(x1, y0)] ?? 0,
       fx - x0,
     );
     const south = lerp(
-      this.heights[this.atlasIndex(x0, y1)],
-      this.heights[this.atlasIndex(x1, y1)],
+      this.heights[this.atlasIndex(x0, y1)] ?? 0,
+      this.heights[this.atlasIndex(x1, y1)] ?? 0,
       fx - x0,
     );
     return lerp(north, south, fy - y0);
   }
 
-  outsideDistance(cellX, cellZ) {
+  outsideDistance(cellX: number, cellZ: number): number {
     const { bounds } = this.source;
     const maxX = bounds.minCellX + bounds.widthCells;
     const maxZ = bounds.minCellZ + bounds.heightCells;
@@ -260,7 +314,7 @@ export class AzgaarMacroWorldGenerator {
     );
   }
 
-  sampleHeight(vertexX, vertexZ) {
+  sampleHeight(vertexX: number, vertexZ: number): number {
     const rawHeight = this.sampleRawHeight(vertexX, vertexZ);
     const base = convertHeight(rawHeight, this.source.terrain);
     if (!this.isInside(vertexX, vertexZ)) {
@@ -271,10 +325,7 @@ export class AzgaarMacroWorldGenerator {
     }
     if (rawHeight < LAND_HEIGHT) return base;
     const coastFade = clamp((rawHeight - LAND_HEIGHT) / 10, 0, 1);
-    // Rugged high country: extra relief grows with elevation and exaggeration
-    // so peaks stay jagged while plains stay smooth. ruggedness === 1 when
-    // verticalExaggeration === 1, keeping unscaled imports bit-identical.
-    const exaggeration = this.source.terrain.verticalExaggeration ?? 1;
+    const exaggeration = this.source.terrain.verticalExaggeration;
     const elevationFraction = landReliefFraction(rawHeight, this.source.terrain);
     const ruggedness = 1 + (exaggeration - 1) * elevationFraction * MOUNTAIN_RUGGEDNESS;
     const detail = (
@@ -284,9 +335,7 @@ export class AzgaarMacroWorldGenerator {
     return base + detail * coastFade * ruggedness;
   }
 
-  // Coarse macro sample (base height without the high-frequency detail noise,
-  // plus the biome tile) for distant-terrain backdrops and overview rendering.
-  sampleMacroColumn(cellX, cellZ) {
+  sampleMacroColumn(cellX: number, cellZ: number): AzgaarMacroColumn {
     const rawHeight = this.sampleRawHeight(cellX, cellZ);
     let height = convertHeight(rawHeight, this.source.terrain);
     if (!this.isInside(cellX, cellZ)) {
@@ -298,7 +347,7 @@ export class AzgaarMacroWorldGenerator {
     return { height, tileId: this.sampleTile(cellX, cellZ) };
   }
 
-  isRiver(cellX, cellZ) {
+  isRiver(cellX: number, cellZ: number): boolean {
     const position = this.toAtlasPosition(cellX + 0.5, cellZ + 0.5);
     const key = `${Math.floor(position.x)}:${Math.floor(position.y)}`;
     const segments = this.riverIndex.get(key);
@@ -313,13 +362,13 @@ export class AzgaarMacroWorldGenerator {
     ) <= segment.width * 0.5);
   }
 
-  sampleTile(cellX, cellZ) {
+  sampleTile(cellX: number, cellZ: number): number {
     if (!this.isInside(cellX + 0.5, cellZ + 0.5)) return WATER_TILE_ID;
     const position = this.toAtlasPosition(cellX + 0.5, cellZ + 0.5);
     const index = this.atlasIndex(Math.floor(position.x), Math.floor(position.y));
-    const rawHeight = this.heights[index];
+    const rawHeight = this.heights[index] ?? 0;
     if (rawHeight >= LAND_HEIGHT && this.isRiver(cellX, cellZ)) return WATER_TILE_ID;
     if (rawHeight < LAND_HEIGHT) return WATER_TILE_ID;
-    return this.biomeBySourceId.get(this.biomeAtlas[index]).tileId;
+    return this.biomeBySourceId.get(this.biomeAtlas[index] ?? 0)?.tileId ?? WATER_TILE_ID;
   }
 }
