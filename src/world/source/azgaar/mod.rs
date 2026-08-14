@@ -74,8 +74,8 @@ fn terrain_class_to_biome(class: AzgaarTerrainClass) -> BiomeId {
 }
 
 impl AzgaarWorldSource {
-    pub fn new(source: AzgaarMacroWorldSource, options: AzgaarWorldSourceOptions) -> Self {
-        let luminance = azgaar_macro_to_luminance(&source);
+    pub fn new(source: AzgaarMacroWorldSource, options: AzgaarWorldSourceOptions) -> Result<Self, String> {
+        let luminance = azgaar_macro_to_luminance(&source)?;
         let generator = AzgaarMacroWorldGenerator::new(
             source.clone(),
             AzgaarProceduralMetadata {
@@ -97,7 +97,7 @@ impl AzgaarWorldSource {
             ocean_rim: false,
             terrain: options.terrain,
         };
-        Self {
+        Ok(Self {
             metadata,
             generator,
             luminance,
@@ -108,7 +108,7 @@ impl AzgaarWorldSource {
             span_m: options.span_m,
             use_macro_generator_heights: options.use_macro_generator_heights,
             biome_by_tile,
-        }
+        })
     }
 
     fn to_macro_cell(&self, x: f32, z: f32) -> (f32, f32) {
@@ -220,10 +220,7 @@ mod tests {
         })
     }
 
-    #[test]
-    fn detects_and_imports_full_json() {
-        let document = sample_document();
-        assert!(is_azgaar_full_json(&document));
+    fn import_sample() -> AzgaarImportedWorld {
         let config = AzgaarImportConfig {
             tile_size: 2.0,
             atlas_long_edge: Some(4),
@@ -235,8 +232,13 @@ mod tests {
             relief_exponent: 1.0,
             ..AzgaarImportConfig::default()
         };
-        let imported = import_azgaar_full_json(&document, &config, &AzgaarImportOptions::default())
-            .expect("import");
+        import_azgaar_full_json(&sample_document(), &config, &AzgaarImportOptions::default())
+            .expect("import")
+    }
+
+    #[test]
+    fn detects_and_imports_full_json() {
+        let imported = import_sample();
         assert_eq!(imported.base_terrain.kind, AZGAAR_MACRO_SOURCE_KIND);
         assert_eq!(imported.base_terrain.atlas.width, 4);
         assert_eq!(imported.base_terrain.atlas.height, 3);
@@ -248,8 +250,22 @@ mod tests {
                 world_cells: 64.0,
                 ..AzgaarWorldSourceOptions::default()
             },
-        );
+        )
+        .expect("world source");
         let h = world.sample_height(32.0, 32.0);
         assert!(h.is_finite());
+    }
+
+    #[test]
+    fn rejects_corrupt_macro_atlas_during_world_source_construction() {
+        let mut imported = import_sample();
+        imported.base_terrain.atlas.height_data.data = "not-base64".to_string();
+
+        let result = AzgaarWorldSource::new(
+            imported.base_terrain,
+            AzgaarWorldSourceOptions::default(),
+        );
+
+        assert!(result.is_err());
     }
 }
