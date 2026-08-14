@@ -1,4 +1,3 @@
-// @ts-nocheck — exercises the Node launcher .mjs export surface.
 import { describe, expect, it } from "vitest";
 
 describe("normalizeAcceptanceArgs route water", () => {
