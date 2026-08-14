@@ -19,8 +19,7 @@ pub use json_importer::{
 pub use macro_world_generator::{AzgaarMacroWorldGenerator, AzgaarProceduralMetadata};
 pub use macro_world_source::{
     AZGAAR_MACRO_SOURCE_KIND, AzgaarMacroWorldSource, DecodedMacroAtlas, MacroAtlasPayload,
-    build_azgaar_import_summary, create_azgaar_macro_world_source, create_macro_atlas_payload,
-    decode_macro_atlas,
+    create_macro_atlas_payload, decode_macro_atlas,
 };
 
 use crate::world::source::biome_region_field::BiomeId;
