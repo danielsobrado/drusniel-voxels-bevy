@@ -112,13 +112,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
 function isOptionalFiniteNumber(value: unknown): value is number | undefined {
   return value === undefined || (typeof value === "number" && Number.isFinite(value));
 }
 
 function isIntegerArray(value: unknown): value is number[] {
   return Array.isArray(value)
-    && value.every((entry) => Number.isSafeInteger(entry) && entry >= 0);
+    && value.every((entry) => isSafeInteger(entry) && entry >= 0);
 }
 
 function isPoint(value: unknown): value is number[] {
@@ -129,16 +133,16 @@ function isPoint(value: unknown): value is number[] {
 
 function isGridCell(value: unknown, cellCount: number): value is AzgaarFullJsonGridCell {
   if (!isRecord(value)) return false;
-  return Number.isSafeInteger(value.i)
-    && (value.i as number) >= 0
-    && (value.i as number) < cellCount
+  return isSafeInteger(value.i)
+    && value.i >= 0
+    && value.i < cellCount
     && isOptionalFiniteNumber(value.h)
     && isOptionalFiniteNumber(value.f);
 }
 
 function isPackCell(value: unknown): value is AzgaarFullJsonPackCell {
-  if (!isRecord(value) || !Number.isSafeInteger(value.i) || (value.i as number) < 0) return false;
-  if (value.g !== undefined && (!Number.isSafeInteger(value.g) || (value.g as number) < 0)) return false;
+  if (!isRecord(value) || !isSafeInteger(value.i) || value.i < 0) return false;
+  if (value.g !== undefined && (!isSafeInteger(value.g) || value.g < 0)) return false;
   if (!isOptionalFiniteNumber(value.h)
       || !isOptionalFiniteNumber(value.biome)
       || !isOptionalFiniteNumber(value.f)) {
@@ -150,7 +154,7 @@ function isPackCell(value: unknown): value is AzgaarFullJsonPackCell {
 }
 
 function isRiver(value: unknown): value is AzgaarFullJsonRiver {
-  if (!isRecord(value) || !Number.isSafeInteger(value.i) || (value.i as number) < 0) return false;
+  if (!isRecord(value) || !isSafeInteger(value.i) || value.i < 0) return false;
   if (!isOptionalFiniteNumber(value.width)) return false;
   if (value.cells !== undefined && !isIntegerArray(value.cells)) return false;
   if (value.points !== undefined) {
