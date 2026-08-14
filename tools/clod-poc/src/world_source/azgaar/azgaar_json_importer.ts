@@ -72,12 +72,21 @@ export interface AzgaarImportedWorld {
 }
 
 function hasValidGrid(document: AzgaarFullJsonDocument): boolean {
-  return Array.isArray(document.grid?.cells)
-    && document.grid.cells.length > 0
-    && Number.isSafeInteger(document.grid.cellsX)
-    && (document.grid.cellsX ?? 0) > 0
-    && Number.isSafeInteger(document.grid.cellsY)
-    && (document.grid.cellsY ?? 0) > 0;
+  const cells = document.grid?.cells;
+  const cellsX = document.grid?.cellsX;
+  const cellsY = document.grid?.cellsY;
+  if (
+    !Array.isArray(cells)
+    || cells.length === 0
+    || !Number.isSafeInteger(cellsX)
+    || !Number.isSafeInteger(cellsY)
+    || (cellsX ?? 0) < 1
+    || (cellsY ?? 0) < 1
+  ) {
+    return false;
+  }
+  const cellCount = (cellsX as number) * (cellsY as number);
+  return Number.isSafeInteger(cellCount) && cellCount <= 0x7fffffff;
 }
 
 function assertAzgaarDocument(document: AzgaarFullJsonDocument): void {
@@ -87,7 +96,7 @@ function assertAzgaarDocument(document: AzgaarFullJsonDocument): void {
   }
   if (!hasValidGrid(document)) {
     throw new Error(
-      "Azgaar Full JSON must include non-empty grid cells and positive grid dimensions.",
+      "Azgaar Full JSON must include non-empty grid cells and supported positive grid dimensions.",
     );
   }
 }
