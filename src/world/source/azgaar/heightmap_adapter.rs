@@ -16,11 +16,11 @@ impl Default for AzgaarHeightmapOptions {
 }
 
 /// Convert Azgaar raw heights (0–100) into luminance samples in [0, 1].
-pub fn azgaar_macro_to_luminance(source: &AzgaarMacroWorldSource) -> Vec<f32> {
-    let decoded = decode_macro_atlas(source).expect("macro atlas decode");
-    decoded
+pub fn azgaar_macro_to_luminance(source: &AzgaarMacroWorldSource) -> Result<Vec<f32>, String> {
+    let decoded = decode_macro_atlas(source)?;
+    Ok(decoded
         .heights
         .iter()
         .map(|height| f32::from(*height) / 100.0)
-        .collect()
+        .collect())
 }
