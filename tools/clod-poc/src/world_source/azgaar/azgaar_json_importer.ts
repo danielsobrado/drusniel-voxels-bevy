@@ -1,14 +1,44 @@
 import { createAzgaarCartographySource } from "./azgaar_cartography_source.js";
+import type { AzgaarBiomesData } from "./azgaar_biome_catalog.js";
 import {
   buildAzgaarImportSummary,
   createAzgaarMacroWorldSource,
   type AzgaarImportConfig,
   type AzgaarImportOptions,
+  type AzgaarMacroDocument,
   type AzgaarMacroWorldSource,
 } from "./azgaar_macro_world_source.js";
 
 export const AZGAAR_IMPORTED_WORLD_FORMAT = "azgaar-imported-v1" as const;
 export const AZGAAR_IMPORTED_WORLD_VERSION = 1 as const;
+
+interface AzgaarFullJsonGridCell {
+  i: number;
+  h?: number;
+  f?: number;
+}
+
+interface AzgaarFullJsonPackCell extends AzgaarFullJsonGridCell {
+  g?: number;
+  biome?: number;
+  p?: number[];
+  v?: number[];
+  [key: string]: unknown;
+}
+
+interface AzgaarFullJsonRiver {
+  i: number;
+  width?: number;
+  points?: number[][];
+  cells?: number[];
+  [key: string]: unknown;
+}
+
+interface AzgaarFullJsonPack extends Record<string, unknown> {
+  cells?: AzgaarFullJsonPackCell[];
+  rivers?: AzgaarFullJsonRiver[];
+  vertices?: unknown[];
+}
 
 export interface AzgaarFullJsonDocument {
   info?: {
@@ -20,17 +50,24 @@ export interface AzgaarFullJsonDocument {
     height?: number;
     seed?: string | number | null;
   };
-  settings?: Record<string, unknown>;
+  settings?: {
+    mapName?: string;
+    distanceScale?: number;
+    distanceUnit?: string;
+    [key: string]: unknown;
+  };
   grid?: {
-    cells?: unknown[];
+    cells?: AzgaarFullJsonGridCell[];
     cellsX?: number;
     cellsY?: number;
     seed?: string | number | null;
   };
-  pack?: Record<string, unknown>;
-  biomesData?: Record<string, unknown>;
+  pack?: AzgaarFullJsonPack;
+  biomesData?: AzgaarBiomesData;
   notes?: unknown[];
 }
+
+type ValidatedAzgaarDocument = AzgaarFullJsonDocument & AzgaarMacroDocument;
 
 export interface AzgaarCampaign {
   source: {
@@ -71,53 +108,99 @@ export interface AzgaarImportedWorld {
   savedAt: string;
 }
 
-function hasValidGrid(document: AzgaarFullJsonDocument): boolean {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isOptionalFiniteNumber(value: unknown): value is number | undefined {
+  return value === undefined || (typeof value === "number" && Number.isFinite(value));
+}
+
+function isIntegerArray(value: unknown): value is number[] {
+  return Array.isArray(value)
+    && value.every((entry) => Number.isSafeInteger(entry) && entry >= 0);
+}
+
+function isPoint(value: unknown): value is number[] {
+  return Array.isArray(value)
+    && value.length >= 2
+    && value.every((entry) => typeof entry === "number" && Number.isFinite(entry));
+}
+
+function isGridCell(value: unknown, cellCount: number): value is AzgaarFullJsonGridCell {
+  if (!isRecord(value)) return false;
+  return Number.isSafeInteger(value.i)
+    && (value.i as number) >= 0
+    && (value.i as number) < cellCount
+    && isOptionalFiniteNumber(value.h)
+    && isOptionalFiniteNumber(value.f);
+}
+
+function isPackCell(value: unknown): value is AzgaarFullJsonPackCell {
+  if (!isRecord(value) || !Number.isSafeInteger(value.i) || (value.i as number) < 0) return false;
+  if (value.g !== undefined && (!Number.isSafeInteger(value.g) || (value.g as number) < 0)) return false;
+  if (!isOptionalFiniteNumber(value.h)
+      || !isOptionalFiniteNumber(value.biome)
+      || !isOptionalFiniteNumber(value.f)) {
+    return false;
+  }
+  if (value.p !== undefined && !isPoint(value.p)) return false;
+  if (value.v !== undefined && !isIntegerArray(value.v)) return false;
+  return true;
+}
+
+function isRiver(value: unknown): value is AzgaarFullJsonRiver {
+  if (!isRecord(value) || !Number.isSafeInteger(value.i) || (value.i as number) < 0) return false;
+  if (!isOptionalFiniteNumber(value.width)) return false;
+  if (value.cells !== undefined && !isIntegerArray(value.cells)) return false;
+  if (value.points !== undefined) {
+    if (!Array.isArray(value.points) || !value.points.every(isPoint)) return false;
+  }
+  return true;
+}
+
+function hasValidGrid(document: AzgaarFullJsonDocument): document is ValidatedAzgaarDocument {
   const cells = document.grid?.cells;
   const cellsX = document.grid?.cellsX;
   const cellsY = document.grid?.cellsY;
   if (
     !Array.isArray(cells)
     || cells.length === 0
+    || typeof cellsX !== "number"
+    || typeof cellsY !== "number"
     || !Number.isSafeInteger(cellsX)
     || !Number.isSafeInteger(cellsY)
-    || (cellsX ?? 0) < 1
-    || (cellsY ?? 0) < 1
+    || cellsX < 1
+    || cellsY < 1
   ) {
     return false;
   }
-  const cellCount = (cellsX as number) * (cellsY as number);
-  return Number.isSafeInteger(cellCount) && cellCount <= 0x7fffffff;
+  const cellCount = cellsX * cellsY;
+  if (!Number.isSafeInteger(cellCount) || cellCount > 0x7fffffff) return false;
+  return cells.every((cell) => isGridCell(cell, cellCount));
 }
 
-function assertAzgaarDocument(document: AzgaarFullJsonDocument): void {
-  const description = String(document?.info?.description ?? "").toLowerCase();
+function hasValidPack(document: AzgaarFullJsonDocument): boolean {
+  const cells = document.pack?.cells;
+  if (cells !== undefined && (!Array.isArray(cells) || !cells.every(isPackCell))) return false;
+  const rivers = document.pack?.rivers;
+  return rivers === undefined || (Array.isArray(rivers) && rivers.every(isRiver));
+}
+
+function assertAzgaarDocument(
+  document: AzgaarFullJsonDocument,
+): asserts document is ValidatedAzgaarDocument {
+  const description = String(document.info?.description ?? "").toLowerCase();
   if (!description.includes("azgaar's fantasy map generator")) {
     throw new Error("The selected JSON is not an Azgaar Full JSON export.");
   }
   if (!hasValidGrid(document)) {
     throw new Error(
-      "Azgaar Full JSON must include non-empty grid cells and supported positive grid dimensions.",
+      "Azgaar Full JSON must include valid non-empty grid cells and supported positive grid dimensions.",
     );
   }
-}
-
-function validateImportConfig(config: AzgaarImportConfig): void {
-  if (!Number.isFinite(config.map.tileSize) || config.map.tileSize <= 0) {
-    throw new Error("Azgaar tile size must be positive.");
-  }
-  if (
-    !Number.isFinite(config.terrain.minHeight)
-    || !Number.isFinite(config.terrain.maxHeight)
-    || config.terrain.minHeight >= config.terrain.maxHeight
-  ) {
-    throw new Error("Azgaar terrain height range is invalid.");
-  }
-  if (!Number.isFinite(config.world.seaLevel)) {
-    throw new Error("Azgaar sea level must be finite.");
-  }
-  const transitionKm = config.import?.azgaarOceanTransitionKilometers;
-  if (transitionKm !== undefined && (!Number.isFinite(transitionKm) || transitionKm < 0)) {
-    throw new Error("Azgaar ocean transition distance must be non-negative.");
+  if (!hasValidPack(document)) {
+    throw new Error("Azgaar Full JSON contains invalid packed cells or rivers.");
   }
 }
 
@@ -126,7 +209,7 @@ function cloneCampaignArray(value: unknown): unknown[] {
 }
 
 function createCampaign(
-  document: AzgaarFullJsonDocument,
+  document: ValidatedAzgaarDocument,
   baseTerrain: AzgaarMacroWorldSource,
   summary: ReturnType<typeof buildAzgaarImportSummary>,
   cartography: ReturnType<typeof createAzgaarCartographySource> | null,
@@ -137,7 +220,7 @@ function createCampaign(
       version: document.info?.version ?? null,
       mapId: document.info?.mapId ?? null,
       mapName: document.info?.mapName ?? String(document.settings?.mapName ?? "Azgaar world"),
-      seed: document.info?.seed ?? document.grid?.seed ?? null,
+      seed: document.info?.seed ?? document.grid.seed ?? null,
       importedAt: new Date().toISOString(),
       sourceWidth: document.info?.width ?? null,
       sourceHeight: document.info?.height ?? null,
@@ -169,12 +252,14 @@ function createCampaign(
   };
 }
 
-export function isAzgaarFullJson(document: unknown): document is AzgaarFullJsonDocument {
-  const doc = document as AzgaarFullJsonDocument;
-  return String(doc?.info?.description ?? "")
+export function isAzgaarFullJson(document: unknown): document is ValidatedAzgaarDocument {
+  if (!isRecord(document)) return false;
+  const candidate = document as AzgaarFullJsonDocument;
+  return String(candidate.info?.description ?? "")
     .toLowerCase()
     .includes("azgaar's fantasy map generator")
-    && hasValidGrid(doc);
+    && hasValidGrid(candidate)
+    && hasValidPack(candidate);
 }
 
 export function importAzgaarFullJson(
@@ -183,7 +268,6 @@ export function importAzgaarFullJson(
   options: AzgaarImportOptions = {},
 ): AzgaarImportedWorld {
   assertAzgaarDocument(document);
-  validateImportConfig(config);
   const summary = buildAzgaarImportSummary(document, config, options);
   const baseTerrain = createAzgaarMacroWorldSource(document, config, options);
   const cartography = Array.isArray(document.pack?.vertices)
