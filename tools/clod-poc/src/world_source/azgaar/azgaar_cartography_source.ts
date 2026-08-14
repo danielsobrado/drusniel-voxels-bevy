@@ -92,6 +92,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? value as Record<string, unknown> : null;
 }
 
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value);
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   if (typeof Buffer !== 'undefined') {
     return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64');
@@ -411,14 +415,14 @@ export function createAzgaarCartographySource(document: unknown): AzgaarCartogra
 function isEncodedVertices(value: unknown): value is EncodedVertices {
   const record = asRecord(value);
   return record !== null
-    && Number.isSafeInteger(record.count)
+    && isSafeInteger(record.count)
     && typeof record.ids === 'string'
     && typeof record.points === 'string';
 }
 
 function isEncodedCells(value: unknown): value is EncodedCells {
   const record = asRecord(value);
-  if (!record || !Number.isSafeInteger(record.count) || !Number.isSafeInteger(record.vertexReferenceCount)) {
+  if (!record || !isSafeInteger(record.count) || !isSafeInteger(record.vertexReferenceCount)) {
     return false;
   }
   const fields = [
@@ -440,7 +444,8 @@ function isEncodedCells(value: unknown): value is EncodedCells {
 
 export function isAzgaarCartographySource(source: unknown): source is AzgaarCartographySource {
   const record = asRecord(source);
-  return record?.kind === CARTOGRAPHY_KIND
+  if (!record) return false;
+  return record.kind === CARTOGRAPHY_KIND
     && record.version === CARTOGRAPHY_VERSION
     && record.encoding === BINARY_ENCODING
     && typeof record.width === 'number'
