@@ -207,30 +207,64 @@ function encodeValues(values, bytesPerValue) {
   };
 }
 
-function decodeValues(payload, bytesPerValue) {
-  if (!payload || !Number.isInteger(payload.length) || payload.length < 0) {
-    throw new Error('Macro atlas payload length is invalid.');
+function maximumBase64Length(decodedBytes) {
+  if (!Number.isSafeInteger(decodedBytes) || decodedBytes < 0) {
+    throw new Error('Macro atlas payload size is invalid.');
   }
-  const bytes = base64ToBytes(payload.data);
+  const encodedLength = Math.ceil(decodedBytes / 3) * 4;
+  if (!Number.isSafeInteger(encodedLength)) {
+    throw new Error('Macro atlas payload size is invalid.');
+  }
+  return encodedLength;
+}
+
+function decodeValues(payload, bytesPerValue, expectedLength) {
+  if (!payload || !Number.isSafeInteger(payload.length) || payload.length !== expectedLength) {
+    throw new Error('Macro atlas dimensions do not match its payloads.');
+  }
+  if (typeof payload.data !== 'string') {
+    throw new Error('Macro atlas data must be a base64 string.');
+  }
+
   const rawEncoding = bytesPerValue === 1 ? UINT8_RAW : UINT16_RAW;
   const rleEncoding = bytesPerValue === 1 ? UINT8_RLE : UINT16_RLE;
   const Values = bytesPerValue === 1 ? Uint8Array : Uint16Array;
+  const rawBytes = expectedLength * bytesPerValue;
+  const rleBytes = expectedLength * (2 + bytesPerValue);
+  if (!Number.isSafeInteger(rawBytes) || !Number.isSafeInteger(rleBytes)) {
+    throw new Error('Macro atlas payload size is invalid.');
+  }
+
+  const maximumDecodedBytes = payload.encoding === rawEncoding
+    ? rawBytes
+    : payload.encoding === rleEncoding
+      ? rleBytes
+      : null;
+  if (maximumDecodedBytes === null) {
+    throw new Error(`Unsupported macro atlas encoding: ${payload.encoding}.`);
+  }
+  if (payload.data.length > maximumBase64Length(maximumDecodedBytes)) {
+    throw new Error('Macro atlas payload exceeds its expected size.');
+  }
+
+  const bytes = base64ToBytes(payload.data);
   if (payload.encoding === rawEncoding) {
-    if (bytes.byteLength !== payload.length * bytesPerValue) {
+    if (bytes.byteLength !== rawBytes) {
       throw new Error('Macro atlas raw payload has an invalid size.');
     }
     if (bytesPerValue === 1) return new Uint8Array(bytes);
-    const result = new Uint16Array(payload.length);
+    const result = new Uint16Array(expectedLength);
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     for (let index = 0; index < result.length; index += 1) {
       result[index] = view.getUint16(index * 2, true);
     }
     return result;
   }
-  if (payload.encoding !== rleEncoding || bytes.byteLength % (2 + bytesPerValue) !== 0) {
-    throw new Error(`Unsupported macro atlas encoding: ${payload.encoding}.`);
+
+  if (bytes.byteLength % (2 + bytesPerValue) !== 0) {
+    throw new Error('Macro atlas RLE payload is invalid.');
   }
-  const result = new Values(payload.length);
+  const result = new Values(expectedLength);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let target = 0;
   for (let offset = 0; offset < bytes.byteLength;) {
@@ -259,7 +293,7 @@ function resolveAtlasDimensions(document, config) {
     throw new Error('Azgaar Full JSON must include positive map dimensions.');
   }
   const configuredLongEdge = config.import?.azgaarAtlasLongEdge;
-  if (Number.isInteger(configuredLongEdge) && configuredLongEdge > 0) {
+  if (Number.isSafeInteger(configuredLongEdge) && configuredLongEdge > 0) {
     if (sourceWidth >= sourceHeight) {
       return {
         width: configuredLongEdge,
@@ -273,7 +307,7 @@ function resolveAtlasDimensions(document, config) {
   }
   const width = config.import?.azgaarTargetWidth;
   const height = config.import?.azgaarTargetHeight;
-  if (!Number.isInteger(width) || width < 1 || !Number.isInteger(height) || height < 1) {
+  if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1) {
     throw new Error('Azgaar import requires a positive atlas long edge or target dimensions.');
   }
   return { width, height };
@@ -283,6 +317,9 @@ function resolvePhysicalDimensions(document, options = {}) {
   const sourceWidth = Number(document.info.width);
   const sourceHeight = Number(document.info.height);
   const distanceScale = Number(document.settings?.distanceScale ?? 1);
+  if (!Number.isFinite(distanceScale) || distanceScale <= 0) {
+    throw new Error('Azgaar distance scale must be positive.');
+  }
   const distanceUnit = String(document.settings?.distanceUnit ?? 'km');
   const unitMeters = UNIT_METERS[distanceUnit] ?? 1000;
   const defaultWidthMeters = sourceWidth * distanceScale * unitMeters;
@@ -363,13 +400,18 @@ export function decodeMacroAtlas(source) {
   if (source?.kind !== MACRO_SOURCE_KIND || source.version !== MACRO_SOURCE_VERSION) {
     throw new Error(`Unsupported base terrain source: ${source?.kind ?? 'unknown'}.`);
   }
-  const expected = source.atlas.width * source.atlas.height;
-  const heights = decodeValues(source.atlas.heightData, 1);
-  const biomes = decodeValues(source.atlas.biomeData, 1);
-  const features = decodeValues(source.atlas.featureData, 2);
-  if (heights.length !== expected || biomes.length !== expected || features.length !== expected) {
-    throw new Error('Macro atlas dimensions do not match its payloads.');
+  const width = source.atlas?.width;
+  const height = source.atlas?.height;
+  if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1) {
+    throw new Error('Macro atlas dimensions must be positive safe integers.');
   }
+  const expected = width * height;
+  if (!Number.isSafeInteger(expected) || expected < 1) {
+    throw new Error('Macro atlas dimensions are too large.');
+  }
+  const heights = decodeValues(source.atlas.heightData, 1, expected);
+  const biomes = decodeValues(source.atlas.biomeData, 1, expected);
+  const features = decodeValues(source.atlas.featureData, 2, expected);
   return { heights, biomes, features };
 }
 
@@ -377,6 +419,10 @@ export function buildAzgaarImportSummary(document, config, options = {}) {
   const atlas = resolveAtlasDimensions(document, config);
   const physical = resolvePhysicalDimensions(document, options);
   const biomeDefinitions = createAzgaarBiomeDefinitions(document.biomesData);
+  const sampleCount = atlas.width * atlas.height;
+  if (!Number.isSafeInteger(sampleCount) || sampleCount < 1) {
+    throw new Error('Azgaar atlas dimensions are too large.');
+  }
   return Object.freeze({
     atlasWidth: atlas.width,
     atlasHeight: atlas.height,
@@ -387,11 +433,20 @@ export function buildAzgaarImportSummary(document, config, options = {}) {
     usedCustomUnitFallback: physical.usedCustomUnitFallback,
     standardBiomeCount: biomeDefinitions.filter((biome) => biome.standard).length,
     customBiomeCount: biomeDefinitions.filter((biome) => !biome.standard).length,
-    estimatedRawBytes: atlas.width * atlas.height * 4,
+    estimatedRawBytes: sampleCount * 4,
   });
 }
 
 export function createAzgaarMacroWorldSource(document, config, options = {}): AzgaarMacroWorldSource {
+  if (!Number.isFinite(config.map?.tileSize) || config.map.tileSize <= 0) {
+    throw new Error('Azgaar tile size must be positive.');
+  }
+  if (!Number.isSafeInteger(document.grid?.cellsX) || document.grid.cellsX < 1
+      || !Number.isSafeInteger(document.grid?.cellsY) || document.grid.cellsY < 1
+      || !Array.isArray(document.grid?.cells) || document.grid.cells.length < 1) {
+    throw new Error('Azgaar Full JSON must include non-empty grid cells and positive grid dimensions.');
+  }
+
   const summary = buildAzgaarImportSummary(document, config, options);
   const length = summary.atlasWidth * summary.atlasHeight;
   const heights = new Uint8Array(length);
