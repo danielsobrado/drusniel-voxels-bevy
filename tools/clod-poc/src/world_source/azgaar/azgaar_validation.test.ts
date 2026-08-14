@@ -36,11 +36,27 @@ describe("Azgaar import validation", () => {
       .toThrow(/non-empty grid cells/);
   });
 
+  it("rejects overflowing grid dimensions", () => {
+    const source = document();
+    source.grid!.cellsX = 0x7fffffff;
+    source.grid!.cellsY = 2;
+
+    expect(isAzgaarFullJson(source)).toBe(false);
+    expect(() => importAzgaarFullJson(source, defaultAzgaarImportConfig({ atlasLongEdge: 2 })))
+      .toThrow(/supported positive grid dimensions/);
+  });
+
   it("rejects invalid tile sizes", () => {
     expect(() => importAzgaarFullJson(document(), defaultAzgaarImportConfig({
       atlasLongEdge: 2,
       tileSize: 0,
     }))).toThrow(/tile size must be positive/);
+  });
+
+  it("rejects oversized atlas configs before allocation", () => {
+    expect(() => importAzgaarFullJson(document(), defaultAzgaarImportConfig({
+      atlasLongEdge: 5000,
+    }))).toThrow(/supported raw size limit/);
   });
 
   it("rejects corrupt payload lengths before decoding", () => {
@@ -63,5 +79,17 @@ describe("Azgaar import validation", () => {
 
     expect(() => decodeMacroAtlas(imported.baseTerrain))
       .toThrow(/dimensions must be positive safe integers/);
+  });
+
+  it("rejects oversized serialized atlas dimensions before decoding", () => {
+    const imported = importAzgaarFullJson(
+      document(),
+      defaultAzgaarImportConfig({ atlasLongEdge: 2 }),
+    );
+    imported.baseTerrain.atlas.width = 5000;
+    imported.baseTerrain.atlas.height = 5000;
+
+    expect(() => decodeMacroAtlas(imported.baseTerrain))
+      .toThrow(/supported raw size limit/);
   });
 });
