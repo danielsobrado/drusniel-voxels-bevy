@@ -29,6 +29,7 @@ export class AzgaarImportWorkerClient {
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private worker: Worker | null = null;
+  private disposed = false;
 
   constructor() {
     if (typeof Worker !== "function") return;
@@ -51,6 +52,10 @@ export class AzgaarImportWorkerClient {
     config: AzgaarImportConfig,
     options: AzgaarImportOptions = {},
   ): Promise<AzgaarImportedWorld> {
+    if (this.disposed) {
+      return Promise.reject(new Error("Azgaar import worker was disposed."));
+    }
+
     const worker = this.worker;
     if (!worker) {
       return Promise.resolve().then(() => importAzgaarFullJson(document, config, options));
@@ -115,6 +120,8 @@ export class AzgaarImportWorkerClient {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.failWorker(new Error("Azgaar import worker was disposed."));
   }
 }
