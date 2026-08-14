@@ -153,4 +153,16 @@ describe("azgaar map loader", () => {
     expect(() => importAzgaarFullJson(document, defaultAzgaarImportConfig({ atlasLongEdge: 4 })))
       .toThrow(/missing vertex 999/);
   });
+
+  it("rejects oversized cartography payloads before base64 decoding", () => {
+    const converted = importAzgaarFullJson(
+      createAzgaarDocument(),
+      defaultAzgaarImportConfig({ atlasLongEdge: 4 }),
+    );
+    const cartography = structuredClone(converted.campaign.cartography!);
+    cartography.vertices.ids = "A".repeat(1024);
+
+    expect(() => decodeAzgaarCartographySource(cartography))
+      .toThrow(/vertex ids exceeds its expected size/);
+  });
 });
