@@ -71,17 +71,44 @@ export interface AzgaarImportedWorld {
   savedAt: string;
 }
 
+function hasValidGrid(document: AzgaarFullJsonDocument): boolean {
+  return Array.isArray(document.grid?.cells)
+    && document.grid.cells.length > 0
+    && Number.isSafeInteger(document.grid.cellsX)
+    && (document.grid.cellsX ?? 0) > 0
+    && Number.isSafeInteger(document.grid.cellsY)
+    && (document.grid.cellsY ?? 0) > 0;
+}
+
 function assertAzgaarDocument(document: AzgaarFullJsonDocument): void {
   const description = String(document?.info?.description ?? "").toLowerCase();
   if (!description.includes("azgaar's fantasy map generator")) {
     throw new Error("The selected JSON is not an Azgaar Full JSON export.");
   }
+  if (!hasValidGrid(document)) {
+    throw new Error(
+      "Azgaar Full JSON must include non-empty grid cells and positive grid dimensions.",
+    );
+  }
+}
+
+function validateImportConfig(config: AzgaarImportConfig): void {
+  if (!Number.isFinite(config.map.tileSize) || config.map.tileSize <= 0) {
+    throw new Error("Azgaar tile size must be positive.");
+  }
   if (
-    !Array.isArray(document?.grid?.cells)
-    || !Number.isInteger(document.grid!.cellsX)
-    || !Number.isInteger(document.grid!.cellsY)
+    !Number.isFinite(config.terrain.minHeight)
+    || !Number.isFinite(config.terrain.maxHeight)
+    || config.terrain.minHeight >= config.terrain.maxHeight
   ) {
-    throw new Error("Azgaar Full JSON must include grid cells and grid dimensions.");
+    throw new Error("Azgaar terrain height range is invalid.");
+  }
+  if (!Number.isFinite(config.world.seaLevel)) {
+    throw new Error("Azgaar sea level must be finite.");
+  }
+  const transitionKm = config.import?.azgaarOceanTransitionKilometers;
+  if (transitionKm !== undefined && (!Number.isFinite(transitionKm) || transitionKm < 0)) {
+    throw new Error("Azgaar ocean transition distance must be non-negative.");
   }
 }
 
@@ -138,7 +165,7 @@ export function isAzgaarFullJson(document: unknown): document is AzgaarFullJsonD
   return String(doc?.info?.description ?? "")
     .toLowerCase()
     .includes("azgaar's fantasy map generator")
-    && Array.isArray(doc?.grid?.cells);
+    && hasValidGrid(doc);
 }
 
 export function importAzgaarFullJson(
@@ -147,6 +174,7 @@ export function importAzgaarFullJson(
   options: AzgaarImportOptions = {},
 ): AzgaarImportedWorld {
   assertAzgaarDocument(document);
+  validateImportConfig(config);
   const summary = buildAzgaarImportSummary(document, config, options);
   const baseTerrain = createAzgaarMacroWorldSource(document, config, options);
   const cartography = Array.isArray(document.pack?.vertices)
