@@ -1,0 +1,59 @@
+name: Map Import QA
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/world/source/azgaar/**'
+      - 'src/ui/minimap*.rs'
+      - 'tools/clod-poc/src/world_source/azgaar/**'
+      - 'tools/clod-poc/src/ui/minimap*'
+      - 'tools/clod-poc/package.json'
+      - 'tools/clod-poc/tsconfig.json'
+      - '.github/workflows/map-import-qa.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/world/source/azgaar/**'
+      - 'src/ui/minimap*.rs'
+      - 'tools/clod-poc/src/world_source/azgaar/**'
+      - 'tools/clod-poc/src/ui/minimap*'
+      - 'tools/clod-poc/package.json'
+      - 'tools/clod-poc/tsconfig.json'
+      - '.github/workflows/map-import-qa.yml'
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Compile all targets
+        run: cargo check --all-targets --message-format=short
+      - name: Run Azgaar tests
+        run: cargo test world::source::azgaar --lib
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: tools/clod-poc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Run tests
+        run: npm test
+      - name: Build
+        run: npm run build
