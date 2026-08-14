@@ -154,9 +154,11 @@ function customSourceIds(
   const colors = Array.isArray(biomesData.color) ? biomesData.color : [];
   const metadataLength = Math.max(names.length, colors.length);
   for (let sourceId = AZGAAR_STANDARD_BIOMES.length; sourceId < metadataLength; sourceId += 1) {
+    const name = names[sourceId];
+    const color = colors[sourceId];
     if (
-      (typeof names[sourceId] === 'string' && names[sourceId].trim() !== '')
-      || validColor(colors[sourceId])
+      (typeof name === 'string' && name.trim() !== '')
+      || validColor(color)
     ) {
       ids.add(sourceId);
     }
