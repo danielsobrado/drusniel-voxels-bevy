@@ -124,26 +124,29 @@ fn create_river_index(
 }
 
 impl AzgaarMacroWorldGenerator {
-    pub fn new(source: AzgaarMacroWorldSource, metadata: AzgaarProceduralMetadata) -> Self {
+    pub fn new(
+        source: AzgaarMacroWorldSource,
+        metadata: AzgaarProceduralMetadata,
+    ) -> Result<Self, String> {
         let DecodedMacroAtlas {
             heights,
             biomes,
             features: _,
-        } = decode_macro_atlas(&source).expect("valid macro atlas");
+        } = decode_macro_atlas(&source)?;
         let biome_by_source_id = source
             .biomes
             .iter()
             .map(|definition| (definition.source_id, definition.tile_id))
             .collect();
         let river_index = create_river_index(&source.rivers, source.atlas.width, source.atlas.height);
-        Self {
+        Ok(Self {
             source,
             heights,
             biome_atlas: biomes,
             biome_by_source_id,
             seed: metadata.seed,
             river_index,
-        }
+        })
     }
 
     pub fn source(&self) -> &AzgaarMacroWorldSource {
