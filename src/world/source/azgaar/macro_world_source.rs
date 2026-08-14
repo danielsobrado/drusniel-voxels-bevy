@@ -7,6 +7,7 @@ use super::biome_catalog::{AzgaarBiomeDefinition, create_azgaar_biome_definition
 
 pub const AZGAAR_MACRO_SOURCE_KIND: &str = "azgaar-macro-v1";
 const MACRO_SOURCE_VERSION: u32 = 1;
+const MAX_ATLAS_RAW_BYTES: usize = 64 * 1024 * 1024;
 const UINT8_RAW: &str = "base64-u8-v1";
 const UINT8_RLE: &str = "base64-rle-u8-v1";
 const UINT16_RAW: &str = "base64-le-u16-v1";
@@ -119,6 +120,30 @@ fn clamp_i32(value: i32, minimum: i32, maximum: i32) -> i32 {
     value.max(minimum).min(maximum)
 }
 
+fn atlas_sample_count(width: u32, height: u32) -> Result<usize, String> {
+    if width == 0 || height == 0 {
+        return Err("Macro atlas dimensions must be positive.".into());
+    }
+    let samples = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| "Macro atlas dimensions are too large.".to_string())?;
+    let raw_bytes = samples
+        .checked_mul(4)
+        .ok_or_else(|| "Macro atlas dimensions are too large.".to_string())?;
+    if raw_bytes > MAX_ATLAS_RAW_BYTES {
+        return Err("Macro atlas exceeds the supported raw size limit.".into());
+    }
+    Ok(samples)
+}
+
+fn maximum_base64_length(decoded_bytes: usize) -> Result<usize, String> {
+    decoded_bytes
+        .checked_add(2)
+        .map(|value| value / 3)
+        .and_then(|groups| groups.checked_mul(4))
+        .ok_or_else(|| "Macro atlas payload size is invalid.".to_string())
+}
+
 fn encode_runs_u8(values: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::new();
     let mut offset = 0usize;
@@ -182,31 +207,58 @@ fn encode_values_u16(values: &[u16]) -> MacroAtlasPayload {
     }
 }
 
-fn decode_values_u8(payload: &MacroAtlasPayload) -> Result<Vec<u8>, String> {
+fn decode_values_u8(
+    payload: &MacroAtlasPayload,
+    expected_length: usize,
+) -> Result<Vec<u8>, String> {
+    if payload.length != expected_length {
+        return Err("Macro atlas dimensions do not match its payloads.".into());
+    }
+    let maximum_decoded_bytes = match payload.encoding.as_str() {
+        UINT8_RAW => expected_length,
+        UINT8_RLE => expected_length
+            .checked_mul(3)
+            .ok_or_else(|| "Macro atlas payload size is invalid.".to_string())?,
+        _ => {
+            return Err(format!(
+                "Unsupported macro atlas encoding: {}.",
+                payload.encoding
+            ));
+        }
+    };
+    if payload.data.len() > maximum_base64_length(maximum_decoded_bytes)? {
+        return Err("Macro atlas payload exceeds its expected size.".into());
+    }
+
     let bytes = BASE64
         .decode(payload.data.as_bytes())
         .map_err(|error| format!("invalid base64: {error}"))?;
     if payload.encoding == UINT8_RAW {
-        if bytes.len() != payload.length {
+        if bytes.len() != expected_length {
             return Err("Macro atlas raw payload has an invalid size.".into());
         }
         return Ok(bytes);
     }
-    if payload.encoding != UINT8_RLE || bytes.len() % 3 != 0 {
-        return Err(format!("Unsupported macro atlas encoding: {}.", payload.encoding));
+    if bytes.len() % 3 != 0 {
+        return Err("Macro atlas RLE payload is invalid.".into());
     }
-    let mut result = vec![0u8; payload.length];
+
+    let mut result = vec![0u8; expected_length];
     let mut target = 0usize;
     let mut offset = 0usize;
     while offset < bytes.len() {
         let count = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as usize;
         let value = bytes[offset + 2];
         offset += 3;
-        if count < 1 || target + count > result.len() {
+        let end = target
+            .checked_add(count)
+            .filter(|end| *end <= result.len())
+            .ok_or_else(|| "Macro atlas RLE payload is invalid.".to_string())?;
+        if count < 1 {
             return Err("Macro atlas RLE payload is invalid.".into());
         }
-        result[target..target + count].fill(value);
-        target += count;
+        result[target..end].fill(value);
+        target = end;
     }
     if target != result.len() {
         return Err("Macro atlas RLE payload is incomplete.".into());
@@ -214,35 +266,65 @@ fn decode_values_u8(payload: &MacroAtlasPayload) -> Result<Vec<u8>, String> {
     Ok(result)
 }
 
-fn decode_values_u16(payload: &MacroAtlasPayload) -> Result<Vec<u16>, String> {
+fn decode_values_u16(
+    payload: &MacroAtlasPayload,
+    expected_length: usize,
+) -> Result<Vec<u16>, String> {
+    if payload.length != expected_length {
+        return Err("Macro atlas dimensions do not match its payloads.".into());
+    }
+    let raw_bytes = expected_length
+        .checked_mul(2)
+        .ok_or_else(|| "Macro atlas payload size is invalid.".to_string())?;
+    let maximum_decoded_bytes = match payload.encoding.as_str() {
+        UINT16_RAW => raw_bytes,
+        UINT16_RLE => expected_length
+            .checked_mul(4)
+            .ok_or_else(|| "Macro atlas payload size is invalid.".to_string())?,
+        _ => {
+            return Err(format!(
+                "Unsupported macro atlas encoding: {}.",
+                payload.encoding
+            ));
+        }
+    };
+    if payload.data.len() > maximum_base64_length(maximum_decoded_bytes)? {
+        return Err("Macro atlas payload exceeds its expected size.".into());
+    }
+
     let bytes = BASE64
         .decode(payload.data.as_bytes())
         .map_err(|error| format!("invalid base64: {error}"))?;
     if payload.encoding == UINT16_RAW {
-        if bytes.len() != payload.length * 2 {
+        if bytes.len() != raw_bytes {
             return Err("Macro atlas raw payload has an invalid size.".into());
         }
-        let mut result = Vec::with_capacity(payload.length);
+        let mut result = Vec::with_capacity(expected_length);
         for chunk in bytes.chunks_exact(2) {
             result.push(u16::from_le_bytes([chunk[0], chunk[1]]));
         }
         return Ok(result);
     }
-    if payload.encoding != UINT16_RLE || bytes.len() % 4 != 0 {
-        return Err(format!("Unsupported macro atlas encoding: {}.", payload.encoding));
+    if bytes.len() % 4 != 0 {
+        return Err("Macro atlas RLE payload is invalid.".into());
     }
-    let mut result = vec![0u16; payload.length];
+
+    let mut result = vec![0u16; expected_length];
     let mut target = 0usize;
     let mut offset = 0usize;
     while offset < bytes.len() {
         let count = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as usize;
         let value = u16::from_le_bytes([bytes[offset + 2], bytes[offset + 3]]);
         offset += 4;
-        if count < 1 || target + count > result.len() {
+        let end = target
+            .checked_add(count)
+            .filter(|end| *end <= result.len())
+            .ok_or_else(|| "Macro atlas RLE payload is invalid.".to_string())?;
+        if count < 1 {
             return Err("Macro atlas RLE payload is invalid.".into());
         }
-        result[target..target + count].fill(value);
-        target += count;
+        result[target..end].fill(value);
+        target = end;
     }
     if target != result.len() {
         return Err("Macro atlas RLE payload is incomplete.".into());
@@ -269,13 +351,10 @@ pub fn decode_macro_atlas(source: &AzgaarMacroWorldSource) -> Result<DecodedMacr
             source.kind
         ));
     }
-    let expected = (source.atlas.width as usize) * (source.atlas.height as usize);
-    let heights = decode_values_u8(&source.atlas.height_data)?;
-    let biomes = decode_values_u8(&source.atlas.biome_data)?;
-    let features = decode_values_u16(&source.atlas.feature_data)?;
-    if heights.len() != expected || biomes.len() != expected || features.len() != expected {
-        return Err("Macro atlas dimensions do not match its payloads.".into());
-    }
+    let expected = atlas_sample_count(source.atlas.width, source.atlas.height)?;
+    let heights = decode_values_u8(&source.atlas.height_data, expected)?;
+    let biomes = decode_values_u8(&source.atlas.biome_data, expected)?;
+    let features = decode_values_u16(&source.atlas.feature_data, expected)?;
     Ok(DecodedMacroAtlas {
         heights,
         biomes,
@@ -301,10 +380,14 @@ fn resolve_atlas_dimensions(
         .ok_or_else(|| "Azgaar Full JSON must include positive map dimensions.".to_string())?;
     if let Some(long_edge) = atlas_long_edge.filter(|v| *v > 0) {
         if source_width >= source_height {
-            let height = ((long_edge as f64) * source_height / source_width).round().max(1.0) as u32;
+            let height = ((long_edge as f64) * source_height / source_width)
+                .round()
+                .max(1.0) as u32;
             return Ok((long_edge, height));
         }
-        let width = ((long_edge as f64) * source_width / source_height).round().max(1.0) as u32;
+        let width = ((long_edge as f64) * source_width / source_height)
+            .round()
+            .max(1.0) as u32;
         return Ok((width, long_edge));
     }
     match (target_width, target_height) {
@@ -317,12 +400,21 @@ fn resolve_physical_dimensions(
     document: &serde_json::Value,
     physical_width_meters: Option<f64>,
 ) -> Result<(f64, f64, f64, String, bool), String> {
-    let source_width = document.pointer("/info/width").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let source_height = document.pointer("/info/height").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let source_width = document
+        .pointer("/info/width")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let source_height = document
+        .pointer("/info/height")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
     let distance_scale = document
         .pointer("/settings/distanceScale")
         .and_then(|v| v.as_f64())
         .unwrap_or(1.0);
+    if !(distance_scale.is_finite() && distance_scale > 0.0) {
+        return Err("Azgaar distance scale must be positive.".into());
+    }
     let distance_unit = document
         .pointer("/settings/distanceUnit")
         .and_then(|v| v.as_str())
@@ -335,7 +427,16 @@ fn resolve_physical_dimensions(
         return Err("Azgaar physical width override must be positive.".into());
     }
     let height_meters = width_meters * source_height / source_width;
-    Ok((width_meters, height_meters, distance_scale, distance_unit, used_fallback))
+    if !(height_meters.is_finite() && height_meters > 0.0) {
+        return Err("Azgaar physical height must be positive.".into());
+    }
+    Ok((
+        width_meters,
+        height_meters,
+        distance_scale,
+        distance_unit,
+        used_fallback,
+    ))
 }
 
 pub fn build_azgaar_import_summary(
@@ -347,6 +448,7 @@ pub fn build_azgaar_import_summary(
 ) -> Result<AzgaarImportSummary, String> {
     let (atlas_width, atlas_height) =
         resolve_atlas_dimensions(document, atlas_long_edge, target_width, target_height)?;
+    let sample_count = atlas_sample_count(atlas_width, atlas_height)?;
     let (width_meters, height_meters, distance_scale, distance_unit, used_fallback) =
         resolve_physical_dimensions(document, physical_width_meters)?;
     let biomes = create_azgaar_biome_definitions(document.get("biomesData"), std::iter::empty())?;
@@ -360,8 +462,16 @@ pub fn build_azgaar_import_summary(
         used_custom_unit_fallback: used_fallback,
         standard_biome_count: biomes.iter().filter(|b| b.standard).count(),
         custom_biome_count: biomes.iter().filter(|b| !b.standard).count(),
-        estimated_raw_bytes: (atlas_width as usize) * (atlas_height as usize) * 4,
+        estimated_raw_bytes: sample_count * 4,
     })
+}
+
+fn checked_cell_count(meters: f64, tile_size: f64, label: &str) -> Result<i32, String> {
+    let cells = (meters / tile_size).round().max(1.0);
+    if !(cells.is_finite() && cells <= i32::MAX as f64) {
+        return Err(format!("Azgaar {label} exceeds supported world bounds."));
+    }
+    Ok(cells as i32)
 }
 
 pub fn create_azgaar_macro_world_source(
@@ -378,6 +488,19 @@ pub fn create_azgaar_macro_world_source(
     relief_exponent: f32,
     physical_width_meters: Option<f64>,
 ) -> Result<AzgaarMacroWorldSource, String> {
+    if !(tile_size.is_finite() && tile_size > 0.0) {
+        return Err("Azgaar tile size must be positive.".into());
+    }
+    if !(ocean_transition_kilometers.is_finite() && ocean_transition_kilometers >= 0.0) {
+        return Err("Azgaar ocean transition distance must be non-negative.".into());
+    }
+    if !(min_height.is_finite() && max_height.is_finite() && min_height < max_height) {
+        return Err("Azgaar terrain height range is invalid.".into());
+    }
+    if !sea_level.is_finite() {
+        return Err("Azgaar sea level must be finite.".into());
+    }
+
     let summary = build_azgaar_import_summary(
         document,
         atlas_long_edge,
@@ -385,7 +508,7 @@ pub fn create_azgaar_macro_world_source(
         target_height,
         physical_width_meters,
     )?;
-    let length = (summary.atlas_width as usize) * (summary.atlas_height as usize);
+    let length = atlas_sample_count(summary.atlas_width, summary.atlas_height)?;
     let mut heights = vec![0u8; length];
     let mut biomes = vec![0u8; length];
     let mut features = vec![0u16; length];
@@ -394,25 +517,36 @@ pub fn create_azgaar_macro_world_source(
     let cells_x = document
         .pointer("/grid/cellsX")
         .and_then(|v| v.as_i64())
-        .ok_or("missing grid.cellsX")? as i32;
+        .filter(|value| (1..=i32::MAX as i64).contains(value))
+        .ok_or("invalid grid.cellsX")? as i32;
     let cells_y = document
         .pointer("/grid/cellsY")
         .and_then(|v| v.as_i64())
-        .ok_or("missing grid.cellsY")? as i32;
+        .filter(|value| (1..=i32::MAX as i64).contains(value))
+        .ok_or("invalid grid.cellsY")? as i32;
     let grid_cells = document
         .pointer("/grid/cells")
         .and_then(|v| v.as_array())
+        .filter(|cells| !cells.is_empty())
         .ok_or("missing grid.cells")?;
     let mut lookup = HashMap::new();
     for cell in grid_cells {
-        if let Some(id) = cell.get("i").and_then(|v| v.as_i64()) {
+        if let Some(id) = cell
+            .get("i")
+            .and_then(|v| v.as_i64())
+            .filter(|value| (i32::MIN as i64..=i32::MAX as i64).contains(value))
+        {
             lookup.insert(id as i32, cell);
         }
     }
     let mut pack_by_grid: HashMap<i32, &serde_json::Value> = HashMap::new();
     if let Some(pack_cells) = document.pointer("/pack/cells").and_then(|v| v.as_array()) {
         for cell in pack_cells {
-            if let Some(g) = cell.get("g").and_then(|v| v.as_i64()) {
+            if let Some(g) = cell
+                .get("g")
+                .and_then(|v| v.as_i64())
+                .filter(|value| (i32::MIN as i64..=i32::MAX as i64).contains(value))
+            {
                 let g = g as i32;
                 let previous = pack_by_grid.get(&g).copied();
                 let h = cell.get("h").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -430,8 +564,16 @@ pub fn create_azgaar_macro_world_source(
         let normalized_y = (y as f64 + 0.5) / summary.atlas_height as f64;
         for x in 0..summary.atlas_width {
             let normalized_x = (x as f64 + 0.5) / summary.atlas_width as f64;
-            let column = clamp_i32((normalized_x * cells_x as f64).floor() as i32, 0, cells_x - 1);
-            let row = clamp_i32((normalized_y * cells_y as f64).floor() as i32, 0, cells_y - 1);
+            let column = clamp_i32(
+                (normalized_x * cells_x as f64).floor() as i32,
+                0,
+                cells_x - 1,
+            );
+            let row = clamp_i32(
+                (normalized_y * cells_y as f64).floor() as i32,
+                0,
+                cells_y - 1,
+            );
             let id = row * cells_x + column;
             let grid_cell = lookup
                 .get(&id)
@@ -439,6 +581,7 @@ pub fn create_azgaar_macro_world_source(
                 .or_else(|| grid_cells.get(id.clamp(0, grid_cells.len() as i32 - 1) as usize));
             let pack_cell = grid_cell
                 .and_then(|cell| cell.get("i").and_then(|v| v.as_i64()))
+                .filter(|value| (i32::MIN as i64..=i32::MAX as i64).contains(value))
                 .and_then(|gid| pack_by_grid.get(&(gid as i32)).copied());
             let index = (y * summary.atlas_width + x) as usize;
             let raw_h = pack_cell
@@ -468,12 +611,13 @@ pub fn create_azgaar_macro_world_source(
 
     let (height_data, biome_data, feature_data) =
         create_macro_atlas_payload(&heights, &biomes, &features);
-    let width_cells = (summary.physical_width_meters / tile_size)
-        .round()
-        .max(1.0) as i32;
-    let height_cells = (summary.physical_height_meters / tile_size)
-        .round()
-        .max(1.0) as i32;
+    let width_cells = checked_cell_count(summary.physical_width_meters, tile_size, "width")?;
+    let height_cells = checked_cell_count(summary.physical_height_meters, tile_size, "height")?;
+    let transition_cells = checked_cell_count(
+        ocean_transition_kilometers * 1000.0,
+        tile_size,
+        "ocean transition distance",
+    )?;
     let biome_defs =
         create_azgaar_biome_definitions(document.get("biomesData"), observed.into_iter())?;
     let rivers = create_river_data(
@@ -498,7 +642,11 @@ pub fn create_azgaar_macro_world_source(
             map_name: document
                 .pointer("/info/mapName")
                 .and_then(|v| v.as_str())
-                .or_else(|| document.pointer("/settings/mapName").and_then(|v| v.as_str()))
+                .or_else(|| {
+                    document
+                        .pointer("/settings/mapName")
+                        .and_then(|v| v.as_str())
+                })
                 .unwrap_or("Azgaar world")
                 .to_string(),
             seed: document
@@ -525,19 +673,17 @@ pub fn create_azgaar_macro_world_source(
             width_cells,
             height_cells,
         },
-        ocean_transition_cells: ((ocean_transition_kilometers * 1000.0) / tile_size)
-            .round()
-            .max(1.0) as i32,
+        ocean_transition_cells: transition_cells,
         terrain: MacroTerrain {
             min_height,
             max_height,
             sea_level,
-            vertical_exaggeration: if vertical_exaggeration > 0.0 {
+            vertical_exaggeration: if vertical_exaggeration.is_finite() && vertical_exaggeration > 0.0 {
                 vertical_exaggeration
             } else {
                 1.0
             },
-            relief_exponent: if relief_exponent > 0.0 {
+            relief_exponent: if relief_exponent.is_finite() && relief_exponent > 0.0 {
                 relief_exponent
             } else {
                 1.0
@@ -554,8 +700,14 @@ fn create_river_data(
     atlas_height: u32,
     physical_width_meters: f64,
 ) -> Vec<MacroRiver> {
-    let source_width = document.pointer("/info/width").and_then(|v| v.as_f64()).unwrap_or(1.0);
-    let source_height = document.pointer("/info/height").and_then(|v| v.as_f64()).unwrap_or(1.0);
+    let source_width = document
+        .pointer("/info/width")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0);
+    let source_height = document
+        .pointer("/info/height")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0);
     let distance_scale = document
         .pointer("/settings/distanceScale")
         .and_then(|v| v.as_f64())
@@ -571,10 +723,17 @@ fn create_river_data(
         .and_then(|v| v.as_array())
         .into_iter()
         .flatten()
-        .filter_map(|cell| cell.get("i").and_then(|v| v.as_i64()).map(|id| (id, cell)))
+        .filter_map(|cell| {
+            cell.get("i")
+                .and_then(|v| v.as_i64())
+                .map(|id| (id, cell))
+        })
         .collect();
     let mut rivers = Vec::new();
-    let Some(source_rivers) = document.pointer("/pack/rivers").and_then(|v| v.as_array()) else {
+    let Some(source_rivers) = document
+        .pointer("/pack/rivers")
+        .and_then(|v| v.as_array())
+    else {
         return rivers;
     };
     for river in source_rivers {
@@ -614,10 +773,14 @@ fn create_river_data(
         if points.len() < 2 {
             continue;
         }
-        let width = river.get("width").and_then(|v| v.as_f64()).unwrap_or(0.1);
+        let width = river
+            .get("width")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.1);
         rivers.push(MacroRiver {
             id: river.get("i").and_then(|v| v.as_i64()).unwrap_or(0),
-            width_atlas: (width * distance_scale * unit_meters / meters_per_atlas_pixel).max(1.0 / 256.0),
+            width_atlas: (width * distance_scale * unit_meters / meters_per_atlas_pixel)
+                .max(1.0 / 256.0),
             points: points
                 .into_iter()
                 .map(|[x, y]| {
