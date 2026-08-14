@@ -149,4 +149,14 @@ describe("AzgaarImportWorkerClient", () => {
     await expect(pending).rejects.toThrow("invalid protocol message");
     expect(worker.terminate).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects conversions after disposal", async () => {
+    const client = new AzgaarImportWorkerClient();
+    const worker = currentWorker();
+
+    client.dispose();
+
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
+    await expect(client.convert(document(), config)).rejects.toThrow("was disposed");
+  });
 });
