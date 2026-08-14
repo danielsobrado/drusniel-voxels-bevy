@@ -1,0 +1,67 @@
+import { describe, expect, it } from "vitest";
+import { defaultAzgaarImportConfig } from "./azgaar_map_loader.js";
+import {
+  importAzgaarFullJson,
+  isAzgaarFullJson,
+  type AzgaarFullJsonDocument,
+} from "./azgaar_json_importer.js";
+import { decodeMacroAtlas } from "./azgaar_macro_world_source.js";
+
+function document(): AzgaarFullJsonDocument {
+  return {
+    info: {
+      description: "Azgaar's Fantasy Map Generator output: azgaar.github.io/Fantasy-map-generator",
+      mapName: "Validation Test",
+      width: 100,
+      height: 100,
+    },
+    grid: {
+      cellsX: 1,
+      cellsY: 1,
+      cells: [{ i: 0, h: 50 }],
+    },
+    pack: {
+      cells: [{ i: 0, g: 0, h: 50, biome: 1 }],
+    },
+  };
+}
+
+describe("Azgaar import validation", () => {
+  it("rejects empty grids before rasterization", () => {
+    const source = document();
+    source.grid!.cells = [];
+
+    expect(isAzgaarFullJson(source)).toBe(false);
+    expect(() => importAzgaarFullJson(source, defaultAzgaarImportConfig({ atlasLongEdge: 2 })))
+      .toThrow(/non-empty grid cells/);
+  });
+
+  it("rejects invalid tile sizes", () => {
+    expect(() => importAzgaarFullJson(document(), defaultAzgaarImportConfig({
+      atlasLongEdge: 2,
+      tileSize: 0,
+    }))).toThrow(/tile size must be positive/);
+  });
+
+  it("rejects corrupt payload lengths before decoding", () => {
+    const imported = importAzgaarFullJson(
+      document(),
+      defaultAzgaarImportConfig({ atlasLongEdge: 2 }),
+    );
+    imported.baseTerrain.atlas.heightData.length = Number.MAX_SAFE_INTEGER;
+
+    expect(() => decodeMacroAtlas(imported.baseTerrain))
+      .toThrow(/dimensions do not match its payloads/);
+  });
+
+  it("rejects invalid serialized atlas dimensions", () => {
+    const imported = importAzgaarFullJson(
+      document(),
+      defaultAzgaarImportConfig({ atlasLongEdge: 2 }),
+    );
+    imported.baseTerrain.atlas.width = 0;
+
+    expect(() => decodeMacroAtlas(imported.baseTerrain))
+      .toThrow(/dimensions must be positive safe integers/);
+  });
+});
