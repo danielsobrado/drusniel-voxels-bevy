@@ -60,35 +60,59 @@ pub struct ImportSummaryDto {
     pub distance_unit: String,
 }
 
+fn has_valid_grid(document: &serde_json::Value) -> bool {
+    let cells = document.pointer("/grid/cells").and_then(|value| value.as_array());
+    let cells_x = document.pointer("/grid/cellsX").and_then(|value| value.as_i64());
+    let cells_y = document.pointer("/grid/cellsY").and_then(|value| value.as_i64());
+    matches!(cells, Some(cells) if !cells.is_empty())
+        && matches!(cells_x, Some(value) if (1..=i32::MAX as i64).contains(&value))
+        && matches!(cells_y, Some(value) if (1..=i32::MAX as i64).contains(&value))
+}
+
 pub fn is_azgaar_full_json(document: &serde_json::Value) -> bool {
     let description = document
         .pointer("/info/description")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    description.contains("azgaar's fantasy map generator")
-        && document
-            .pointer("/grid/cells")
-            .and_then(|v| v.as_array())
-            .is_some()
+    description.contains("azgaar's fantasy map generator") && has_valid_grid(document)
 }
 
 fn assert_azgaar_document(document: &serde_json::Value) -> Result<(), String> {
-    if !is_azgaar_full_json(document) {
-        let description = document
-            .pointer("/info/description")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if !description.contains("azgaar's fantasy map generator") {
-            return Err("The selected JSON is not an Azgaar Full JSON export.".into());
-        }
-        return Err("Azgaar Full JSON must include grid cells and grid dimensions.".into());
+    let description = document
+        .pointer("/info/description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !description.contains("azgaar's fantasy map generator") {
+        return Err("The selected JSON is not an Azgaar Full JSON export.".into());
     }
-    let cells_x = document.pointer("/grid/cellsX").and_then(|v| v.as_i64());
-    let cells_y = document.pointer("/grid/cellsY").and_then(|v| v.as_i64());
-    if cells_x.is_none() || cells_y.is_none() {
-        return Err("Azgaar Full JSON must include grid cells and grid dimensions.".into());
+    if !has_valid_grid(document) {
+        return Err(
+            "Azgaar Full JSON must include non-empty grid cells and positive grid dimensions."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_import_config(config: &AzgaarImportConfig) -> Result<(), String> {
+    if !(config.tile_size.is_finite() && config.tile_size > 0.0) {
+        return Err("Azgaar tile size must be positive.".into());
+    }
+    if !(config.ocean_transition_kilometers.is_finite()
+        && config.ocean_transition_kilometers >= 0.0)
+    {
+        return Err("Azgaar ocean transition distance must be non-negative.".into());
+    }
+    if !(config.min_height.is_finite()
+        && config.max_height.is_finite()
+        && config.min_height < config.max_height)
+    {
+        return Err("Azgaar terrain height range is invalid.".into());
+    }
+    if !config.sea_level.is_finite() {
+        return Err("Azgaar sea level must be finite.".into());
     }
     Ok(())
 }
@@ -99,6 +123,7 @@ pub fn import_azgaar_full_json(
     options: &AzgaarImportOptions,
 ) -> Result<AzgaarImportedWorld, String> {
     assert_azgaar_document(document)?;
+    validate_import_config(config)?;
     let summary: AzgaarImportSummary = build_azgaar_import_summary(
         document,
         config.atlas_long_edge,
