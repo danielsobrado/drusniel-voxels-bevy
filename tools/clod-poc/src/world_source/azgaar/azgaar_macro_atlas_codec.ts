@@ -35,6 +35,7 @@ const UINT8_RAW = 'base64-u8-v1';
 const UINT8_RLE = 'base64-rle-u8-v1';
 const UINT16_RAW = 'base64-le-u16-v1';
 const UINT16_RLE = 'base64-rle-u16-v1';
+const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 type BytesPerValue = 1 | 2;
 type AtlasValues = Uint8Array | Uint16Array;
@@ -52,6 +53,9 @@ function bytesToBase64(bytes: Uint8Array): string {
 }
 
 function base64ToBytes(value: string): Uint8Array {
+  if (!BASE64_PATTERN.test(value)) {
+    throw new Error('Macro atlas data is not valid base64.');
+  }
   if (typeof Buffer !== 'undefined') {
     return new Uint8Array(Buffer.from(value, 'base64'));
   }
@@ -145,7 +149,7 @@ function validatePayload(
   payload: MacroAtlasPayload,
   bytesPerValue: BytesPerValue,
   expectedLength: number,
-): { bytes: Uint8Array; rawEncoding: string; rleEncoding: string } {
+): { bytes: Uint8Array; rawEncoding: string } {
   if (!Number.isSafeInteger(payload.length) || payload.length !== expectedLength) {
     throw new Error('Macro atlas dimensions do not match its payloads.');
   }
@@ -155,29 +159,23 @@ function validatePayload(
 
   const rawEncoding = bytesPerValue === 1 ? UINT8_RAW : UINT16_RAW;
   const rleEncoding = bytesPerValue === 1 ? UINT8_RLE : UINT16_RLE;
-  const rawBytes = expectedLength * bytesPerValue;
-  const rleBytes = expectedLength * (2 + bytesPerValue);
-  if (!Number.isSafeInteger(rawBytes) || !Number.isSafeInteger(rleBytes)) {
-    throw new Error('Macro atlas payload size is invalid.');
-  }
-
-  const maximumDecodedBytes = payload.encoding === rawEncoding
-    ? rawBytes
-    : payload.encoding === rleEncoding
-      ? rleBytes
-      : null;
-  if (maximumDecodedBytes === null) {
+  if (payload.encoding !== rawEncoding && payload.encoding !== rleEncoding) {
     throw new Error(`Unsupported macro atlas encoding: ${payload.encoding}.`);
   }
-  if (payload.data.length > maximumBase64Length(maximumDecodedBytes)) {
+
+  const rawBytes = expectedLength * bytesPerValue;
+  if (!Number.isSafeInteger(rawBytes)) {
+    throw new Error('Macro atlas payload size is invalid.');
+  }
+  if (payload.data.length > maximumBase64Length(rawBytes)) {
     throw new Error('Macro atlas payload exceeds its expected size.');
   }
 
   const bytes = base64ToBytes(payload.data);
-  if (bytes.byteLength > maximumDecodedBytes) {
+  if (bytes.byteLength > rawBytes) {
     throw new Error('Macro atlas payload exceeds its expected size.');
   }
-  return { bytes, rawEncoding, rleEncoding };
+  return { bytes, rawEncoding };
 }
 
 function decodeValuesU8(payload: MacroAtlasPayload, expectedLength: number): Uint8Array {
