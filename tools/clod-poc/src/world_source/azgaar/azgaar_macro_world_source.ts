@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { createAzgaarBiomeDefinitions, type AzgaarBiomeDefinition } from "./azgaar_biome_catalog.js";
 import {
   createMacroAtlasPayload,
@@ -6,6 +5,25 @@ import {
   validateMacroAtlasDimensions,
   type MacroAtlasPayload,
 } from "./azgaar_macro_atlas_codec.js";
+
+interface AzgaarGridCell {
+  i: number;
+  h?: number;
+  f?: number;
+}
+
+interface AzgaarPackCell extends AzgaarGridCell {
+  g?: number;
+  biome?: number;
+  p?: number[];
+}
+
+interface AzgaarRiver {
+  i: number;
+  width?: number;
+  points?: number[][];
+  cells?: number[];
+}
 
 /** Minimal Azgaar Full JSON fields used by the macro atlas rasterizer. */
 export interface AzgaarMacroDocument {
@@ -26,23 +44,11 @@ export interface AzgaarMacroDocument {
     cellsX: number;
     cellsY: number;
     seed?: string | number | null;
-    cells: Array<{ i: number; h?: number; f?: number }>;
+    cells: AzgaarGridCell[];
   };
   pack?: {
-    cells?: Array<{
-      i: number;
-      g?: number;
-      h?: number;
-      biome?: number;
-      f?: number;
-      p?: number[];
-    }>;
-    rivers?: Array<{
-      i: number;
-      width?: number;
-      points?: number[][];
-      cells?: number[];
-    }>;
+    cells?: AzgaarPackCell[];
+    rivers?: AzgaarRiver[];
   };
   biomesData?: Parameters<typeof createAzgaarBiomeDefinitions>[0];
 }
@@ -102,7 +108,7 @@ export interface AzgaarMacroWorldSource {
     reliefExponent: number;
   };
   biomes: readonly Readonly<AzgaarBiomeDefinition>[];
-  rivers: Array<{ id: number; widthAtlas: number; points: number[][] }>;
+  rivers: Array<{ id: number; widthAtlas: number; points: Array<[number, number]> }>;
 }
 
 export interface AzgaarImportSummary {
@@ -118,10 +124,24 @@ export interface AzgaarImportSummary {
   estimatedRawBytes: number;
 }
 
+interface AtlasDimensions {
+  width: number;
+  height: number;
+}
+
+interface PhysicalDimensions {
+  widthMeters: number;
+  heightMeters: number;
+  distanceScale: number;
+  distanceUnit: string;
+  usedCustomUnitFallback: boolean;
+}
+
 const MACRO_SOURCE_KIND = 'azgaar-macro-v1';
 const MACRO_SOURCE_VERSION = 1;
+const MAX_WORLD_CELLS = 0x7fffffff;
 
-const UNIT_METERS = Object.freeze({
+const UNIT_METERS: Readonly<Record<string, number>> = Object.freeze({
   km: 1000,
   mi: 1609.344,
   lg: 4828.032,
@@ -130,35 +150,70 @@ const UNIT_METERS = Object.freeze({
   nlg: 5556,
 });
 
-function clamp(value, minimum, maximum) {
+function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-function resolvePositive(value, fallback) {
+function resolvePositive(value: unknown, fallback: number): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
 }
 
-function validateGridDimensions(grid) {
-  const cellsX = grid?.cellsX;
-  const cellsY = grid?.cellsY;
+function validateGridDimensions(grid: AzgaarMacroDocument["grid"]): void {
+  const { cellsX, cellsY } = grid;
   if (!Number.isSafeInteger(cellsX) || cellsX < 1 || !Number.isSafeInteger(cellsY) || cellsY < 1) {
     throw new Error('Azgaar Full JSON must include positive safe grid dimensions.');
   }
   const cellCount = cellsX * cellsY;
-  if (!Number.isSafeInteger(cellCount) || cellCount < 1 || cellCount > 0x7fffffff) {
+  if (!Number.isSafeInteger(cellCount) || cellCount < 1 || cellCount > MAX_WORLD_CELLS) {
     throw new Error('Azgaar grid dimensions exceed supported bounds.');
+  }
+  if (!Array.isArray(grid.cells) || grid.cells.length < 1) {
+    throw new Error('Azgaar Full JSON must include non-empty grid cells.');
+  }
+  for (const cell of grid.cells) {
+    if (!Number.isSafeInteger(cell.i) || cell.i < 0 || cell.i >= cellCount) {
+      throw new Error('Azgaar Full JSON contains an invalid grid cell id.');
+    }
   }
 }
 
-function resolveAtlasDimensions(document, config) {
+function validateImportConfig(config: AzgaarImportConfig): void {
+  if (!Number.isFinite(config.map.tileSize) || config.map.tileSize <= 0) {
+    throw new Error('Azgaar tile size must be positive.');
+  }
+  if (
+    !Number.isFinite(config.terrain.minHeight)
+    || !Number.isFinite(config.terrain.maxHeight)
+    || config.terrain.minHeight >= config.terrain.maxHeight
+  ) {
+    throw new Error('Azgaar terrain height range is invalid.');
+  }
+  if (!Number.isFinite(config.world.seaLevel)) {
+    throw new Error('Azgaar sea level must be finite.');
+  }
+  const transitionKm = config.import?.azgaarOceanTransitionKilometers;
+  if (transitionKm !== undefined && (!Number.isFinite(transitionKm) || transitionKm < 0)) {
+    throw new Error('Azgaar ocean transition distance must be non-negative.');
+  }
+}
+
+function resolveAtlasDimensions(
+  document: AzgaarMacroDocument,
+  config: AzgaarImportConfig,
+): AtlasDimensions {
   const sourceWidth = Number(document.info?.width);
   const sourceHeight = Number(document.info?.height);
   if (!(sourceWidth > 0) || !(sourceHeight > 0)) {
     throw new Error('Azgaar Full JSON must include positive map dimensions.');
   }
+
   const configuredLongEdge = config.import?.azgaarAtlasLongEdge;
-  if (Number.isSafeInteger(configuredLongEdge) && configuredLongEdge > 0) {
+  if (
+    typeof configuredLongEdge === 'number'
+    && Number.isSafeInteger(configuredLongEdge)
+    && configuredLongEdge > 0
+  ) {
     if (sourceWidth >= sourceHeight) {
       return {
         width: configuredLongEdge,
@@ -170,17 +225,32 @@ function resolveAtlasDimensions(document, config) {
       height: configuredLongEdge,
     };
   }
+
   const width = config.import?.azgaarTargetWidth;
   const height = config.import?.azgaarTargetHeight;
-  if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1) {
+  if (
+    typeof width !== 'number'
+    || typeof height !== 'number'
+    || !Number.isSafeInteger(width)
+    || width < 1
+    || !Number.isSafeInteger(height)
+    || height < 1
+  ) {
     throw new Error('Azgaar import requires a positive atlas long edge or target dimensions.');
   }
   return { width, height };
 }
 
-function resolvePhysicalDimensions(document, options = {}) {
+function resolvePhysicalDimensions(
+  document: AzgaarMacroDocument,
+  options: AzgaarImportOptions,
+): PhysicalDimensions {
   const sourceWidth = Number(document.info?.width);
   const sourceHeight = Number(document.info?.height);
+  if (!(sourceWidth > 0) || !(sourceHeight > 0)) {
+    throw new Error('Azgaar Full JSON must include positive map dimensions.');
+  }
+
   const distanceScale = Number(document.settings?.distanceScale ?? 1);
   if (!Number.isFinite(distanceScale) || distanceScale <= 0) {
     throw new Error('Azgaar distance scale must be positive.');
@@ -201,63 +271,131 @@ function resolvePhysicalDimensions(document, options = {}) {
     heightMeters: physicalHeightMeters,
     distanceScale,
     distanceUnit,
-    usedCustomUnitFallback: !(distanceUnit in UNIT_METERS),
+    usedCustomUnitFallback: UNIT_METERS[distanceUnit] === undefined,
   };
 }
 
-function buildGridCellLookup(grid) {
+function buildGridCellLookup(
+  grid: AzgaarMacroDocument["grid"],
+): Map<number, AzgaarGridCell> {
   return new Map(grid.cells.map((cell) => [cell.i, cell]));
 }
 
-function sourceGridCellAt(document, lookup, normalizedX, normalizedY) {
-  const column = clamp(Math.floor(normalizedX * document.grid.cellsX), 0, document.grid.cellsX - 1);
-  const row = clamp(Math.floor(normalizedY * document.grid.cellsY), 0, document.grid.cellsY - 1);
+function sourceGridCellAt(
+  document: AzgaarMacroDocument,
+  lookup: ReadonlyMap<number, AzgaarGridCell>,
+  normalizedX: number,
+  normalizedY: number,
+): AzgaarGridCell {
+  const column = clamp(
+    Math.floor(normalizedX * document.grid.cellsX),
+    0,
+    document.grid.cellsX - 1,
+  );
+  const row = clamp(
+    Math.floor(normalizedY * document.grid.cellsY),
+    0,
+    document.grid.cellsY - 1,
+  );
   const id = row * document.grid.cellsX + column;
-  return lookup.get(id) ?? document.grid.cells[clamp(id, 0, document.grid.cells.length - 1)];
+  const fallback = document.grid.cells[clamp(id, 0, document.grid.cells.length - 1)];
+  const cell = lookup.get(id) ?? fallback;
+  if (!cell) {
+    throw new Error(`Azgaar grid cell ${id} is unavailable.`);
+  }
+  return cell;
 }
 
-function buildPackByGrid(pack) {
-  const result = new Map();
+function buildPackByGrid(
+  pack: AzgaarMacroDocument["pack"],
+): Map<number, AzgaarPackCell> {
+  const result = new Map<number, AzgaarPackCell>();
   for (const cell of pack?.cells ?? []) {
-    if (!Number.isInteger(cell?.g)) continue;
-    const previous = result.get(cell.g);
+    const gridId = cell.g;
+    if (typeof gridId !== 'number' || !Number.isSafeInteger(gridId) || gridId < 0) continue;
+    const previous = result.get(gridId);
     if (!previous || Number(cell.h ?? 0) > Number(previous.h ?? 0)) {
-      result.set(cell.g, cell);
+      result.set(gridId, cell);
     }
   }
   return result;
 }
 
-function createRiverData(document, atlasWidth, atlasHeight, physicalWidthMeters) {
+function point(value: number[] | undefined): [number, number] | null {
+  if (!value || value.length < 2) return null;
+  const x = value[0];
+  const y = value[1];
+  return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
+}
+
+function riverPoints(
+  river: AzgaarRiver,
+  packById: ReadonlyMap<number, AzgaarPackCell>,
+): Array<[number, number]> {
+  const direct = (river.points ?? [])
+    .map((value) => point(value))
+    .filter((value): value is [number, number] => value !== null);
+  if (direct.length > 1) return direct;
+
+  return (river.cells ?? [])
+    .map((cellId) => point(packById.get(cellId)?.p))
+    .filter((value): value is [number, number] => value !== null);
+}
+
+function createRiverData(
+  document: AzgaarMacroDocument,
+  atlasWidth: number,
+  atlasHeight: number,
+  physicalWidthMeters: number,
+): AzgaarMacroWorldSource["rivers"] {
   const sourceWidth = Number(document.info?.width);
   const sourceHeight = Number(document.info?.height);
-  const packById = new Map((document.pack?.cells ?? []).map((cell) => [cell.i, cell]));
+  if (!(sourceWidth > 0) || !(sourceHeight > 0)) return [];
+
+  const packById = new Map<number, AzgaarPackCell>(
+    (document.pack?.cells ?? []).map((cell) => [cell.i, cell]),
+  );
   const distanceScale = Number(document.settings?.distanceScale ?? 1);
-  const unitMeters = UNIT_METERS[document.settings?.distanceUnit] ?? 1000;
+  const distanceUnit = document.settings?.distanceUnit ?? 'km';
+  const unitMeters = UNIT_METERS[distanceUnit] ?? 1000;
   const metersPerAtlasPixel = physicalWidthMeters / atlasWidth;
-  return (document.pack?.rivers ?? []).flatMap((river) => {
-    const points = Array.isArray(river.points) && river.points.length > 1
-      ? river.points
-      : (river.cells ?? []).flatMap((cellId) => {
-        const point = packById.get(cellId)?.p;
-        return Array.isArray(point) ? [point] : [];
-      });
-    if (points.length < 2) return [];
-    return [{
+
+  const result: AzgaarMacroWorldSource["rivers"] = [];
+  for (const river of document.pack?.rivers ?? []) {
+    if (!Number.isSafeInteger(river.i) || river.i < 0) continue;
+    const points = riverPoints(river, packById);
+    if (points.length < 2) continue;
+    const width = Number(river.width ?? 0.1);
+    const widthAtlas = Number.isFinite(width)
+      ? Math.max(1 / 256, width * distanceScale * unitMeters / metersPerAtlasPixel)
+      : 1 / 256;
+    result.push({
       id: river.i,
-      widthAtlas: Math.max(
-        1 / 256,
-        Number(river.width ?? 0.1) * distanceScale * unitMeters / metersPerAtlasPixel,
-      ),
+      widthAtlas,
       points: points.map(([x, y]) => [
         x / sourceWidth * atlasWidth,
         y / sourceHeight * atlasHeight,
       ]),
-    }];
-  });
+    });
+  }
+  return result;
 }
 
-export function buildAzgaarImportSummary(document, config, options = {}): AzgaarImportSummary {
+function checkedWorldCells(meters: number, tileSize: number, label: string): number {
+  const cells = Math.max(1, Math.round(meters / tileSize));
+  if (!Number.isSafeInteger(cells) || cells > MAX_WORLD_CELLS) {
+    throw new Error(`Azgaar ${label} exceeds supported world bounds.`);
+  }
+  return cells;
+}
+
+export function buildAzgaarImportSummary(
+  document: AzgaarMacroDocument,
+  config: AzgaarImportConfig,
+  options: AzgaarImportOptions = {},
+): AzgaarImportSummary {
+  validateImportConfig(config);
+  validateGridDimensions(document.grid);
   const atlas = resolveAtlasDimensions(document, config);
   const physical = resolvePhysicalDimensions(document, options);
   const biomeDefinitions = createAzgaarBiomeDefinitions(document.biomesData);
@@ -276,21 +414,17 @@ export function buildAzgaarImportSummary(document, config, options = {}): Azgaar
   });
 }
 
-export function createAzgaarMacroWorldSource(document, config, options = {}): AzgaarMacroWorldSource {
-  if (!Number.isFinite(config.map?.tileSize) || config.map.tileSize <= 0) {
-    throw new Error('Azgaar tile size must be positive.');
-  }
-  validateGridDimensions(document.grid);
-  if (!Array.isArray(document.grid?.cells) || document.grid.cells.length < 1) {
-    throw new Error('Azgaar Full JSON must include non-empty grid cells.');
-  }
-
+export function createAzgaarMacroWorldSource(
+  document: AzgaarMacroDocument,
+  config: AzgaarImportConfig,
+  options: AzgaarImportOptions = {},
+): AzgaarMacroWorldSource {
   const summary = buildAzgaarImportSummary(document, config, options);
   const length = summary.atlasWidth * summary.atlasHeight;
   const heights = new Uint8Array(length);
   const biomes = new Uint8Array(length);
   const features = new Uint16Array(length);
-  const observedBiomeIds = new Set();
+  const observedBiomeIds = new Set<number>();
   const lookup = buildGridCellLookup(document.grid);
   const packByGrid = buildPackByGrid(document.pack);
 
@@ -302,28 +436,28 @@ export function createAzgaarMacroWorldSource(document, config, options = {}): Az
       const packCell = packByGrid.get(gridCell.i);
       const index = y * summary.atlasWidth + x;
       heights[index] = clamp(Math.round(Number(packCell?.h ?? gridCell.h ?? 0)), 0, 100);
-      biomes[index] = clamp(Number(packCell?.biome ?? 0), 0, 255);
-      observedBiomeIds.add(biomes[index]);
-      features[index] = clamp(Number(packCell?.f ?? gridCell.f ?? 0), 0, 0xffff);
+      biomes[index] = clamp(Math.round(Number(packCell?.biome ?? 0)), 0, 255);
+      observedBiomeIds.add(biomes[index] ?? 0);
+      features[index] = clamp(Math.round(Number(packCell?.f ?? gridCell.f ?? 0)), 0, 0xffff);
     }
   }
 
-  const widthCells = Math.max(1, Math.round(summary.physicalWidthMeters / config.map.tileSize));
-  const heightCells = Math.max(1, Math.round(summary.physicalHeightMeters / config.map.tileSize));
-  if (!Number.isSafeInteger(widthCells) || !Number.isSafeInteger(heightCells)) {
-    throw new Error('Azgaar world dimensions exceed supported bounds.');
-  }
-  const transitionKm = Number(config.import?.azgaarOceanTransitionKilometers ?? 50);
-  if (!Number.isFinite(transitionKm) || transitionKm < 0) {
-    throw new Error('Azgaar ocean transition distance must be non-negative.');
-  }
-  const oceanTransitionCells = Math.max(
-    1,
-    Math.round(transitionKm * 1000 / config.map.tileSize),
+  const widthCells = checkedWorldCells(
+    summary.physicalWidthMeters,
+    config.map.tileSize,
+    'width',
   );
-  if (!Number.isSafeInteger(oceanTransitionCells)) {
-    throw new Error('Azgaar ocean transition distance exceeds supported bounds.');
-  }
+  const heightCells = checkedWorldCells(
+    summary.physicalHeightMeters,
+    config.map.tileSize,
+    'height',
+  );
+  const transitionKm = config.import?.azgaarOceanTransitionKilometers ?? 50;
+  const oceanTransitionCells = checkedWorldCells(
+    transitionKm * 1000,
+    config.map.tileSize,
+    'ocean transition distance',
+  );
 
   return {
     kind: MACRO_SOURCE_KIND,
