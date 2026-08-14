@@ -70,6 +70,32 @@ describe("Azgaar import validation", () => {
       .toThrow(/dimensions do not match its payloads/);
   });
 
+  it("rejects non-canonical base64 instead of relying on permissive Node decoding", () => {
+    const imported = importAzgaarFullJson(
+      document(),
+      defaultAzgaarImportConfig({ atlasLongEdge: 2 }),
+    );
+    imported.baseTerrain.atlas.heightData.data = "!!!!";
+
+    expect(() => decodeMacroAtlas(imported.baseTerrain))
+      .toThrow(/not valid base64/);
+  });
+
+  it("rejects RLE payloads larger than the equivalent raw data", () => {
+    const imported = importAzgaarFullJson(
+      document(),
+      defaultAzgaarImportConfig({ atlasLongEdge: 2 }),
+    );
+    imported.baseTerrain.atlas.heightData = {
+      encoding: "base64-rle-u8-v1",
+      data: "AQABAwAC",
+      length: 4,
+    };
+
+    expect(() => decodeMacroAtlas(imported.baseTerrain))
+      .toThrow(/exceeds its expected size/);
+  });
+
   it("rejects invalid serialized atlas dimensions", () => {
     const imported = importAzgaarFullJson(
       document(),
