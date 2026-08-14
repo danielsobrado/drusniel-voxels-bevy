@@ -60,13 +60,24 @@ pub struct ImportSummaryDto {
     pub distance_unit: String,
 }
 
+fn valid_grid_dimensions(document: &serde_json::Value) -> Option<(i32, i32)> {
+    let cells_x = document
+        .pointer("/grid/cellsX")
+        .and_then(|value| value.as_i64())
+        .filter(|value| (1..=i32::MAX as i64).contains(value))? as i32;
+    let cells_y = document
+        .pointer("/grid/cellsY")
+        .and_then(|value| value.as_i64())
+        .filter(|value| (1..=i32::MAX as i64).contains(value))? as i32;
+    cells_x.checked_mul(cells_y)?;
+    Some((cells_x, cells_y))
+}
+
 fn has_valid_grid(document: &serde_json::Value) -> bool {
-    let cells = document.pointer("/grid/cells").and_then(|value| value.as_array());
-    let cells_x = document.pointer("/grid/cellsX").and_then(|value| value.as_i64());
-    let cells_y = document.pointer("/grid/cellsY").and_then(|value| value.as_i64());
-    matches!(cells, Some(cells) if !cells.is_empty())
-        && matches!(cells_x, Some(value) if (1..=i32::MAX as i64).contains(&value))
-        && matches!(cells_y, Some(value) if (1..=i32::MAX as i64).contains(&value))
+    let cells = document
+        .pointer("/grid/cells")
+        .and_then(|value| value.as_array());
+    matches!(cells, Some(cells) if !cells.is_empty()) && valid_grid_dimensions(document).is_some()
 }
 
 pub fn is_azgaar_full_json(document: &serde_json::Value) -> bool {
@@ -89,7 +100,7 @@ fn assert_azgaar_document(document: &serde_json::Value) -> Result<(), String> {
     }
     if !has_valid_grid(document) {
         return Err(
-            "Azgaar Full JSON must include non-empty grid cells and positive grid dimensions."
+            "Azgaar Full JSON must include non-empty grid cells and supported positive grid dimensions."
                 .into(),
         );
     }
@@ -176,4 +187,80 @@ pub fn import_azgaar_full_json(
             distance_unit: summary.distance_unit,
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn sample_document() -> serde_json::Value {
+        json!({
+            "info": {
+                "description": "Azgaar's Fantasy Map Generator output: azgaar.github.io/Fantasy-map-generator",
+                "width": 100,
+                "height": 100
+            },
+            "grid": {
+                "cellsX": 1,
+                "cellsY": 1,
+                "cells": [{ "i": 0, "h": 50 }]
+            },
+            "pack": {
+                "cells": [{ "i": 0, "g": 0, "h": 50, "biome": 1 }]
+            }
+        })
+    }
+
+    #[test]
+    fn rejects_empty_grid() {
+        let mut document = sample_document();
+        document["grid"]["cells"] = json!([]);
+
+        assert!(!is_azgaar_full_json(&document));
+        let error = import_azgaar_full_json(
+            &document,
+            &AzgaarImportConfig::default(),
+            &AzgaarImportOptions::default(),
+        )
+        .expect_err("empty grid must be rejected");
+        assert!(error.contains("non-empty grid cells"));
+    }
+
+    #[test]
+    fn rejects_grid_dimension_overflow() {
+        let mut document = sample_document();
+        document["grid"]["cellsX"] = json!(i32::MAX);
+        document["grid"]["cellsY"] = json!(2);
+
+        assert!(!is_azgaar_full_json(&document));
+    }
+
+    #[test]
+    fn rejects_invalid_tile_size() {
+        let mut config = AzgaarImportConfig::default();
+        config.tile_size = 0.0;
+
+        let error = import_azgaar_full_json(
+            &sample_document(),
+            &config,
+            &AzgaarImportOptions::default(),
+        )
+        .expect_err("invalid tile size must be rejected");
+        assert!(error.contains("tile size must be positive"));
+    }
+
+    #[test]
+    fn rejects_oversized_atlas_before_allocation() {
+        let mut config = AzgaarImportConfig::default();
+        config.atlas_long_edge = Some(5000);
+
+        let error = import_azgaar_full_json(
+            &sample_document(),
+            &config,
+            &AzgaarImportOptions::default(),
+        )
+        .expect_err("oversized atlas must be rejected");
+        assert!(error.contains("supported raw size limit"));
+    }
 }
