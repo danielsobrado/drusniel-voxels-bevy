@@ -107,6 +107,7 @@ export interface AzgaarMacroWorldSource {
 
 const MACRO_SOURCE_KIND = 'azgaar-macro-v1';
 const MACRO_SOURCE_VERSION = 1;
+const MAX_ATLAS_RAW_BYTES = 64 * 1024 * 1024;
 const UINT8_RAW = 'base64-u8-v1';
 const UINT8_RLE = 'base64-rle-u8-v1';
 const UINT16_RAW = 'base64-le-u16-v1';
@@ -128,6 +129,33 @@ function clamp(value, minimum, maximum) {
 function resolvePositive(value, fallback) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+}
+
+function validateAtlasSampleCount(width, height) {
+  if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1) {
+    throw new Error('Macro atlas dimensions must be positive safe integers.');
+  }
+  const sampleCount = width * height;
+  const rawBytes = sampleCount * 4;
+  if (!Number.isSafeInteger(sampleCount) || !Number.isSafeInteger(rawBytes)) {
+    throw new Error('Macro atlas dimensions are too large.');
+  }
+  if (rawBytes > MAX_ATLAS_RAW_BYTES) {
+    throw new Error('Macro atlas exceeds the supported raw size limit.');
+  }
+  return sampleCount;
+}
+
+function validateGridDimensions(grid) {
+  const cellsX = grid?.cellsX;
+  const cellsY = grid?.cellsY;
+  if (!Number.isSafeInteger(cellsX) || cellsX < 1 || !Number.isSafeInteger(cellsY) || cellsY < 1) {
+    throw new Error('Azgaar Full JSON must include positive safe grid dimensions.');
+  }
+  const cellCount = cellsX * cellsY;
+  if (!Number.isSafeInteger(cellCount) || cellCount < 1 || cellCount > 0x7fffffff) {
+    throw new Error('Azgaar grid dimensions exceed supported bounds.');
+  }
 }
 
 function bytesToBase64(bytes) {
@@ -327,9 +355,13 @@ function resolvePhysicalDimensions(document, options = {}) {
   if (!Number.isFinite(physicalWidthMeters) || physicalWidthMeters <= 0) {
     throw new Error('Azgaar physical width override must be positive.');
   }
+  const physicalHeightMeters = physicalWidthMeters * sourceHeight / sourceWidth;
+  if (!Number.isFinite(physicalHeightMeters) || physicalHeightMeters <= 0) {
+    throw new Error('Azgaar physical height must be positive.');
+  }
   return {
     widthMeters: physicalWidthMeters,
-    heightMeters: physicalWidthMeters * sourceHeight / sourceWidth,
+    heightMeters: physicalHeightMeters,
     distanceScale,
     distanceUnit,
     usedCustomUnitFallback: !(distanceUnit in UNIT_METERS),
@@ -400,15 +432,7 @@ export function decodeMacroAtlas(source) {
   if (source?.kind !== MACRO_SOURCE_KIND || source.version !== MACRO_SOURCE_VERSION) {
     throw new Error(`Unsupported base terrain source: ${source?.kind ?? 'unknown'}.`);
   }
-  const width = source.atlas?.width;
-  const height = source.atlas?.height;
-  if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1) {
-    throw new Error('Macro atlas dimensions must be positive safe integers.');
-  }
-  const expected = width * height;
-  if (!Number.isSafeInteger(expected) || expected < 1) {
-    throw new Error('Macro atlas dimensions are too large.');
-  }
+  const expected = validateAtlasSampleCount(source.atlas?.width, source.atlas?.height);
   const heights = decodeValues(source.atlas.heightData, 1, expected);
   const biomes = decodeValues(source.atlas.biomeData, 1, expected);
   const features = decodeValues(source.atlas.featureData, 2, expected);
@@ -419,10 +443,7 @@ export function buildAzgaarImportSummary(document, config, options = {}) {
   const atlas = resolveAtlasDimensions(document, config);
   const physical = resolvePhysicalDimensions(document, options);
   const biomeDefinitions = createAzgaarBiomeDefinitions(document.biomesData);
-  const sampleCount = atlas.width * atlas.height;
-  if (!Number.isSafeInteger(sampleCount) || sampleCount < 1) {
-    throw new Error('Azgaar atlas dimensions are too large.');
-  }
+  const sampleCount = validateAtlasSampleCount(atlas.width, atlas.height);
   return Object.freeze({
     atlasWidth: atlas.width,
     atlasHeight: atlas.height,
@@ -441,10 +462,9 @@ export function createAzgaarMacroWorldSource(document, config, options = {}): Az
   if (!Number.isFinite(config.map?.tileSize) || config.map.tileSize <= 0) {
     throw new Error('Azgaar tile size must be positive.');
   }
-  if (!Number.isSafeInteger(document.grid?.cellsX) || document.grid.cellsX < 1
-      || !Number.isSafeInteger(document.grid?.cellsY) || document.grid.cellsY < 1
-      || !Array.isArray(document.grid?.cells) || document.grid.cells.length < 1) {
-    throw new Error('Azgaar Full JSON must include non-empty grid cells and positive grid dimensions.');
+  validateGridDimensions(document.grid);
+  if (!Array.isArray(document.grid?.cells) || document.grid.cells.length < 1) {
+    throw new Error('Azgaar Full JSON must include non-empty grid cells.');
   }
 
   const summary = buildAzgaarImportSummary(document, config, options);
@@ -472,7 +492,21 @@ export function createAzgaarMacroWorldSource(document, config, options = {}): Az
 
   const widthCells = Math.max(1, Math.round(summary.physicalWidthMeters / config.map.tileSize));
   const heightCells = Math.max(1, Math.round(summary.physicalHeightMeters / config.map.tileSize));
+  if (!Number.isSafeInteger(widthCells) || !Number.isSafeInteger(heightCells)) {
+    throw new Error('Azgaar world dimensions exceed supported bounds.');
+  }
   const transitionKm = Number(config.import?.azgaarOceanTransitionKilometers ?? 50);
+  if (!Number.isFinite(transitionKm) || transitionKm < 0) {
+    throw new Error('Azgaar ocean transition distance must be non-negative.');
+  }
+  const oceanTransitionCells = Math.max(
+    1,
+    Math.round(transitionKm * 1000 / config.map.tileSize),
+  );
+  if (!Number.isSafeInteger(oceanTransitionCells)) {
+    throw new Error('Azgaar ocean transition distance exceeds supported bounds.');
+  }
+
   return {
     kind: MACRO_SOURCE_KIND,
     version: MACRO_SOURCE_VERSION,
@@ -499,10 +533,7 @@ export function createAzgaarMacroWorldSource(document, config, options = {}): Az
       widthCells,
       heightCells,
     },
-    oceanTransitionCells: Math.max(
-      1,
-      Math.round(transitionKm * 1000 / config.map.tileSize),
-    ),
+    oceanTransitionCells,
     terrain: {
       minHeight: config.terrain.minHeight,
       maxHeight: config.terrain.maxHeight,
