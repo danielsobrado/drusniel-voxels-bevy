@@ -6,6 +6,10 @@ const MAX_LABELS = 64;
 
 interface LabelElement {
   div: HTMLDivElement;
+  title: HTMLElement;
+  footprint: HTMLElement;
+  error: HTMLElement;
+  reason: HTMLElement;
   nodeId: string;
 }
 
@@ -71,17 +75,15 @@ export class ClodErrorLabelOverlay {
       if (label.nodeId !== sel.nodeId) {
         label.nodeId = sel.nodeId;
         label.div.dataset.level = String(sel.level);
+        label.title.textContent = sel.nodeId;
       }
 
       const x = (worldPos.x * 0.5 + 0.5) * width;
       const y = (-worldPos.y * 0.5 + 0.5) * height;
       label.div.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
-      label.div.innerHTML = `
-        <strong>${sel.nodeId}</strong>
-        <span>L${sel.level} · ${node.footprint.minX},${node.footprint.minZ}-${node.footprint.maxX},${node.footprint.maxZ}</span>
-        <span>err_w ${node.errorWorld.toFixed(3)} · err_px ${errorPx.toFixed(2)} · dist ${dist.toFixed(1)}</span>
-        <span>reason: ${sel.reason}${node.lowBenefit ? " · LOW BENEFIT" : ""}</span>
-      `;
+      label.footprint.textContent = `L${sel.level} · ${node.footprint.minX},${node.footprint.minZ}-${node.footprint.maxX},${node.footprint.maxZ}`;
+      label.error.textContent = `err_w ${node.errorWorld.toFixed(3)} · err_px ${errorPx.toFixed(2)} · dist ${dist.toFixed(1)}`;
+      label.reason.textContent = `reason: ${sel.reason}${node.lowBenefit ? " · LOW BENEFIT" : ""}`;
     }
   }
 
@@ -89,8 +91,13 @@ export class ClodErrorLabelOverlay {
     while (this.labels.length < count) {
       const div = document.createElement("div");
       div.className = "clod-error-label";
+      const title = document.createElement("strong");
+      const footprint = document.createElement("span");
+      const error = document.createElement("span");
+      const reason = document.createElement("span");
+      div.append(title, footprint, error, reason);
       this.container.appendChild(div);
-      this.labels.push({ div, nodeId: "" });
+      this.labels.push({ div, title, footprint, error, reason, nodeId: "" });
     }
     for (let i = count; i < this.labels.length; i++) {
       this.labels[i].div.hidden = true;
