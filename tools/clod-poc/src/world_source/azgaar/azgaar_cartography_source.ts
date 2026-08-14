@@ -40,21 +40,43 @@ function bytesToBase64(bytes) {
   return btoa(binary);
 }
 
-function base64ToBytes(value, label) {
+function maximumBase64Length(decodedBytes) {
+  if (!Number.isSafeInteger(decodedBytes) || decodedBytes < 0) {
+    throw new Error('Azgaar cartography payload size is invalid.');
+  }
+  const encodedLength = Math.ceil(decodedBytes / 3) * 4;
+  if (!Number.isSafeInteger(encodedLength)) {
+    throw new Error('Azgaar cartography payload size is invalid.');
+  }
+  return encodedLength;
+}
+
+function base64ToBytes(value, label, maximumDecodedBytes) {
   if (typeof value !== 'string') {
     throw new Error(`Azgaar cartography ${label} must be a base64 string.`);
   }
+  if (value.length > maximumBase64Length(maximumDecodedBytes)) {
+    throw new Error(`Azgaar cartography ${label} exceeds its expected size.`);
+  }
   try {
-    if (typeof Buffer !== 'undefined') {
-      return new Uint8Array(Buffer.from(value, 'base64'));
-    }
-    const binary = atob(value);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      bytes[index] = binary.charCodeAt(index);
+    const bytes = typeof Buffer !== 'undefined'
+      ? new Uint8Array(Buffer.from(value, 'base64'))
+      : (() => {
+        const binary = atob(value);
+        const result = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+          result[index] = binary.charCodeAt(index);
+        }
+        return result;
+      })();
+    if (bytes.byteLength > maximumDecodedBytes) {
+      throw new Error(`Azgaar cartography ${label} exceeds its expected size.`);
     }
     return bytes;
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('exceeds its expected size')) {
+      throw error;
+    }
     throw new Error(`Azgaar cartography ${label} is not valid base64.`);
   }
 }
@@ -71,8 +93,11 @@ function encodeNumbers(values, formatName) {
 
 function decodeNumbers(encoded, count, formatName, label) {
   const format = NUMBER_FORMATS[formatName];
-  const bytes = base64ToBytes(encoded, label);
   const expectedBytes = count * format.bytes;
+  if (!Number.isSafeInteger(expectedBytes)) {
+    throw new Error(`Azgaar cartography ${label} has an invalid size.`);
+  }
+  const bytes = base64ToBytes(encoded, label, expectedBytes);
   if (bytes.byteLength !== expectedBytes) {
     throw new Error(
       `Azgaar cartography ${label} has ${bytes.byteLength} bytes; expected ${expectedBytes}.`,
